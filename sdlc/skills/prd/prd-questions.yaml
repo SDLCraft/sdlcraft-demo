@@ -1,0 +1,1571 @@
+# =============================================================================
+# prd-questions.yaml — Question inventory for the sdlc-prd skill
+# =============================================================================
+# This file is a *guide*, not a rigid script. The skill batches questions by
+# theme (3–5 per batch), skips questions already answered by the project scan,
+# and skips questions irrelevant to the detected project type.
+#
+# Field reference for each entry:
+#   theme              — grouping label; matches a top-level key in PRD.yaml
+#   id                 — unique slug, kebab-case
+#   schema_path        — dotted path where the answer is written in PRD.yaml
+#                        (e.g. "product_identity.name")
+#   question           — the prompt shown to the user
+#   hint               — why this matters for downstream agents (kept short)
+#   suggested_answers  — 3–5 plausible options shown as a numbered list
+#   free_text_allowed  — if true, a final "Other / type your own" option appears.
+#                        If FALSE the answer is written as one of the suggested
+#                        values: an "Other" reply is mapped to the closest one,
+#                        the mapping is read back for confirmation, and the text
+#                        goes to <schema_path>_rationale (interview-mechanics.md).
+#   free_text_expected — if true, free text IS the designed answer: the suggested
+#                        answers are templates or examples ("state your number",
+#                        "ACR-NNN: <criterion>"), so a high free-text rate in the
+#                        run telemetry is not a question_quality signal. The
+#                        maintainer's digest (collect_lessons.py) honours it.
+#   multi_select       — if true, the user may pick SEVERAL suggested answers
+#                        (AskUserQuestion multiSelect: true) and the answer is
+#                        written as a LIST at schema_path — never a scalar.
+#   required           — true => must be answered (or explicitly nulled with a
+#                        warning) before the skill can complete
+#   required_if        — optional expression; when it evaluates true against
+#                        already-answered fields, the question is promoted to
+#                        required even if `required: false`. The agent must
+#                        re-evaluate this at the start of each new theme batch.
+#                        Reading: PROMOTION (canonical activation-vs-promotion definition: references/interview-mechanics.md).
+#                        Examples below.
+#   capture_rationale  — if true, after the choice, ask one follow-up:
+#                        "In one sentence — why?". Stored at <schema_path>_rationale.
+#   confidence_field   — if true, a sibling <schema_path>_confidence is written
+#                        (most fields use this; set false to opt out)
+#   importance         — one of `med | high | critical | nested_freeform`.
+#                        Controls how the agent runs the interview for this
+#                        question. Defaults to `med` if omitted.
+#                        See `references/importance-flows.md`:
+#                          * med             — single AskUserQuestion batch
+#                                              entry, inferred suggestion at
+#                                              position 1.
+#                          * high            — own mini-section: agent drafts a
+#                                              full answer, shows it, user
+#                                              approves or iterates (max 3
+#                                              rounds). For list[string] fields
+#                                              the loop runs once per item with
+#                                              a single clarifying challenge
+#                                              round.
+#                          * critical        — same as high but the agent
+#                                              challenges every list item
+#                                              against risks/gaps it sees, drafts
+#                                              detail with explicit slots
+#                                              (input/output/dependencies/edge
+#                                              cases/why), and runs a dynamic
+#                                              project-specific scope-completeness
+#                                              sweep against the draft + upstream
+#                                              answers before closing the list.
+#                                              Full a→a-2→b→b-2→c→d→sweep
+#                                              per-item state machine.
+#                          * nested_freeform — for a Dict[str, Any] field whose
+#                                              shape is project-defined. Agent
+#                                              proposes named buckets it
+#                                              inferred from prior answers, then
+#                                              for each accepted bucket drafts a
+#                                              free-form nested YAML body the
+#                                              user approves or iterates on.
+#                                              See "The nested_freeform flow"
+#                                              section in importance-flows.md.
+#                        Most fields stay `med`. Required list[string] fields
+#                        and a few foundational narrative fields are `high`.
+#                        `features` and `non_functional_requirements.other` are
+#                        `critical` — they define the functional scope and the
+#                        cross-cutting NFR set.
+#                        `conventions` is the only `nested_freeform` field.
+#
+# Theme order below is the canonical interview order. Required themes are
+# asked in batches via AskUserQuestion (2–4 questions per call); product_identity
+# is intentionally LAST among required themes so the agent can synthesize
+# name/slug/one_liner candidates from earlier answers instead of asking cold.
+# For optional themes the agent offers a now/skip/todo gate before each batch.
+# Within a theme, `high`/`critical` questions are *not* batched with others —
+# they run as their own mini-section because their answer flow is multi-turn.
+# =============================================================================
+
+themes:
+  - id: problem_opportunity
+    title: "Problem & Opportunity"
+    required: true
+    description: "What hurts, and why fix it now?"
+
+  - id: users_personas
+    title: "Users & Personas"
+    required: true
+    description: "Who are we building for?"
+
+  - id: use_cases
+    title: "Use Cases & Jobs to Be Done"
+    required: true
+    description: "What jobs is the product hired to do?"
+
+  - id: functional_requirements
+    title: "Functional Requirements"
+    required: true
+    description: "What must, should, and won't the product do?"
+
+  - id: technical_constraints
+    title: "Technical Constraints"
+    required: true
+    description: "What stack, platform, deployment are we committed to?"
+
+  - id: product_identity
+    title: "Product Identity"
+    required: true
+    synthesis: true
+    description: >
+      What is this thing, in one breath? Asked LAST among required themes
+      so the agent can synthesize name/slug/one_liner candidates from
+      everything answered so far (problem, users, workflows, features, tech).
+
+  - id: non_functional_requirements
+    title: "Non-Functional Requirements"
+    required: false
+    description: "Performance, reliability, accessibility — the qualities."
+
+  - id: data_model
+    title: "Data Model"
+    required: false
+    description: "What data lives here, who owns it, how much?"
+
+  - id: security_compliance
+    title: "Security & Compliance"
+    required: false
+    description: "What protects users and the data they trust us with?"
+
+  - id: business_model
+    title: "Business Model"
+    required: false
+    description: "How (and whether) this makes money."
+
+  - id: stakeholders
+    title: "Stakeholders & Team"
+    required: false
+    description: "Who decides, who builds, who blocks?"
+
+  # milestones theme REMOVED (D2) — no MVP/phase split; the 1–3-sentence MVP
+  # narrative folds into product_vision, de-scoped ideas into parking_lot.
+
+  - id: success_metrics
+    title: "Success Metrics"
+    required: false
+    description: "How will we know it worked?"
+
+  - id: risks_assumptions
+    title: "Risks & Assumptions"
+    required: false
+    description: "What could go wrong, what are we betting on?"
+
+  # --- 1.1 optional context blocks (adopted from the AICF meta-corpus PRD
+  # schema). Each is now/skip/todo gated; a PRD that skips all seven is still
+  # complete. The hints say which later skill reads the answer — several have
+  # no consumer yet and are recorded so the obligation is not lost.
+  - id: glossary
+    title: "Glossary"
+    required: false
+    description: "The domain vocabulary every later stage reuses verbatim."
+
+  - id: user_stories
+    title: "User Stories"
+    required: false
+    synthesis: true
+    description: >
+      Persona-centred "As a …, I want …, so that …" narratives (USR-NNN),
+      synthesized from personas, features and workflows already captured.
+
+  - id: internationalization
+    title: "Internationalization"
+    required: false
+    description: "Locales, default language, right-to-left support."
+
+  - id: competitive_landscape
+    title: "Competitive Landscape"
+    required: false
+    description: "Who else solves this, and why this product wins."
+
+  - id: legal_and_terms
+    title: "Legal & Terms"
+    required: false
+    description: "Which legal documents must ship with the product."
+
+  - id: analytics_and_telemetry
+    title: "Analytics & Telemetry"
+    required: false
+    description: "Product-level events to track (not infra logs/metrics)."
+
+  - id: support_model
+    title: "Support Model"
+    required: false
+    description: "How users get help once the product ships."
+
+  - id: open_questions
+    title: "Open Questions"
+    required: false
+    description: "What is still undecided?"
+
+  - id: conventions
+    title: "Conventions"
+    required: false
+    description: >
+      Cross-cutting project conventions that downstream stages must honor
+      verbatim — naming/ID schemes, schema-versioning policy, propagation
+      rules from PRD fields into later artifacts, code-style invariants,
+      etc. Asked LAST so the agent has the whole picture; the answer is a
+      named-bucket map with project-defined sub-structure (Dict[str, Any]).
+      Skip for simple projects that have no binding cross-cutting rules.
+
+questions:
+
+  # ---------------------------------------------------------------------------
+  # Problem & Opportunity
+  # ---------------------------------------------------------------------------
+  - theme: problem_opportunity
+    id: problem_statement
+    schema_path: problem_opportunity.problem_statement
+    question: "What user pain or unmet need does this product address? (1–3 sentences)"
+    hint: "The grounding fact for every feature decision downstream."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: true
+    importance: high
+
+  - theme: problem_opportunity
+    id: who_has_pain
+    schema_path: problem_opportunity.who_has_pain
+    question: "Who specifically feels this pain? (Pick one or more, or describe.)"
+    hint: "Helps agents make persona-specific UX trade-offs."
+    suggested_answers:
+      - "End consumers"
+      - "Small business operators"
+      - "Engineers / developers"
+      - "Internal team / coworkers"
+      - "Enterprise IT buyers"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: problem_opportunity
+    id: current_workarounds
+    schema_path: problem_opportunity.current_workarounds
+    question: "How do affected people cope today? (Pick all that apply.)"
+    hint: "Anchors the 'why-better-than-status-quo' argument."
+    suggested_answers:
+      - "Manual / spreadsheet work"
+      - "Stitching together multiple existing tools"
+      - "A direct competitor's product"
+      - "Internal scripts or one-offs"
+      - "They simply don't — the need goes unmet"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: problem_opportunity
+    id: why_now
+    schema_path: problem_opportunity.why_now
+    question: "Why is this the right moment to build this? (Optional — market shift, new tech, regulation, etc.)"
+    hint: "Helps agents reason about urgency and competitive pressure."
+    suggested_answers:
+      - "New AI capability makes it possible"
+      - "Regulatory change forces it"
+      - "Competitor moved and we need to respond"
+      - "Internal cost of status quo crossed a threshold"
+      - "No specific trigger — just time to do it"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Users & Personas
+  # ---------------------------------------------------------------------------
+  - theme: users_personas
+    id: primary_users
+    schema_path: users_personas.primary_users
+    question: "Who are the primary users? (Pick all that apply, or describe.)"
+    hint: "Primary users define the default UX bias. Each item is stored as 'PER-NNN: <descriptor>' (e.g. 'PER-001: …') — IDs are assigned in collection order and let downstream artifacts (UX flows, API auth scopes, test users) cross-reference specific personas."
+    suggested_answers:
+      - "Software engineers / developers"
+      - "Data analysts or scientists"
+      - "Product / project managers"
+      - "Designers"
+      - "Non-technical end users"
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: true
+    importance: high
+
+  - theme: users_personas
+    id: secondary_users
+    schema_path: users_personas.secondary_users
+    question: "Any secondary users we should keep in mind? (Optional — pick or describe.)"
+    hint: "Secondary users get acknowledged but not optimized for in v1. Same 'PER-NNN: <descriptor>' format; IDs continue the PER-NNN sequence from primary_users (if primary ends at PER-002, secondary starts at PER-003)."
+    suggested_answers:
+      - "Admins / IT operators"
+      - "External auditors or compliance reviewers"
+      - "Customer support agents"
+      - "Executives consuming summaries"
+      - "None right now"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: users_personas
+    id: user_goals
+    schema_path: users_personas.user_goals
+    question: "What does success look like for a user after using this? (Pick all that apply.)"
+    hint: "Drives the framing of error states, success states, and CTAs. Each item is stored as 'GOL-NNN: <goal>' so UX/success-metrics agents can map flows and KPIs back to a specific goal."
+    suggested_answers:
+      - "Save significant time on a recurring task"
+      - "Get an answer they couldn't easily get before"
+      - "Coordinate with their team more reliably"
+      - "Avoid a costly mistake"
+      - "Have fun / feel delighted"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: users_personas
+    id: user_frustrations
+    schema_path: users_personas.user_frustrations
+    question: "What frustrates these users about today's options? (Pick all that apply.)"
+    hint: "Pain points are sharp signals for what to over-invest in. Each item is stored as 'PAN-NNN: <pain>' so downstream agents can cite which pain a feature addresses."
+    suggested_answers:
+      - "Existing tools are too complex"
+      - "Existing tools are too limited"
+      - "They are too expensive"
+      - "They don't integrate with the rest of the workflow"
+      - "They are unreliable"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: users_personas
+    id: expertise_level
+    schema_path: users_personas.expertise_level
+    question: "Typical user expertise level in this domain?"
+    hint: "Drives how much hand-holding the UX needs."
+    suggested_answers:
+      - "novice"
+      - "intermediate"
+      - "expert"
+      - "mixed"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Use Cases & Jobs to Be Done
+  # ---------------------------------------------------------------------------
+  - theme: use_cases
+    id: core_workflows
+    schema_path: use_cases.core_workflows
+    question: "What are the 3–7 happy-path workflows? (List them as short verb phrases.)"
+    hint: "Each becomes a candidate feature surface and a test scenario. Stored as 'WKF-NNN: <workflow>' — test-strategy and UX agents reference these IDs when scoping coverage."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: use_cases
+    id: primary_jobs_to_be_done
+    schema_path: use_cases.primary_jobs_to_be_done
+    question: "What are the primary 'jobs' the product is hired to do? (JTBD format: 'When ___, I want to ___, so I can ___'.)"
+    hint: "JTBD framing keeps agents from designing features in isolation from intent. Stored as 'JTB-NNN: <statement>' — features can cite which JTB they fulfil."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: use_cases
+    id: secondary_jobs
+    schema_path: use_cases.secondary_jobs
+    question: "Any secondary jobs worth supporting? (Optional.)"
+    hint: "Helps agents avoid accidentally blocking adjacent use cases. Same 'JTB-NNN: <statement>' format; IDs continue the JTB-NNN sequence from primary_jobs_to_be_done."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: use_cases
+    id: edge_cases
+    schema_path: use_cases.edge_cases
+    question: "Any edge cases that must be handled gracefully from day one? (Pick or describe.)"
+    hint: "Calling these out early prevents agents from treating them as afterthoughts. Stored as 'EDG-NNN: <edge case>' so test-strategy can build coverage per ID."
+    suggested_answers:
+      - "Offline use / poor connectivity"
+      - "Very large inputs (>1GB / >100k items)"
+      - "Concurrent users editing the same data"
+      - "Untrusted user input / abuse"
+      - "Long-running operations (minutes+)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Functional Requirements
+  # ---------------------------------------------------------------------------
+  - theme: functional_requirements
+    id: features
+    schema_path: functional_requirements.features
+    question: "What are the product's functional requirements? List the features it must do. Be verbose."
+    hint: "One flat list — no must/should/could split (every consumer is built whole by /sdlc:code, so an economic MVP tier has no downstream consumer). Each item is stored as 'FR-NNN: <description>' (e.g. 'FR-001: …'); the ID is assigned automatically at approval and used for cross-stage traceability. A de-scoped or later idea that surfaces here is NOT dropped — route it to open_questions.parking_lot (a QUE-NNN) so it stays reviewable without inflating scope."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  - theme: functional_requirements
+    id: out_of_scope
+    schema_path: functional_requirements.out_of_scope
+    question: "What is *explicitly out of scope*? (List, or skip.)"
+    hint: "Crucial. Agents over-build when scope boundaries are vague. Stored as 'OOS-NNN: <non-goal>' so downstream agents can cite which OOS item rules out a proposed feature."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: functional_requirements
+    id: integrations_required
+    schema_path: functional_requirements.integrations_required
+    question: "Which external systems must this integrate with? (Pick or describe.)"
+    hint: "Integrations drive auth, schema, and reliability requirements. Stored as 'INT-NNN: <integration target>' — arch/api/test agents reference specific integrations by ID."
+    suggested_answers:
+      - "GitHub / GitLab"
+      - "Slack / Teams"
+      - "Google Workspace"
+      - "Stripe / payment processor"
+      - "None"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: true
+    importance: high
+
+  - theme: functional_requirements
+    id: ai_features
+    schema_path: functional_requirements.ai_features
+    question: "Any AI-powered capabilities planned? (Pick or describe.)"
+    hint: "AI features have outsized cost, latency, and eval implications. Stored as 'AIF-NNN: <AI capability>' so downstream agents (arch, test) can scope eval suites and cost budgets per ID."
+    suggested_answers:
+      - "LLM chat / Q&A"
+      - "Summarization / extraction"
+      - "Embeddings / semantic search"
+      - "Agentic workflows"
+      - "None — no AI features"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: true
+    importance: high
+
+  # ---------------------------------------------------------------------------
+  # Technical Constraints (rationale captured on stack-shaping fields)
+  # ---------------------------------------------------------------------------
+  - theme: technical_constraints
+    id: primary_language
+    schema_path: technical_constraints.primary_language
+    question: "Primary programming language?"
+    hint: "Determines available libraries, hiring pool, runtime characteristics."
+    suggested_answers:
+      - "python"
+      - "typescript"
+      - "javascript"
+      - "go"
+      - "rust"
+      - "java"
+      - "csharp"
+      - "ruby"
+      - "other"
+      - "undecided"
+    free_text_allowed: true
+    required: true
+    capture_rationale: true
+    confidence_field: true
+    importance: med
+
+  - theme: technical_constraints
+    id: framework
+    schema_path: technical_constraints.framework
+    question: "Primary framework(s), if any? (Pick or describe.)"
+    hint: "Frameworks lock in many downstream decisions; worth surfacing early."
+    suggested_answers:
+      - "React / Next.js"
+      - "Vue / Nuxt"
+      - "Svelte / SvelteKit"
+      - "Django / FastAPI / Flask"
+      - "Rails"
+      - "None / standard library only"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: technical_constraints
+    id: runtime_platform
+    schema_path: technical_constraints.runtime_platform
+    question: "Where does the product run? Pick EVERY platform it ships on."
+    hint: >
+      Written as a LIST — e.g. [mobile_ios, mobile_android]; a single platform
+      is still [cli]. ux derives its surface family from it, api narrows
+      api_kind, arch pre-fills the deployment shape. `undecided` only ever
+      stands alone. cli/tui are terminal surfaces; `service` is a network
+      service with no UI of its own; `library` ships as a dependency.
+    suggested_answers:
+      - "web"
+      - "mobile_ios"
+      - "mobile_android"
+      - "desktop"
+      - "cli"
+      - "tui"
+      - "server"
+      - "service"
+      - "library"
+      - "embedded"
+      - "browser_extension"
+      - "voice"
+      - "other"
+      - "undecided"
+    free_text_allowed: true
+    multi_select: true
+    required: true
+    capture_rationale: true
+    confidence_field: true
+    importance: med
+
+  - theme: technical_constraints
+    id: deployment_target
+    schema_path: technical_constraints.deployment_target
+    question: "Deployment target?"
+    hint: "Affects every infra and ops decision downstream."
+    suggested_answers:
+      - "cloud_aws"
+      - "cloud_gcp"
+      - "cloud_azure"
+      - "self_hosted"
+      - "on_prem"
+      - "edge"
+      - "serverless"
+      - "hybrid"
+      - "local"
+      - "cloud_managed"
+      - "mobile_app_store"
+      - "undecided"
+    free_text_allowed: true
+    required: false
+    capture_rationale: true
+    confidence_field: true
+    importance: med
+
+  - theme: technical_constraints
+    id: existing_systems
+    schema_path: technical_constraints.existing_systems
+    question: "Any existing systems we must coexist with or migrate from? (Pick or describe.)"
+    hint: "Coexistence constraints often dwarf greenfield design considerations."
+    suggested_answers:
+      - "Legacy in-house system"
+      - "A specific SaaS product (describe)"
+      - "Database we cannot replace yet"
+      - "Identity provider (describe)"
+      - "None — greenfield"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: technical_constraints
+    id: browser_support
+    schema_path: technical_constraints.browser_support
+    question: "Browser support requirements? (Web only — skip if not web.)"
+    hint: "Directly informs polyfills, CSS, and bundler config."
+    suggested_answers:
+      - "Modern evergreen only (last 2 versions)"
+      - "Chrome + Firefox + Safari latest"
+      - "Including Safari 14+"
+      - "Including IE11 (legacy enterprise)"
+      - "Not applicable"
+    free_text_allowed: true
+    required: false
+    required_if: "'web' in runtime_platform"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Product Identity (asked LAST among required themes — synthesized from
+  # everything answered above; the agent should propose all candidates as
+  # ⚠ inferred position-1 options in AskUserQuestion, not ask cold)
+  # ---------------------------------------------------------------------------
+  - theme: product_identity
+    id: idea_text
+    schema_path: product_identity.idea_text
+    question: "Original product brief — the free-text description you shared at the start."
+    hint: "Preserved verbatim so downstream agents can refer to the founding idea without re-reading the interview transcript."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    synthesis: true
+    importance: med  # captured verbatim in Phase 3, no new input here
+
+  - theme: product_identity
+    id: name
+    schema_path: product_identity.name
+    question: "What is the product's name?"
+    hint: "Used by downstream agents in copy, branding, and code identifiers."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: true
+    synthesis: true
+    importance: med
+
+  - theme: product_identity
+    id: slug
+    schema_path: product_identity.slug
+    question: "Preferred URL/package slug? (kebab-case)"
+    hint: "Used for repo names, package names, URL paths."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: true
+    synthesis: true
+    importance: med
+
+  - theme: product_identity
+    id: one_liner
+    schema_path: product_identity.one_liner
+    question: "Describe the product in one sentence (≤ 140 chars), as if to a smart friend who doesn't work in your industry."
+    hint: "Used everywhere: docs intros, README headers, agent context."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: true
+    synthesis: true
+    importance: med
+
+  - theme: product_identity
+    id: tagline
+    schema_path: product_identity.tagline
+    question: "Marketing tagline (optional). Punchy, ≤ 8 words."
+    hint: "Optional. Skip if you don't have one yet."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    synthesis: true
+    importance: med
+
+  - theme: product_identity
+    id: vision
+    schema_path: product_identity.vision
+    question: "Where is this product going in 1–3 years? (1–3 sentences)"
+    hint: "Vision shapes architectural choices that have long horizons."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    synthesis: true
+    importance: med
+
+  - theme: product_identity
+    id: mission
+    schema_path: product_identity.mission
+    question: "What does this product do for users today? (1–3 sentences)"
+    hint: "Mission is what the product IS now; vision is where it's going. Used by agents for onboarding copy and feature rationale."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    synthesis: true
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Non-Functional Requirements
+  # ---------------------------------------------------------------------------
+  - theme: non_functional_requirements
+    id: performance_targets
+    schema_path: non_functional_requirements.performance_targets
+    question: "Any specific performance targets? (Pick or describe.)"
+    hint: "Concrete targets prevent over- or under-engineering. Stored as 'NFR-NNN: <target>' (e.g. 'NFR-001: p95 < 200ms') — test-strategy turns each into an assertion."
+    suggested_answers:
+      - "p95 response under 200ms"
+      - "p95 response under 1s"
+      - "Best-effort, no hard targets"
+      - "Throughput-driven (state your number)"
+      - "Latency-driven (state your number)"
+    free_text_allowed: true
+    free_text_expected: true   # the options are templates - the number is always typed
+    required: false
+    required_if: "scalability in ['large', 'hyperscale']"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: non_functional_requirements
+    id: scalability
+    schema_path: non_functional_requirements.scalability
+    question: "Expected scale?"
+    hint: "Frames architecture decisions: monolith vs. distributed."
+    suggested_answers:
+      - "small"        # < 100 users
+      - "medium"       # 100s–10k users
+      - "large"        # 10k–1M users
+      - "hyperscale"   # > 1M users
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: non_functional_requirements
+    id: reliability
+    schema_path: non_functional_requirements.reliability
+    question: "Reliability tier?"
+    hint: "Mission-critical implies redundancy, formal SLOs, oncall."
+    suggested_answers:
+      - "best_effort"
+      - "high"
+      - "mission_critical"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: non_functional_requirements
+    id: availability_sla
+    schema_path: non_functional_requirements.availability_sla
+    question: "Availability target? (Optional.)"
+    hint: "An explicit SLA shapes infra spend and oncall rotations."
+    suggested_answers:
+      - "99% (≈3.65 days/year downtime)"
+      - "99.9% (≈9h/year downtime)"
+      - "99.95%"
+      - "99.99% (≈53min/year downtime)"
+      - "Business hours only"
+      - "No formal target"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: non_functional_requirements
+    id: accessibility
+    schema_path: non_functional_requirements.accessibility
+    question: "Accessibility commitment?"
+    hint: "WCAG levels affect component choices, colors, keyboard handling."
+    suggested_answers:
+      - "none_yet"
+      - "wcag_aa"
+      - "wcag_aaa"
+      - "not_applicable_cli"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: non_functional_requirements
+    id: other
+    schema_path: non_functional_requirements.other
+    question: "What else are important non-functional requirements?"
+    hint: "Catch-all for NFRs not captured by the enums/scalars above — routing/state determinism, isolation guarantees, error-handling policies, observability hooks, lossless resumability, etc. Same 'NFR-NNN: <requirement>' format; IDs continue the NFR-NNN sequence from performance_targets. Treated `critical` (per-item drill-down + dynamic scope sweep against draft + upstream answers) because deep multi-clause NFRs here drive architecture and test-strategy decisions downstream and tend to be missed when asked as a single batched question."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  # ---------------------------------------------------------------------------
+  # Data Model
+  # ---------------------------------------------------------------------------
+  - theme: data_model
+    id: key_entities
+    schema_path: data_model.key_entities
+    question: "What are the primary domain entities? (e.g. User, Project, Invoice)"
+    hint: "Seeds the schema, API resources, and authorization boundaries. Stored as 'ENT-NNN: <entity>' (e.g. 'ENT-001: User') — sdlc-data uses these IDs as the seed list and downstream artifacts cross-reference them."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: data_model
+    id: data_ownership
+    schema_path: data_model.data_ownership
+    question: "Who owns the data?"
+    hint: "Drives auth model, deletion semantics, export obligations."
+    suggested_answers:
+      - "user_owned"
+      - "org_owned"
+      - "platform_owned"
+      - "third_party"
+      - "mixed"
+    free_text_allowed: false
+    required: false
+    capture_rationale: true    # the nuance users kept typing into "Other" (who
+                               # is the controller, who edits what) has a home
+                               # here; the enum stays the answer
+    confidence_field: true
+    importance: med
+
+  - theme: data_model
+    id: data_volume_estimate
+    schema_path: data_model.data_volume_estimate
+    question: "Rough total data volume at maturity?"
+    hint: "MB vs. TB changes everything about storage and indexing strategy."
+    suggested_answers:
+      - "kilobytes"
+      - "megabytes"
+      - "gigabytes"
+      - "terabytes"
+      - "petabytes"
+      - "unknown"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: data_model
+    id: storage_preferences
+    schema_path: data_model.storage_preferences
+    question: "Preferred storage technologies? (Pick or describe.)"
+    hint: "Even soft preferences here save downstream agents from re-litigating."
+    suggested_answers:
+      - "PostgreSQL"
+      - "MySQL / MariaDB"
+      - "SQLite"
+      - "Redis"
+      - "S3 / object storage"
+      - "No preference — recommend"
+    free_text_allowed: true
+    required: false
+    capture_rationale: true
+    confidence_field: true
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Security & Compliance
+  # ---------------------------------------------------------------------------
+  - theme: security_compliance
+    id: auth_model
+    schema_path: security_compliance.auth_model
+    question: "Authentication model?"
+    hint: "Auth choice cascades into session handling, mobile flows, integrations."
+    suggested_answers:
+      - "none"
+      - "api_key"
+      - "oauth2"
+      - "oidc"
+      - "saml"
+      - "jwt"
+      - "session_cookie"
+      - "passkeys"
+      - "mtls"
+      - "custom"
+    free_text_allowed: true
+    required: false
+    required_if: "data_sensitivity in ['restricted', 'regulated', 'phi', 'pci']"
+    capture_rationale: true
+    confidence_field: true
+    importance: med
+
+  - theme: security_compliance
+    id: data_sensitivity
+    schema_path: security_compliance.data_sensitivity
+    question: "Highest data sensitivity tier handled?"
+    hint: "Restricted/regulated data implies encryption, audit, segregation."
+    suggested_answers:
+      - "public"
+      - "internal"
+      - "confidential"
+      - "restricted"
+      - "regulated"
+      - "phi"
+      - "pci"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: security_compliance
+    id: regulatory_requirements
+    schema_path: security_compliance.regulatory_requirements
+    question: "Any regulatory regimes that apply? (Pick all that apply.)"
+    hint: "GDPR/HIPAA/PCI/SOC2 each impose specific concrete obligations."
+    suggested_answers:
+      - "gdpr"
+      - "ccpa"
+      - "hipaa"
+      - "pci_dss"
+      - "soc2"
+      - "iso_27001"
+      - "none"
+    free_text_allowed: true
+    required: false
+    required_if: "data_sensitivity in ['restricted', 'regulated', 'phi', 'pci']"
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: security_compliance
+    id: encryption_at_rest
+    schema_path: security_compliance.encryption_at_rest
+    question: "Is encryption at rest required?"
+    hint: "Boolean — drives storage backend selection and key management."
+    suggested_answers:
+      - "true"
+      - "false"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: security_compliance
+    id: audit_logging
+    schema_path: security_compliance.audit_logging
+    question: "Is audit logging required for sensitive actions?"
+    hint: "Boolean — affects every mutating endpoint."
+    suggested_answers:
+      - "true"
+      - "false"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Business Model
+  # ---------------------------------------------------------------------------
+  - theme: business_model
+    id: monetization
+    schema_path: business_model.monetization
+    question: "How does this product make (or save) money?"
+    hint: "Drives auth tiers, billing surface, feature flagging needs."
+    suggested_answers:
+      - "free"
+      - "freemium"
+      - "paid"
+      - "subscription"
+      - "usage_based"
+      - "enterprise"
+      - "open_source"
+      - "internal_tool"
+      - "undecided"
+    free_text_allowed: true
+    required: false
+    capture_rationale: true
+    confidence_field: true
+    importance: med
+
+  - theme: business_model
+    id: pricing_model
+    schema_path: business_model.pricing_model
+    question: "Pricing model summary, if known? (One sentence.)"
+    hint: "Per-seat vs per-usage vs flat radically changes UX surfaces."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    required_if: "monetization not in ['internal_tool', 'open_source', 'free']"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: business_model
+    id: license_type
+    schema_path: business_model.license_type
+    question: "License type?"
+    hint: "License affects what dependencies can be used and how code can ship."
+    suggested_answers:
+      - "proprietary"
+      - "mit"
+      - "apache_2"
+      - "gpl_v3"
+      - "agpl_v3"
+      - "bsd_3_clause"
+      - "mpl_2"
+      - "cc_by"
+      - "cc_by_sa"
+      - "bsl"
+      - "sspl"
+      - "dual"
+      - "other"
+      - "undecided"
+    free_text_allowed: true
+    required: false
+    capture_rationale: true
+    confidence_field: true
+    importance: med
+
+  - theme: business_model
+    id: target_market
+    schema_path: business_model.target_market
+    question: "Target market in one sentence? (Optional.)"
+    hint: "B2B vs B2C vs internal radically changes UX assumptions."
+    suggested_answers:
+      - "B2B SaaS"
+      - "B2C consumer app"
+      - "Developer tool"
+      - "Internal-only"
+      - "Open source community tool"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Stakeholders
+  # ---------------------------------------------------------------------------
+  - theme: stakeholders
+    id: product_owner
+    schema_path: stakeholders.product_owner
+    question: "Who owns this product? (Name, role, or 'me'.)"
+    hint: "Used by agents when summarizing and when conflicts arise."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: stakeholders
+    id: primary_contributors
+    schema_path: stakeholders.primary_contributors
+    question: "Who are the primary contributors? (List names or roles.)"
+    hint: "Helps agents tailor reviews and PR descriptions."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: stakeholders
+    id: decision_maker
+    schema_path: stakeholders.decision_maker
+    question: "Who has final say on scope and timeline?"
+    hint: "Useful for agents when escalating trade-offs."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: stakeholders
+    id: external_dependencies
+    schema_path: stakeholders.external_dependencies
+    question: "Which external TEAMS, vendors or organisations does the project depend on? (People and orgs only.)"
+    hint: >
+      Organizational dependencies only — sign-offs, vendor deliveries, another
+      team's API landing; the classic silent blockers. Technical or service
+      dependencies are INT-NNN under functional_requirements.integrations_required
+      (consumed by api and data) — do not repeat them here.
+    suggested_answers:
+      - "Another internal team (describe)"
+      - "Specific vendor / agency (describe)"
+      - "Open source maintainer responsiveness"
+      - "Regulatory / legal sign-off"
+      - "None"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Milestones — REMOVED (D2). No MVP/phase questions: the product is built whole
+  # by /sdlc:code. Any tightest-scope narrative folds into product_vision.
+  # ---------------------------------------------------------------------------
+
+  # ---------------------------------------------------------------------------
+  # Success Metrics
+  # ---------------------------------------------------------------------------
+  - theme: success_metrics
+    id: primary_kpis
+    schema_path: success_metrics.primary_kpis
+    question: "Top 2–5 KPIs that matter? (Pick or describe.)"
+    hint: "Anchors what agents should optimize for when trading off."
+    suggested_answers:
+      - "Weekly active users"
+      - "Conversion rate"
+      - "Time-to-value (first useful action)"
+      - "Retention (e.g. D7, D30)"
+      - "Revenue / ARR"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: success_metrics
+    id: acceptance_criteria
+    schema_path: success_metrics.acceptance_criteria
+    question: "What makes a feature 'done' for this product? (Pick all that apply.)"
+    hint: >
+      Becomes the implicit checklist for every PR an agent opens. WRITE EACH
+      ITEM AS "ACR-NNN: <criterion>" (writer-managed counter,
+      state.last_ids.ACR) — the ACR ids are what downstream test's ACR→TST
+      coverage gate resolves against; unprefixed bullets leave that gate
+      mechanism-only. Phrase criteria as observable, verifiable outcomes.
+    suggested_answers:
+      - "Has tests"
+      - "Has docs"
+      - "Reviewed by a human"
+      - "Passes accessibility check"
+      - "Performance budget respected"
+    free_text_allowed: true
+    free_text_expected: true   # every product adds its own "ACR-NNN: ..." lines
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: success_metrics
+    id: definition_of_done
+    schema_path: success_metrics.definition_of_done
+    question: "Team-level Definition of Done items? (Pick or describe.)"
+    hint: "Distinguishes 'feature works' from 'release-ready'."
+    suggested_answers:
+      - "Deployed to staging"
+      - "Smoke-tested in prod"
+      - "Telemetry/analytics added"
+      - "Runbook updated"
+      - "Stakeholder sign-off"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: success_metrics
+    id: user_satisfaction_target
+    schema_path: success_metrics.user_satisfaction_target
+    question: "User satisfaction target, if any? (NPS, CSAT, etc. — Optional.)"
+    hint: "If you have one, agents should weight UX work accordingly."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Risks & Assumptions
+  # ---------------------------------------------------------------------------
+  - theme: risks_assumptions
+    id: top_risks
+    schema_path: risks_assumptions.top_risks
+    question: "Top risks that could derail this? (Pick all that apply, or describe.)"
+    hint: "Risks the team has named are risks the team can manage."
+    suggested_answers:
+      - "Unproven user demand"
+      - "Technical complexity / unknowns"
+      - "Regulatory uncertainty"
+      - "Resourcing / staffing"
+      - "Dependency on external party"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: risks_assumptions
+    id: key_assumptions
+    schema_path: risks_assumptions.key_assumptions
+    question: "What are we taking on faith? (Pick or describe.)"
+    hint: "Naming assumptions lets agents flag when reality contradicts them."
+    suggested_answers:
+      - "Users will pay for this"
+      - "Technical approach will scale"
+      - "Integrations will remain stable"
+      - "Team will stay intact"
+      - "Regulatory landscape will not shift"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: risks_assumptions
+    id: blockers
+    schema_path: risks_assumptions.blockers
+    question: "Active blockers right now? (List or 'none'.)"
+    hint: "Lets agents avoid doing work that depends on a blocked path."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # risks_assumptions.dependencies — REMOVED (1.1). It duplicated two
+  # better-owned fields: technical/service dependencies are INT-NNN
+  # (integrations_required, consumed by api/data); organizational ones are
+  # stakeholders.external_dependencies; a dependency that is a RISK goes in
+  # top_risks. The validator still accepts the field on legacy PRDs; new
+  # writes never emit it.
+
+  # ---------------------------------------------------------------------------
+  # 1.1 optional context blocks — every theme below is now/skip/todo gated.
+  # ---------------------------------------------------------------------------
+
+  # --- Glossary ---
+  - theme: glossary
+    id: glossary-terms
+    schema_path: glossary.terms
+    question: "Which domain terms need one agreed definition? (The agent drafts candidates from everything answered so far; confirm, edit, add.)"
+    hint: >
+      Every later stage names things — UX copy, entity and field names (data),
+      operation names (api), code identifiers (code). One glossary stops
+      "customer" turning into three different words downstream. Emit typed
+      entries {term, definition, synonyms}; no ID family.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # --- User Stories ---
+  - theme: user_stories
+    id: user-stories
+    schema_path: user_stories.stories
+    question: "User stories — one per persona/job the features serve. (The agent drafts 'As a <persona>, I want <Y>, so that <Z>' candidates from PER + FR + WKF; approve or edit each.)"
+    hint: >
+      Typed entries {id: USR-NNN, story, owning_personas: [PER-NNN]}; the USR
+      counter is writer-managed (state.last_ids.USR) and never renumbered.
+      Name the persona by its PER id inside the story. No downstream skill
+      gates on USR yet — a later `test` version may cover them; today they are
+      the context that ties personas to features.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  # --- Internationalization ---
+  - theme: internationalization
+    id: i18n-enabled
+    schema_path: internationalization.enabled
+    question: "Does the product need more than one language or locale?"
+    hint: >
+      Written as a boolean. When true, data and api must carry locale-tagged
+      fields and ux must plan text expansion / RTL — say so now; retrofitting
+      i18n is the classic expensive rework.
+    suggested_answers:
+      - "No — a single locale"
+      - "Yes — a few target locales (describe)"
+      - "Yes — fully localizable from day one"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: internationalization
+    id: i18n-default-locale
+    schema_path: internationalization.default_locale
+    question: "Default locale? (BCP-47 tag)"
+    hint: "The locale the product falls back to; data/api default values and ux copy are authored in it."
+    suggested_answers:
+      - "en-US"
+      - "en-GB"
+      - "de-DE"
+    free_text_allowed: true
+    required: false
+    required_if: "internationalization.enabled == true"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: internationalization
+    id: i18n-target-locales
+    schema_path: internationalization.target_locales
+    question: "Which further locales must be supported? (BCP-47 tags, list.)"
+    hint: "Drives the locale set data and api must accept and ux must render."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    required_if: "internationalization.enabled == true"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: internationalization
+    id: i18n-rtl
+    schema_path: internationalization.rtl_support
+    question: "Right-to-left script support needed (Arabic, Hebrew, …)?"
+    hint: "Written as a boolean. RTL changes layout rules for every ux surface."
+    suggested_answers:
+      - "No"
+      - "Yes"
+    free_text_allowed: false
+    required: false
+    required_if: "internationalization.enabled == true"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # --- Competitive Landscape ---
+  - theme: competitive_landscape
+    id: competitors
+    schema_path: competitive_landscape.competitors
+    question: "Who else solves this today? (Name up to ~5; the agent drafts strengths/weaknesses for you to correct.)"
+    hint: >
+      Typed entries {name, url, strengths, weaknesses, pricing_notes}. No later
+      skill reads this yet — it is positioning context and a seed for
+      out_of_scope and the differentiating FRs.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: competitive_landscape
+    id: differentiators
+    schema_path: competitive_landscape.differentiators
+    question: "What makes this product the better choice? (2–5 differentiators.)"
+    hint: "Each differentiator should be traceable to at least one FR; if it is not, the feature list has a gap."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: competitive_landscape
+    id: market-positioning
+    schema_path: competitive_landscape.market_positioning
+    question: "One sentence of positioning: for <who>, this is the <category> that <key benefit>."
+    hint: "Keeps the one_liner honest and gives design a tone anchor."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # --- Legal & Terms ---
+  - theme: legal_and_terms
+    id: legal-documents
+    schema_path: legal_and_terms
+    question: "Which legal documents must ship with the product?"
+    hint: >
+      Write each pick as its boolean under legal_and_terms — tos_required,
+      privacy_policy_required, cookie_disclosure_required, eula_required,
+      dpa_required — and the unpicked ones as false. No later skill consumes
+      this yet (a compliance / deploy stage would); it is recorded so the
+      obligation is not lost between PRD and release.
+    suggested_answers:
+      - "Terms of Service"
+      - "Privacy policy"
+      - "Cookie disclosure / banner"
+      - "EULA (installed software)"
+      - "Data Processing Agreement (GDPR Art. 28)"
+      - "None of these"
+    free_text_allowed: true
+    multi_select: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # --- Analytics & Telemetry ---
+  - theme: analytics_and_telemetry
+    id: product-events
+    schema_path: analytics_and_telemetry.product_events
+    question: "Which product-level events should be tracked? (e.g. signup_completed, report_exported — the agent drafts candidates from the workflows.)"
+    hint: >
+      Typed entries {event_name (snake_case), description, properties,
+      contains_pii}. Product analytics, NOT infra logs/metrics — those are the
+      arch stage's observability signals. No later skill consumes this yet;
+      arch may seed observability from it in a later version.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: analytics_and_telemetry
+    id: consent-required
+    schema_path: analytics_and_telemetry.consent_required
+    question: "Does event tracking need user consent (opt-in / cookie consent)?"
+    hint: "Written as a boolean. Pairs with legal_and_terms.cookie_disclosure_required."
+    suggested_answers:
+      - "Yes"
+      - "No"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: analytics_and_telemetry
+    id: pii-redaction-required
+    schema_path: analytics_and_telemetry.pii_redaction_required
+    question: "Must PII be redacted from events before they are stored?"
+    hint: "Written as a boolean. Follows from security_compliance.data_sensitivity — restricted/regulated/phi/pci almost always means yes."
+    suggested_answers:
+      - "Yes"
+      - "No"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # --- Support Model ---
+  - theme: support_model
+    id: support-channels
+    schema_path: support_model.channels
+    question: "How will users get support? (Pick every channel that applies.)"
+    hint: "Written as a list. No later skill consumes this yet (deploy is planned)."
+    suggested_answers:
+      - "email"
+      - "community_forum"
+      - "in_app_chat"
+      - "dedicated_support"
+      - "self_serve_docs_only"
+    free_text_allowed: true
+    multi_select: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: support_model
+    id: support-sla-targets
+    schema_path: support_model.sla_targets
+    question: "Support SLA targets? (e.g. first_response: 24h, resolution_p95: 5d — or none.)"
+    hint: "Written as a map of target name → value. No later skill consumes this yet."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Open Questions
+  # ---------------------------------------------------------------------------
+  - theme: open_questions
+    id: undecided_decisions
+    schema_path: open_questions.undecided_decisions
+    question: "Any decisions you are explicitly punting for now? (List, or 'none'.)"
+    hint: >
+      Agents should treat these as decisions-still-to-make, not silence.
+      EMIT TYPED ENTRIES, not bullets: each is a mapping
+      {id: QUE-NNN, question, status: open, blocks: [...]} — the QUE counter
+      (state.last_ids.QUE) is SHARED with parking_lot. Downstream stages gate
+      on QUE ids (a question blocking an FR must be resolved before the FR is
+      built); a plain bullet gives them nothing to reference or close. On an
+      update flow, retrofit legacy bullets with the next QUE id +
+      status: open.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: open_questions
+    id: parking_lot
+    schema_path: open_questions.parking_lot
+    question: "Anything in the parking lot to revisit later? (Ideas, half-baked thoughts, optional.)"
+    hint: >
+      A safe place to capture ideas without committing to them. Same typed
+      shape as undecided_decisions ({id: QUE-NNN, question, status} —
+      usually status: deferred), continuing the SAME QUE counter. This is where
+      de-scoped feature ideas land now that there is no nice-to-have list (D2):
+      when the features theme surfaces something out of scope, route it here as
+      a QUE rather than dropping it.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Conventions (run LAST — after open_questions — so the agent has the full
+  # picture and can spot patterns that downstream stages must honor verbatim)
+  # ---------------------------------------------------------------------------
+  - theme: conventions
+    id: conventions
+    schema_path: conventions
+    question: "Any binding cross-cutting conventions downstream stages must honor — naming/ID rules, schema-versioning policy, NFR-propagation maps, code-style invariants, etc.?"
+    hint: >
+      The whole `conventions` block, run as `nested_freeform` — but treat it
+      as a deliberate SYNTHESIS PASS, not a single question. It runs last, once
+      the agent has read the entire project, so it can spot the cross-cutting
+      rules every downstream stage must honor verbatim (the biggest source of
+      PRD-intent drift when left implicit). BEFORE proposing buckets, read
+      `references/conventions-catalog.md` and reflect across all prior answers,
+      every upstream ID family, and the project type — the same discipline as
+      the FR scope-completeness sweep. Propose the buckets the project actually
+      needs (artifact_ids, schema_versioning, nfr_propagation, code_style,
+      testing_policy, severity rubrics, supply-chain policy, … — see the
+      catalogue), draft each free-form body, user approves/iterates. The
+      validator only type-checks the top-level mapping. Anti-padding holds:
+      simple projects may have zero conventions. Conventions-rich projects
+      legitimately run to a dozen-plus buckets — don't under-deliver here.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: nested_freeform

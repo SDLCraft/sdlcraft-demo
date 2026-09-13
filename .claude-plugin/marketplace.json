@@ -1,0 +1,15 @@
+{
+  "name": "sdlcraft-demo",
+  "description": "SDLCraft Demo: spec-driven development for Claude Code. Structured interviews turn an idea into requirements, UX, design, data, API and architecture specs that AI agents build from.",
+  "owner": {
+    "name": "Andreas Pfrengle"
+  },
+  "plugins": [
+    {
+      "name": "sdlc",
+      "description": "SDLCraft Demo: spec-driven development for Claude Code. Structured interviews turn an idea into requirements, UX, design, data, API and architecture specs that AI agents build from.",
+      "source": "./sdlc",
+      "version": "0.9.12"
+    }
+  ]
+}

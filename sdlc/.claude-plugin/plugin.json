@@ -1,0 +1,13 @@
+{
+  "name": "sdlc",
+  "description": "SDLCraft Demo: spec-driven development for Claude Code. Structured interviews turn an idea into requirements, UX, design, data, API and architecture specs that AI agents build from.",
+  "version": "0.9.12",
+  "skills": "./skills/",
+  "agents": [],
+  "author": {
+    "name": "Andreas Pfrengle"
+  },
+  "homepage": "https://github.com/sdlcraft/sdlcraft-demo#editions",
+  "repository": "https://github.com/sdlcraft/sdlcraft-demo",
+  "license": "MIT"
+}

@@ -1,0 +1,221 @@
+# Container taxonomy.
+#
+# Each entry is a candidate container archetype. Used during the
+# container_inventory theme to suggest names, aliases, and component
+# scaffolds.
+#
+# The skill normalizes user input to kebab-case canonicals. Aliases are
+# matched tolerantly but never stored as the canonical container_id.
+#
+# `suggested_components` is consumed in container mode's Pass 1
+# (component-discovery.md). It's a *scaffold*, not a mandate — the user
+# can drop or rename anything during Phase 3 confirmation.
+
+archetypes:
+
+  # ----- frontends -----
+  - canonical: backend-api
+    aliases: [backend, api, server, web-server, service]
+    description: Server-side application exposing APIs to clients and other services.
+    common_responsibilities:
+      - expose HTTP / RPC / GraphQL endpoints
+      - enforce authn / authz
+      - orchestrate use cases
+      - read/write data stores
+    suggested_components:
+      - controller
+      - service
+      - repository
+      - auth-middleware
+      - error-handler
+      - validator
+      - serializer
+
+  - canonical: web-frontend
+    aliases: [frontend, web, ui, spa, web-app]
+    description: Browser-facing application that renders UI and orchestrates user interactions.
+    common_responsibilities:
+      - render views and pages
+      - manage client-side state and sessions
+      - call backend APIs
+      - handle authentication flows in the browser
+    suggested_components:
+      - router
+      - view
+      - state_store
+      - api-client
+      - auth-integration
+      - form-handling
+
+  - canonical: mobile-frontend
+    aliases: [mobile, mobile-app, native-app]
+    description: Native or cross-platform mobile application.
+    common_responsibilities:
+      - render mobile UI
+      - manage offline state
+      - call backend APIs
+      - handle device capabilities (push, camera, location)
+    suggested_components:
+      - navigation
+      - view
+      - state_store
+      - api-client
+      - local-storage-adapter
+      - push-handler
+
+  - canonical: desktop-frontend
+    aliases: [desktop, desktop-app, electron]
+    description: Desktop application (Electron, Tauri, native).
+    suggested_components:
+      - view
+      - state_store
+      - api-client
+      - local-persistence
+      - update-handler
+
+  - canonical: cli
+    aliases: [command-line, cli-app]
+    description: Command-line tool.
+    suggested_components:
+      - command-dispatcher   # owns the dispatch root — model as a work_unit of
+                             # kind: entrypoint (argv/mode in, exit code out),
+                             # plus one unit per run-mode. A single-file CLI with
+                             # >1 mode and no entrypoint unit warns (#21).
+      - argument-parser
+      - config-loader
+      - output-formatter
+
+  # ----- backends -----
+  - canonical: worker
+    aliases: [background-worker, job-runner]
+    description: Asynchronous worker that processes jobs / events / batches.
+    common_responsibilities:
+      - dequeue and process work items
+      - retry on failure
+      - emit events / write results
+    suggested_components:
+      - dispatcher
+      - handler
+      - retry-policy
+      - persistence-client
+
+  - canonical: scheduler
+    aliases: [cron, cron-runner, periodic-job]
+    description: Triggers jobs on a schedule.
+    suggested_components:
+      - schedule-registry
+      - trigger
+      - persistence-client
+
+  - canonical: stream-processor
+    aliases: [streamer, stream-consumer]
+    description: Continuously consumes a stream and reacts.
+    suggested_components:
+      - consumer
+      - state-store
+      - sink
+
+  - canonical: gateway
+    aliases: [api-gateway, ingress, reverse-proxy]
+    description: Edge proxy / routing / cross-cutting concerns.
+    suggested_components:
+      - router
+      - auth-middleware
+      - rate-limiter
+      - request-logger
+
+  - canonical: bff
+    aliases: [backend-for-frontend]
+    description: Backend tailored to one frontend; aggregates downstream services.
+    suggested_components:
+      - controller
+      - aggregator-service
+      - api-client
+
+  - canonical: edge-function
+    aliases: [edge-worker, cloudflare-worker]
+    description: Edge / CDN-deployed compute (limited runtime).
+    suggested_components:
+      - handler
+      - cache-lookup
+      - origin-client
+
+  - canonical: static-site
+    aliases: [static, jamstack, marketing]
+    description: Pre-built static asset bundle served from CDN.
+    suggested_components: []
+
+  # ----- identity -----
+  - canonical: identity-provider
+    aliases: [idp, auth-provider, sso]
+    description: Issues and validates identity tokens (OIDC / SAML).
+    suggested_components:
+      - token-issuer
+      - token-validator
+      - user-directory
+
+  # ----- data stores -----
+  - canonical: primary-database
+    aliases: [database, postgres, mysql, sqlite, mongo]
+    description: Authoritative transactional data store.
+    common_responsibilities:
+      - persist records durably
+      - serve transactional queries
+    suggested_components: []   # treated as a container with no internal components
+
+  - canonical: secondary-database
+    aliases: [read-replica, analytics-db, warehouse]
+    description: Secondary store for read-scale / analytics / OLAP.
+    suggested_components: []
+
+  - canonical: cache
+    aliases: [redis, memcached, kv-cache]
+    description: Low-latency in-memory store.
+    suggested_components: []
+
+  - canonical: blob-store
+    aliases: [s3, gcs, object-storage]
+    description: Bulk binary / file storage.
+    suggested_components: []
+
+  - canonical: search-index
+    aliases: [elasticsearch, opensearch, meilisearch]
+    description: Full-text / vector search index.
+    suggested_components: []
+
+  - canonical: message-bus
+    aliases: [kafka, rabbitmq, sqs, pubsub, eventbridge]
+    description: Async message / event broker.
+    suggested_components: []
+
+  # ----- ml / data pipelines -----
+  - canonical: etl-pipeline
+    aliases: [etl, pipeline, ingestion]
+    description: Batch data ingestion / transformation.
+    suggested_components:
+      - extractor
+      - transformer
+      - loader
+      - schedule
+
+  - canonical: ml-inference
+    aliases: [ml, inference-service, model-server]
+    description: Hosts ML models for inference.
+    suggested_components:
+      - controller
+      - model-loader
+      - feature-pipeline
+      - prediction-service
+
+  # ----- escape hatch -----
+  - canonical: external-service
+    aliases: [external, third-party, vendor]
+    description: A service we don't build but depend on.
+    common_responsibilities:
+      - represented for graph completeness; no internal components.
+    suggested_components: []
+
+  - canonical: other
+    aliases: []
+    description: Escape hatch for unusual container shapes.
+    suggested_components: []

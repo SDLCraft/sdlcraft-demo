@@ -1,0 +1,1221 @@
+# =============================================================================
+# arch-questions.yaml — Question inventory for the sdlc-arch skill
+# =============================================================================
+# This file lists every question the agent may ask, grouped by theme and
+# tagged with which mode the theme belongs to. The skill loads only the
+# themes for the currently-active mode and asks unanswered questions in
+# 2–4-question AskUserQuestion batches.
+#
+# Field reference (same convention as sdlc-prd / sdlc-api):
+#   theme              — grouping label; matches a top-level key in
+#                        ARCH.yaml or ARCH__<container>.yaml
+#   id                 — unique slug, kebab-case
+#   schema_path        — dotted path where the answer is written in the
+#                        output yaml (e.g. "architecture_pattern.pattern")
+#   question           — the prompt shown to the user
+#   hint               — why this matters downstream (kept short)
+#   suggested_answers  — 2–5 plausible options shown as a numbered list
+#   free_text_allowed  — if true, a final "Other / type your own" option
+#                        appears in AskUserQuestion
+#   required           — true ⇒ must be answered (or explicitly nulled with
+#                        a warning) before the skill can mark this theme
+#                        complete.
+#   required_if        — optional expression; promotes to required when
+#                        true. Re-evaluated at every theme batch.
+#                        Reading: PROMOTION (canonical activation-vs-promotion
+#                        definition: ../prd/references/interview-mechanics.md).
+#   capture_rationale  — if true, follow up with "In one sentence — why?".
+#                        Stored at <schema_path>_rationale.
+#   confidence_field   — if true, a sibling <schema_path>_confidence is
+#                        written. Defaults to true; set false to opt out.
+#   importance         — `med | high | critical`. Defaults to `med`.
+#                          * med      — single AskUserQuestion batch entry,
+#                                       inferred suggestion at position 1.
+#                          * high     — own mini-section: agent drafts a
+#                                       full answer, shows it, user
+#                                       approves or iterates (max 3 rounds).
+#                          * critical — full per-item state machine.
+#                                       Currently used by `container_inventory`,
+#                                       `cross_container_edges`,
+#                                       `component_inventory`,
+#                                       `per_component_deepdive`, and
+#                                       `internal_and_external_edges`.
+#
+# Theme-level key:
+#   synthesis: true    — the theme produces a scope-defining list synthesized
+#                        from upstream artifacts. After the per-item loop
+#                        closes, the agent runs a dynamic scope-completeness
+#                        sweep that reflects on the draft list + ALL upstream
+#                        ID families + project-type heuristics, surfaces
+#                        concrete missed candidates via one multi-select
+#                        AskUserQuestion (cap 2 passes, anti-padding, defer
+#                        leftovers to a WRN-NNN warning). Marked on
+#                        `container_inventory` (system) and
+#                        `component_inventory` (container). Canonical spec:
+#                        sdlc/skills/prd/references/importance-flows.md.
+#
+# Theme order below is the canonical interview order for each mode.
+# =============================================================================
+
+themes:
+  # -------- system mode --------
+  - id: architecture_pattern
+    mode: system
+    title: "Architecture Pattern"
+    required: true
+    description: "Top-level architectural style and the trade-offs we accept."
+
+  - id: identity_and_auth
+    mode: system
+    title: "Identity & Auth"
+    required: true
+    description: "Who issues identity and what token strategy do containers share?"
+
+  - id: container_inventory
+    mode: system
+    title: "Container Inventory"
+    required: true
+    synthesis: true   # scope-defining list synthesized from ALL upstream ID
+                      # families (PRD FR/WKF/ENT, UX surfaces, DATA stores,
+                      # API resources/channels). Runs the scope-completeness
+                      # sweep after the per-item loop — see
+                      # references/container-discovery.md.
+    description: "The canonical set of independently runnable/deployable units."
+
+  - id: cross_container_edges
+    mode: system
+    title: "Cross-Container Edges"
+    required: true
+    description: "Typed dependency graph between containers. Auto-derived; user confirms."
+
+  # -------- container mode --------
+  - id: tech_stack
+    mode: container
+    title: "Tech Stack"
+    required: true
+    description: "Language, framework, runtime, build tooling."
+
+  - id: persistence_bindings
+    mode: container
+    title: "Persistence Bindings"
+    required: false
+    description: "Which DATA stores does this container access and how?"
+
+  - id: configuration
+    mode: container
+    title: "Configuration"
+    required: false
+    description: "Runtime config keys this container consumes (task slices them into config tasks)."
+
+  - id: deployment
+    mode: container
+    title: "Deployment"
+    required: true
+    description: "How the container is shipped and run."
+
+  - id: observability
+    mode: container
+    title: "Observability"
+    required: true
+    description: "Logs, metrics, traces, alerts at the container level."
+
+  - id: ownership
+    mode: container
+    title: "Ownership"
+    required: false
+    description: "Team, change cadence, on-call rotation."
+
+  - id: failure_modes
+    mode: container
+    title: "Failure Modes"
+    required: true
+    description: "What breaks at the container level and how we mitigate."
+
+  - id: security_concerns
+    mode: container
+    title: "Security Concerns"
+    required: false
+    description: "Container-specific risks (PII handling, key custody, etc.)."
+
+  - id: component_inventory
+    mode: container
+    title: "Component Inventory"
+    required: true
+    synthesis: true   # scope-defining list synthesized from the container's
+                      # owned API resources + UX surfaces + persistence
+                      # bindings + archetype scaffold + the FR-NNN/WKF-NNN it
+                      # implements. Runs the scope-completeness sweep after the
+                      # per-item loop — see references/component-discovery.md.
+    description: "Internal decomposition. Seeded from API resources + UX surfaces + archetype."
+
+  - id: per_component_deepdive
+    mode: container
+    title: "Per-Component Deep-Dive"
+    required: true
+    description: "For each component: purpose, responsibilities, I/O, traces, failure modes."
+
+  - id: internal_and_external_edges
+    mode: container
+    title: "Internal & External Edges"
+    required: true
+    description: "Typed edges component↔component (internal) and component↔other-container (external)."
+
+questions:
+
+  # =========================================================================
+  # SYSTEM MODE — architecture_pattern
+  # =========================================================================
+
+  - theme: architecture_pattern
+    id: pattern
+    schema_path: architecture_pattern.pattern
+    question: >
+      Which architectural pattern best fits the system given the PRD's
+      non-functional requirements and team shape?
+    hint: >
+      Drives every container boundary decision and every downstream test
+      / deploy strategy. Load references/pattern-selection.yaml to weigh
+      candidates against team count, scale asymmetry, integration count,
+      async needs, ops maturity, and ai-builder considerations.
+    suggested_answers:
+      - monolith
+      - modular_monolith
+      - microservices
+      - event_driven
+      - hexagonal
+      - serverless
+      - plugin
+      - pipeline
+    free_text_allowed: true
+    required: true
+    capture_rationale: true
+    importance: high
+
+  - theme: architecture_pattern
+    id: tradeoff_notes
+    schema_path: architecture_pattern.tradeoff_notes
+    question: "What trade-off are we explicitly accepting with this pattern?"
+    hint: "Downstream agents weight this when they hit a decision point that the pattern alone doesn't resolve."
+    suggested_answers:
+      - "Deployment simplicity at the cost of independent scaling"
+      - "Independent scaling at the cost of operational complexity"
+      - "Decoupling at the cost of strong consistency"
+      - "Speed-to-MVP at the cost of long-term modularity"
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: med
+
+  - theme: architecture_pattern
+    id: ai_builder_notes
+    schema_path: architecture_pattern.ai_builder_notes
+    question: >
+      Any pattern-specific guidance for AI agents that will build this
+      system (interface explicitness, contract stability, failure locality)?
+    hint: "Surfaces to downstream code-generating agents what to be careful about."
+    suggested_answers:
+      - "Prefer typed interfaces between components; avoid implicit context"
+      - "Keep event schemas versioned; producers and consumers evolve in lockstep"
+      - "Process-isolate risky modules so partial failures don't cascade"
+      - "Few moving parts is the point — don't introduce extra services"
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: med
+
+  # =========================================================================
+  # SYSTEM MODE — identity_and_auth
+  # =========================================================================
+
+  - theme: identity_and_auth
+    id: identity_provider
+    schema_path: identity_and_auth.identity_provider
+    question: "Where does identity come from?"
+    hint: "Pre-fill from PRD.security_compliance.auth_model. Driver of which container (if any) is the identity issuer."
+    suggested_answers:
+      - external_oidc
+      - external_saml
+      - external_proprietary
+      - internal
+      - none
+    free_text_allowed: false
+    required: true
+    importance: high
+
+  - theme: identity_and_auth
+    id: token_strategy
+    schema_path: identity_and_auth.token_strategy
+    question: "What token format do containers exchange?"
+    hint: "Pre-fill from API.auth.schemes. Drives every backend's request-handling middleware."
+    suggested_answers:
+      - jwt
+      - session
+      - api_key
+      - mtls
+      - opaque_token
+      - none
+    free_text_allowed: false
+    required: true
+    importance: high
+
+  - theme: identity_and_auth
+    id: identity_container
+    schema_path: identity_and_auth.identity_container
+    question: "If identity is internal, which container_id hosts it?"
+    hint: "Only meaningful when identity_provider == internal. Validated against containers[].container_id."
+    suggested_answers: []
+    free_text_allowed: true
+    required_if: "identity_and_auth.identity_provider == 'internal'"
+    required: false
+    importance: med
+
+  # =========================================================================
+  # SYSTEM MODE — container_inventory (critical per item)
+  # =========================================================================
+  #
+  # The agent runs this theme as a per-container state machine:
+  #
+  #   for each candidate container (from Phase 3 + user-added):
+  #     1. propose:   show archetype, draft purpose, draft owns_*
+  #     2. challenge: ask the user to confirm or correct each owns_* set
+  #     3. detail:    fill persistence + deployment_unit + ownership
+  #     4. approve:   confirm the container; set status: confirmed
+  #     5. next
+  #
+  # The questions below describe the FIELDS the per-container drill-down
+  # must produce. The agent ASKS them in the per-item state machine, not
+  # as a flat batch.
+
+  - theme: container_inventory
+    id: archetype
+    schema_path: container.archetype     # rewritten per item to containers[<id>].archetype
+    question: "Which archetype does this container fit?"
+    hint: "Drives suggested components in container mode. See references/container-taxonomy.yaml."
+    suggested_answers:
+      - backend-api
+      - web-frontend
+      - mobile-frontend
+      - worker
+      - scheduler
+      - gateway
+      - bff
+      - primary-database
+      - secondary-database
+      - cache
+      - blob-store
+      - message-bus
+      - identity-provider
+      - external-service
+    free_text_allowed: true
+    required: true
+    importance: critical
+
+  - theme: container_inventory
+    id: purpose
+    schema_path: container.purpose
+    question: "In one or two sentences, what does this container do?"
+    hint: "Used by downstream agents to disambiguate when multiple containers could implement the same feature."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    confidence_field: false
+    importance: critical
+
+  - theme: container_inventory
+    id: owns_api_resources
+    schema_path: container.owns_api_resources
+    question: "Which API resources does this container own?"
+    hint: "Pre-fill from API__*.yaml. Drives the API-resource coverage check at Phase 7."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    confidence_field: false
+    importance: critical
+
+  - theme: container_inventory
+    id: owns_ux_surfaces
+    schema_path: container.owns_ux_surfaces
+    question: "Which UX surfaces does this container render?"
+    hint: "Pre-fill from UX__*.yaml. Drives the UX-surface coverage check at Phase 7. Empty for backends."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    confidence_field: false
+    importance: critical
+
+  - theme: container_inventory
+    id: persistence
+    schema_path: container.persistence
+    question: "Which DATA stores does this container read/write?"
+    hint: "Pre-fill from DATA-MODEL.yaml. Drives the DATA-store coverage check. Empty for stateless."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    confidence_field: false
+    importance: critical
+
+  - theme: container_inventory
+    id: implements_requirements
+    schema_path: container.implements_requirements
+    question: "Which PRD requirements (FR-NNN features, NFR-NNN non-functionals) does this container deliver?"
+    hint: >
+      Reference PRD requirements by stable id (never verbatim text). List the
+      FR-NNN must-have features this container delivers AND any NFR-NNN this
+      container is the architectural home of (a wall-clock timeout cap, an
+      input-containment boundary, a residency constraint). EVERY PRD must-have
+      FR-NNN must be claimed by some container (or listed in
+      non_container_features) — that's the feature-coverage check; NFR-NNN
+      entries are advisory traces, not coverage-gated. Operational containers
+      (scheduler/worker) seeded from an FR keyword in Phase 3 record that FR
+      here; it's the only place those API-less features become traceable.
+      Validated for FR-NNN/NFR-NNN format + existence in PRD.yaml (FR resolves
+      against functional_requirements, NFR against non_functional_requirements).
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: critical
+
+  - theme: container_inventory
+    id: realizes_integrations
+    schema_path: container.realizes_integrations
+    question: "Which PRD integrations (INT-NNN) is this container the seam for?"
+    hint: >
+      Reference PRD functional_requirements.integrations_required by stable
+      INT-NNN id. Typically set on the external provider container itself
+      (external: true), or on the backend that owns the client. Every PRD
+      INT-NNN must end up in some container's realizes_integrations, some
+      component's int_refs, or `deferrals` with a reason — the INT coverage
+      check enforces trace-or-defer (blocking at arch_version >= 2.0). For an
+      external container, also fill external_contract (protocol, auth_scheme,
+      credential_config_keys, failure_semantics) so the build stage does not
+      guess the provider contract.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: critical
+
+  - theme: container_inventory
+    id: realizes_store
+    schema_path: container.realizes_store
+    question: "For a data-store container: which DATA store id does it realize?"
+    hint: >
+      Only for data-store archetypes (primary-database, cache, blob-store,
+      search-index, message-bus). Use the stable DATA-MODEL store id:
+      "primary" for the primary store, else the secondary's store_id.
+      Resolved against DATA-MODEL.persistence (warning-only). This is what
+      lets migration and integration tasks know which store they target.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: med
+
+  - theme: container_inventory
+    id: traces_prd_workflows
+    schema_path: container.traces_prd_workflows
+    question: "Which PRD core workflows (WKF-NNN) does this container participate in?"
+    hint: >
+      Reference PRD core_workflows by stable WKF-NNN id. Optional, but helps
+      downstream `test` scaffold workflow-level integration tests. Validated
+      for WKF-NNN format + existence in PRD.yaml.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: med
+
+  - theme: container_inventory
+    id: deployment_unit
+    schema_path: container.deployment_unit
+    question: "What kind of deployable is this container?"
+    hint: "Shape of artifact downstream `deploy` produces."
+    suggested_answers:
+      - long_running_service
+      - scheduled_job
+      - batch_job
+      - static_asset
+      - serverless_function
+      - container
+      - external_managed
+    free_text_allowed: false
+    required: true
+    importance: critical
+
+  - theme: container_inventory
+    id: ownership_team
+    schema_path: container.ownership.team
+    question: "Which team owns this container? (Skip if N/A for a solo project.)"
+    hint: "Drives change-cadence and on-call decisions in /sdlc:deploy (planned - not yet implemented)."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    importance: med
+
+  - theme: container_inventory
+    id: acceptance_criteria
+    schema_path: container.acceptance_criteria
+    question: "What does 'done' look like for this container? (2–5 short criteria)"
+    hint: >
+      Used by downstream `task` to size and gate the work, and by `test`
+      to seed integration-test acceptance. Skip for trivial containers
+      (data stores, external services). Each item one short sentence.
+    suggested_answers:
+      - "All owned API resources return 2xx for happy-path fixtures"
+      - "Health/readiness probes green; container starts in <10s"
+      - "All persistence_bindings round-trip a sample write/read"
+      - "Token validation works against the configured IDP"
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: med
+
+  # =========================================================================
+  # SYSTEM MODE — cross_container_edges (critical synthesis)
+  # =========================================================================
+  #
+  # This is a synthesis theme: the AGENT derives candidate edges from
+  # API + DATA + UX (see references/edge-derivation.md), then asks the
+  # user to confirm/edit. No flat enumeration question.
+
+  - theme: cross_container_edges
+    id: confirm_edges
+    schema_path: edges
+    question: "Confirm the derived cross-container edges (or edit per row)?"
+    hint: >
+      Derivation rules:
+       * API consumer → producer       ⇒ calls   (pre-fill via_resource_id)
+       * Container with persistence    ⇒ reads / writes (pre-fill via_entity)
+       * Event channel sender          ⇒ publishes     (pre-fill via_channel_id)
+       * Event channel receiver        ⇒ subscribes_to (pre-fill via_channel_id)
+       * Identity client → IDP         ⇒ calls
+      The via_* fields ground each edge in an upstream artifact and let
+      downstream test/task agents scaffold from concrete resources/entities/
+      channels. See references/edge-derivation.md for the full vocabulary.
+    suggested_answers:
+      - "confirm all"
+      - "remove specific edges"
+      - "add specific edges"
+      - "retype specific edges"
+      - "edit via_* fields"
+    free_text_allowed: true
+    required: true
+    importance: critical
+
+  # =========================================================================
+  # CONTAINER MODE — tech_stack
+  # =========================================================================
+
+  - theme: tech_stack
+    id: language
+    schema_path: tech_stack.language
+    question: "Primary language for this container?"
+    hint: "Pre-fill from PRD.technical_constraints.preferred_languages. Drives downstream codegen idioms."
+    suggested_answers:
+      - TypeScript
+      - JavaScript
+      - Python
+      - Go
+      - Rust
+      - Java
+      - Kotlin
+      - Swift
+      - C#
+    free_text_allowed: true
+    required: true
+    importance: high
+
+  - theme: tech_stack
+    id: framework
+    schema_path: tech_stack.framework
+    question: "Framework (web/app/job runtime)?"
+    hint: "Pre-fill from runtime_platform hint. Used by downstream task generation."
+    suggested_answers:
+      - FastAPI
+      - Django
+      - Flask
+      - Express
+      - Next.js
+      - Nest.js
+      - Fastify
+      - Gin
+      - Actix
+      - Spring Boot
+      - none
+    free_text_allowed: true
+    required: false
+    importance: high
+
+  - theme: tech_stack
+    id: runtime_version
+    schema_path: tech_stack.runtime_version
+    question: "Runtime version pin?"
+    hint: "Used by `task` to populate CI matrix and `deploy` to pick a base image."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    importance: med
+
+  - theme: tech_stack
+    id: package_manager
+    schema_path: tech_stack.package_manager
+    question: "Package manager?"
+    hint: "Downstream agents use this to generate lockfile-aware install steps."
+    suggested_answers:
+      - npm
+      - pnpm
+      - yarn
+      - bun
+      - uv
+      - pip
+      - poetry
+      - "go mod"
+      - cargo
+      - maven
+      - gradle
+    free_text_allowed: true
+    required: false
+    importance: med
+
+  - theme: tech_stack
+    id: build_tool
+    schema_path: tech_stack.build_tool
+    question: "Build tool, if not the framework default?"
+    hint: "Only ask when nontrivial. Skip if the framework owns the build."
+    suggested_answers:
+      - vite
+      - esbuild
+      - webpack
+      - rollup
+      - turbopack
+      - none
+    free_text_allowed: true
+    required: false
+    importance: med
+
+  - theme: tech_stack
+    id: key_libraries
+    schema_path: tech_stack.key_libraries
+    question: "Up to five key libraries that shape this container's design?"
+    hint: "Just the load-bearing ones — auth lib, ORM, queue client, ML SDK, etc. Skip transitive deps."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: med
+
+  # =========================================================================
+  # CONTAINER MODE — persistence_bindings
+  # =========================================================================
+
+  - theme: persistence_bindings
+    id: bindings
+    schema_path: persistence_bindings
+    question: "Confirm the persistence bindings derived from ARCH.yaml + DATA-MODEL.yaml?"
+    hint: "Pre-fill from ARCH.yaml.containers[id].persistence and DATA-MODEL access_patterns. User refines per binding (access, driver)."
+    suggested_answers:
+      - "confirm all"
+      - "edit specific bindings"
+      - "add new bindings"
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: high
+
+  # =========================================================================
+  # CONTAINER MODE — configuration
+  # =========================================================================
+
+  - theme: configuration
+    id: config_keys
+    schema_path: configuration.config_keys
+    question: "Which runtime configuration keys does this container consume?"
+    hint: >
+      DRAFT the list, don't ask cold: harvest candidates from the tech stack
+      (DB DSNs per persistence binding, API base URLs + credential keys per
+      external integration/api_consumer, log level, feature flags named in
+      FRs). Per key: key name, purpose, consumed_by (component_ids), secret
+      (true => sourced from a secret store, never a committed default).
+      Downstream `task` slices this block into each config task's
+      config_keys embed as a drift-checked copy — when this block is absent
+      the task-side keys stay authored and nothing checks their drift, so
+      declaring them here is what keeps config honest across regenerations.
+    suggested_answers:
+      - "confirm the drafted keys"
+      - "edit specific keys"
+      - "add keys"
+      - "no runtime configuration"
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: high
+
+  # =========================================================================
+  # CONTAINER MODE — deployment
+  # =========================================================================
+
+  - theme: deployment
+    id: shape
+    schema_path: deployment.shape
+    question: "Deployment shape?"
+    hint: "Pre-fill from container archetype + deployment_unit."
+    suggested_answers:
+      - container
+      - serverless_function
+      - static_asset
+      - managed_service
+      - long_running_service
+      - scheduled_job
+      - batch_job
+      - desktop_app
+      - mobile_app
+      - cli_binary
+    free_text_allowed: false
+    required: true
+    importance: high
+
+  - theme: deployment
+    id: hosting
+    schema_path: deployment.hosting
+    question: "Hosting target?"
+    hint: "Free-form (e.g. 'AWS Fargate', 'GKE', 'Vercel', 'self-hosted Linux VM')."
+    suggested_answers:
+      - "AWS Fargate"
+      - "AWS Lambda"
+      - "Cloud Run"
+      - "Vercel"
+      - "Fly.io"
+      - "Self-hosted Kubernetes"
+      - "Self-hosted Linux VM"
+    free_text_allowed: true
+    required: false
+    importance: med
+
+  - theme: deployment
+    id: scaling
+    schema_path: deployment.scaling
+    question: "Scaling rules (min/max replicas, autoscale signal)?"
+    hint: "Only ask if shape supports scaling. Pre-fill from PRD scalability tier."
+    suggested_answers: []
+    free_text_allowed: true
+    required_if: "deployment.shape in ['container', 'long_running_service', 'serverless_function']"
+    required: false
+    importance: med
+
+  - theme: deployment
+    id: regions
+    schema_path: deployment.regions
+    question: "Which regions does this container run in?"
+    hint: "Pre-fill from PRD data_residency. Drives downstream deploy region selection."
+    suggested_answers:
+      - "us-east-1"
+      - "eu-west-1"
+      - "ap-northeast-1"
+      - "multi-region active-active"
+      - "single-region"
+    free_text_allowed: true
+    required: false
+    importance: med
+
+  - theme: deployment
+    id: scheduling
+    schema_path: deployment.scheduling
+    question: "Cron expression or schedule?"
+    hint: "Only meaningful for scheduled_job / batch_job shapes."
+    suggested_answers: []
+    free_text_allowed: true
+    required_if: "deployment.shape in ['scheduled_job', 'batch_job']"
+    required: false
+    importance: med
+
+  # =========================================================================
+  # CONTAINER MODE — observability
+  # =========================================================================
+
+  - theme: observability
+    id: logs
+    schema_path: observability.logs
+    question: "How are logs emitted and aggregated?"
+    hint: "Drives downstream code's log format choice."
+    suggested_answers:
+      - "stdout structured json"
+      - "stdout plaintext"
+      - "syslog"
+      - "OTLP logs to collector"
+      - "none"
+    free_text_allowed: true
+    required: false
+    importance: med
+
+  - theme: observability
+    id: metrics
+    schema_path: observability.metrics
+    question: "How are metrics emitted?"
+    hint: "Pre-fill from cross-cutting infra if such a container exists. PRD.analytics_and_telemetry.product_events (PRD 1.1) seed candidate business metrics for the container that emits them (⚠ inferred) — product events, not infra signals."
+    suggested_answers:
+      - "prometheus scrape"
+      - "statsd push"
+      - "OTLP metrics to collector"
+      - "vendor SDK (Datadog, NewRelic)"
+      - "none"
+    free_text_allowed: true
+    required: false
+    importance: med
+
+  - theme: observability
+    id: traces
+    schema_path: observability.traces
+    question: "How are traces emitted?"
+    hint: "Drives whether downstream code wires OTel SDK at startup."
+    suggested_answers:
+      - "OTel HTTP to collector"
+      - "OTel gRPC to collector"
+      - "vendor SDK"
+      - "none"
+    free_text_allowed: true
+    required: false
+    importance: med
+
+  - theme: observability
+    id: alerts
+    schema_path: observability.alerts
+    question: "Top alerts and their actions?"
+    hint: "Short list of condition → action. Detailed runbooks belong in /sdlc:deploy (planned - not yet implemented)."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: med
+
+  # =========================================================================
+  # CONTAINER MODE — ownership
+  # =========================================================================
+
+  - theme: ownership
+    id: team
+    schema_path: ownership.team
+    question: "Owning team?"
+    hint: "Optional. Useful for downstream task assignment in multi-team setups."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    importance: med
+
+  - theme: ownership
+    id: change_cadence
+    schema_path: ownership.change_cadence
+    question: "How often is this container released?"
+    hint: "Pre-fill: backend ≈ weekly, frontend ≈ continuous, stores ≈ rarely."
+    suggested_answers:
+      - "continuous"
+      - "daily"
+      - "weekly"
+      - "monthly"
+      - "quarterly"
+      - "rarely"
+    free_text_allowed: true
+    required: false
+    importance: med
+
+  - theme: ownership
+    id: on_call_rotation
+    schema_path: ownership.on_call_rotation
+    question: "On-call rotation?"
+    hint: "Free-form. Skip for solo / hobbyist setups."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    importance: med
+
+  # =========================================================================
+  # CONTAINER MODE — failure_modes (high per item)
+  # =========================================================================
+
+  - theme: failure_modes
+    id: items
+    schema_path: failure_modes
+    question: "Walk through 3–7 failure modes for this container."
+    hint: >
+      Per failure mode: id, description, likelihood (low/med/high),
+      impact (low/med/high), mitigation. Pre-fill from container archetype
+      heuristics (e.g. backend-api ⇒ "dependency call timeout", "DB connection
+      pool exhausted", "auth provider down"). Each item is its own mini-section.
+    suggested_answers:
+      - "dependency call timeout"
+      - "DB connection pool exhausted"
+      - "auth provider down"
+      - "rate-limit threshold reached"
+      - "queue backlog growth"
+      - "memory leak in long-running process"
+    free_text_allowed: true
+    required: true
+    confidence_field: false
+    importance: high
+
+  # =========================================================================
+  # CONTAINER MODE — security_concerns
+  # =========================================================================
+
+  - theme: security_concerns
+    id: items
+    schema_path: security_concerns
+    question: "Container-specific security concerns?"
+    hint: >
+      Pre-fill from DATA-MODEL.yaml.data_classification (PII / regulated /
+      encrypted fields handled by this container's persistence) and from
+      PRD.security_compliance. Skip if nothing container-specific (the
+      generic policies belong at system level).
+    suggested_answers:
+      - "Handles PII; DTOs must omit regulated fields"
+      - "Issues JWTs; private key in vault"
+      - "Stores blobs containing user uploads — virus-scan on ingest"
+      - "Exposes admin endpoints — separate auth role"
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: med
+
+  # =========================================================================
+  # CONTAINER MODE — component_inventory (critical per item)
+  # =========================================================================
+
+  - theme: component_inventory
+    id: archetype
+    schema_path: component.archetype     # rewritten per item to components[<id>].archetype
+    question: "Which archetype does this component fit?"
+    hint: >
+      Enum value drawn from references/component-taxonomy.yaml. The
+      validator enforces the enum — `other` is the escape hatch for
+      genuinely novel shapes (use sparingly).
+    suggested_answers:
+      - controller
+      - service
+      - repository
+      - middleware
+      - use_case
+      - view
+      - state_store
+      - api_client
+      - event_handler
+      - scheduler
+      - validator
+      - serializer
+      - cache_client
+      - blob_client
+      - background_worker
+      - config_loader
+      - observability_bootstrap
+      - error_handler
+      - schema_model
+      - dev_tool
+      - content_asset
+      - other
+    free_text_allowed: false
+    required: true
+    importance: critical
+
+  - theme: component_inventory
+    id: purpose
+    schema_path: component.purpose
+    question: "In one sentence, what does this component do?"
+    hint: "Used by downstream code-gen to disambiguate similarly-named neighbors."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    confidence_field: false
+    importance: critical
+
+  # =========================================================================
+  # CONTAINER MODE — per_component_deepdive (critical per item)
+  # =========================================================================
+
+  - theme: per_component_deepdive
+    id: responsibilities
+    schema_path: component.responsibilities
+    question: "List 2–6 concrete responsibilities for this component."
+    hint: "Each responsibility one short sentence. Don't restate purpose."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    confidence_field: false
+    importance: critical
+
+  - theme: per_component_deepdive
+    id: code_location
+    schema_path: component.code_location
+    question: "Which repo directory(ies) / module(s) does this component's source live in?"
+    hint: >
+      The component→code-module seam — the single most load-bearing field for
+      autonomous downstream task breakdown and codegen. DRAFT it from the
+      component's archetype + the container's source layout / import layering
+      (tech_stack + framework conventions): a layered backend maps controllers
+      to a controllers/ dir, services to services/, repositories to
+      repositories/; a CLI maps to config/ core/ ui/; etc. DIRECTORY entries are
+      the firm contract; add an illustrative file path only when it's obvious. A
+      component may span layers — list each dir. Downstream `task` grounds each
+      task's `target_files` here, so vague placement here forces the codegen
+      agent to invent paths. Skip only for trivial plumbing (config_loader,
+      serializer). See references/component-discovery.md → "Deriving
+      code_location".
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: high
+
+  - theme: per_component_deepdive
+    id: inputs
+    schema_path: component.inputs
+    question: "Inputs (where do calls or data arrive from)?"
+    hint: "Free-form list. Pre-fill from API resource (controller archetypes) or UX surface (view archetypes)."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: high
+
+  - theme: per_component_deepdive
+    id: outputs
+    schema_path: component.outputs
+    question: "Outputs (where do effects or responses go)?"
+    hint: "Free-form list. Used by `task` to identify integration boundaries."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: high
+
+  - theme: per_component_deepdive
+    id: traces_api_resources
+    schema_path: component.traces_api_resources
+    question: "Which API resources does this component implement or call?"
+    hint: >
+      Validated against API__*.yaml resource_ids AND against the parent
+      container's owns_api_resources.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: high
+
+  - theme: per_component_deepdive
+    id: traces_api_operations
+    schema_path: component.traces_api_operations
+    question: "Which specific API endpoint operation_ids does this component implement or call?"
+    hint: >
+      Operation-level traceability (operation_id from API__*.yaml endpoints).
+      Lets the `test` agent scaffold endpoint-level tests. Skip for
+      non-controller / non-api_client components. Validated against
+      API__*.yaml endpoints[].operation_id.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: high
+
+  - theme: per_component_deepdive
+    id: traces_ux_surfaces
+    schema_path: component.traces_ux_surfaces
+    question: "Which UX surfaces does this component render?"
+    hint: >
+      Validated against UX__*.yaml surface_ids AND against the parent
+      container's owns_ux_surfaces. Empty for non-view components.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: high
+
+  - theme: per_component_deepdive
+    id: traces_data_entities
+    schema_path: component.traces_data_entities
+    question: "Which DATA entities does this component read/write?"
+    hint: "Validated against DATA-MODEL.yaml.entities. Empty for plumbing components."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: high
+
+  - theme: per_component_deepdive
+    id: implements_requirements
+    schema_path: component.implements_requirements
+    question: "Which PRD requirements (FR-NNN / NFR-NNN) does this component implement?"
+    hint: >
+      Reference FR-NNN features (and any NFR-NNN this component realizes) by
+      stable id. Must be a SUBSET of the parent container's
+      implements_requirements (a component can't implement a requirement its
+      container doesn't own). Validated for FR-NNN/NFR-NNN format, existence in
+      PRD.yaml, and parent containment. Empty for plumbing components
+      (config-loader, serializer, etc.).
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: high
+
+  - theme: per_component_deepdive
+    id: int_refs
+    schema_path: component.int_refs
+    question: "Which PRD integrations (INT-NNN) does this component talk to?"
+    hint: >
+      Reference PRD integrations_required by stable INT-NNN id. Set on the
+      component that owns the client/adapter for an external provider
+      (api_client archetypes, webhook handlers). Counts toward the INT
+      coverage check alongside container-level realizes_integrations.
+      Validated for INT-NNN format + existence in PRD.yaml.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: med
+
+  - theme: per_component_deepdive
+    id: traces_prd_workflows
+    schema_path: component.traces_prd_workflows
+    question: "Which PRD core workflows (WKF-NNN) does this component participate in?"
+    hint: "Reference WKF-NNN by stable id. Validated for format + existence in PRD.yaml. Optional."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: med
+
+  - theme: per_component_deepdive
+    id: failure_modes
+    schema_path: component.failure_modes
+    question: "Up to 3 component-level failure modes (id, description, likelihood, impact, mitigation)?"
+    hint: >
+      Component-level structured failures, mirroring the container-level
+      shape (id, description, likelihood, impact, mitigation). Drives
+      unit-test negative cases. A bare string is also accepted (backwards
+      compat) and treated as { id: auto, description: <string> }.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: high
+
+  - theme: per_component_deepdive
+    id: acceptance_criteria
+    schema_path: component.acceptance_criteria
+    question: "What does 'done' look like for this component? (1–4 short criteria)"
+    hint: >
+      Used by downstream `task` to size the unit of work and by `test`
+      to scaffold component-level test cases. Skip for trivial plumbing
+      components (config-loader, serializer, etc.).
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: med
+
+  - theme: per_component_deepdive
+    id: work_units
+    schema_path: component.work_units
+    question: >
+      What are this component's work_units — the named method/function-level
+      CALLABLES it exposes? (Approve the drafted list, or edit it.)
+    hint: >
+      THE component→code seam. The downstream `task` skill slices EXACTLY ONE
+      atomic implementation task per work_unit (its target_symbol = the work_unit
+      name), so this is what makes method-level task breakdown possible; a
+      component with no work_units yields no implementation task. DRAFT the list,
+      don't ask cold — enumerate the PUBLIC / contract-bearing callables (those
+      realizing a traced contract or sitting on an internal/external edge, NOT
+      every private helper): one per owned API operation (controllers/api_clients,
+      set traces_api_operation), per entity CRUD verb (repositories, set
+      touches_entities), or per behaviour the responsibilities + acceptance_criteria
+      + implements_requirements imply (services/use_cases). Each work_unit carries
+      name (the callable — method / function / Class.method — UNIQUE within this
+      component; no id family), summary (one line), optional traces
+      (traces_api_operation, implements_requirements ⊆ the component's,
+      touches_entities), and a DEFER-OR-DECLARE interface contract
+      (inputs/output/raises/signature), ENFORCED by cross-check #23: defer is
+      allowed ONLY when traces_api_operation is set (the API schema is the
+      contract); every other unit must DECLARE all three of inputs/output/raises
+      AT DRAFT TIME — explicit empties count (inputs: [], raises: [],
+      output: "None"); trace-only units with empty contracts block complete.
+      Before closing, cross-check the drafted units against the
+      component's API operations / acceptance_criteria / traced entities / every
+      FR in implements_requirements — each should map to a work_unit (#22 blocks
+      complete if an FR maps to none). EMIT BLOCK-STYLE — one field per line under
+      each `- name:` entry, never a flow-style `- {name: x, ...}` one-liner; on an
+      update flow normalize existing flow-style entries. Trivial plumbing
+      (config_loader, serializer, observability_bootstrap, error_handler) may
+      declare none. A NON-TRIVIAL component (non-plumbing, with a trace) that has
+      no callable of its own must record `work_units: []` + a `work_units_waiver`
+      (one-sentence reason, e.g. "realized purely by decorator wiring") — else #21
+      blocks complete. The same waiver also waives #22 for an FR realized by wiring.
+      For a SINGLE-FILE deliverable with >1 run-mode branch (a CLI/shell
+      entrypoint), also emit one unit of `kind: entrypoint` owning the top-level
+      arg/mode dispatch + step-sequencing + setup (argv/env in, exit code out) —
+      else the file's control flow is unowned (#21 warns). Do NOT model a policy
+      enforced EXTERNALLY (nothing to build) as a work_unit — it becomes a codegen
+      task with nothing to emit; record it as a security_concern/acceptance_criterion
+      + a test instead (#23 warns on the empty-callable shape). When a unit's build
+      task will also write private helpers, list them in the unit's
+      `owns_callables` — task copies them onto the task's owns_symbols, and a
+      helper claimed by two units in one container draws a warning (#29).
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    confidence_field: false
+    importance: high
+
+  # =========================================================================
+  # CONTAINER MODE — internal_and_external_edges (critical synthesis)
+  # =========================================================================
+
+  - theme: internal_and_external_edges
+    id: confirm_internal
+    schema_path: internal_edges
+    question: "Confirm the derived internal edges between components (or edit per row)?"
+    hint: >
+      Derivation rules:
+       * controller → service (calls)  ⇒ pre-fill via_unit (the service
+         work_unit being invoked) + via_resource_id when the controller traces it.
+       * service → repository (calls)  ⇒ pre-fill via_entity.
+       * repository → cache_client     ⇒ reads/writes (pre-fill via_entity).
+       * service → event_handler       ⇒ publishes (pre-fill via_channel_id).
+      See references/edge-derivation.md.
+    suggested_answers:
+      - "confirm all"
+      - "remove specific edges"
+      - "add specific edges"
+      - "retype specific edges"
+      - "edit via_* fields"
+    free_text_allowed: true
+    required: true
+    importance: critical
+
+  - theme: internal_and_external_edges
+    id: confirm_external
+    schema_path: external_edges
+    question: "Confirm the derived external edges (component → other-container)?"
+    hint: >
+      Derivation:
+       * api_client → backend container that owns the called resource
+         (pre-fill via_resource_id and via_operation_id when known; mirror
+         the resource into api_consumers — cross-check #26).
+       * calls into a SIBLING container with no API between them → target
+         "<container>/<component>" and pre-fill via_unit (the callee's
+         work_units[].name). Backfill passes sweep these too, not just
+         internal edges.
+       * event_handler subscribing to a channel → the bus container
+         (pre-fill via_channel_id).
+       * repository → primary-database (pre-fill via_entity).
+      Pre-fill via_* from API + DATA bindings whenever evidence is
+      unambiguous. Every external edge must also exist as a system
+      ARCH.yaml.edges row — Phase 7 appends missing rows after a
+      confirmation diff (cross-check #24 blocks complete otherwise).
+    suggested_answers:
+      - "confirm all"
+      - "remove specific edges"
+      - "add specific edges"
+      - "retype specific edges"
+      - "edit via_* fields"
+    free_text_allowed: true
+    required: true
+    importance: critical

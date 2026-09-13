@@ -1,0 +1,327 @@
+# =============================================================================
+# DESIGN.yaml — Canonical Schema Reference (global design-system contract)
+# =============================================================================
+# This file documents the full structure of DESIGN.yaml. It is *not* a runtime
+# config — it is the human-readable source of truth for the schema that
+# `validate_schema.py` enforces.
+#
+# DESIGN.yaml is the global design-system contract produced by `sdlc:design`.
+# It fills the gap UX leaves: UX defines *functional* surfaces (what a screen
+# does); DESIGN defines the *visual identity* (what it looks like) and the
+# *asset requirements* (what bespoke graphics/audio/3D must exist). Downstream
+# coding agents read DESIGN.yaml + its sub-files to actually style the surfaces
+# and scaffold the asset pipeline.
+#
+# -----------------------------------------------------------------------------
+# THE TWO ORTHOGONAL AXES (the core model)
+# -----------------------------------------------------------------------------
+# A design is described along two axes that combine FREELY — a structure choice
+# never constrains a look:
+#
+#   AXIS A — functional_structure : HOW visuals are realized in code.
+#            A multi-select list ⊆ {token_based_ui, asset_pipeline, headless}.
+#            `headless` is exclusive (can't co-occur with the others). A game
+#            with menus is BOTH token_based_ui + asset_pipeline.
+#
+#   AXIS B — aesthetic_direction  : WHAT it looks and feels like.
+#            An OPEN style vocabulary + mood + references + texture. Rides on
+#            ANY structure, so a token_based_ui can be hand-drawn / comic /
+#            manga / vaporwave — looks that a single "UI style" enum could
+#            never express.
+#
+# The bridge between the axes: an artistic aesthetic on a token UI still needs
+# bespoke illustration/icon/texture assets. `aesthetic_direction.requires_
+# custom_assets: true` emits an asset manifest EVEN on a pure token_based_ui.
+# This is what makes "component UI + comic style" actually buildable.
+#
+# -----------------------------------------------------------------------------
+# POLYMORPHIC COMPOSITION (which files / blocks exist)
+# -----------------------------------------------------------------------------
+#   DESIGN.yaml          — always. Holds the axes, brand, and pointers.
+#   DESIGN__tokens.yaml   — iff token_based_ui ∈ functional_structure.
+#                           The concrete DTCG design-token set.
+#                           (DESIGN__TOKENS.schema.yaml)
+#   DESIGN__assets.yaml   — iff asset_pipeline ∈ functional_structure
+#                           OR aesthetic_direction.requires_custom_assets.
+#                           The asset manifest + per-asset generation briefs.
+#                           (DESIGN__ASSETS.schema.yaml)
+#
+# `sub_artifacts` (below) names the files that exist; the validator enforces
+# that the named files match the composition rules above.
+#
+# Two top-level shapes are supported, mirroring PRD.yaml / UX.yaml:
+#   1. SINGLE-PRODUCT (default): the axis blocks live at the top level.
+#   2. MULTI-PRODUCT (monorepo): blocks live under `products.<slug>.<block>`,
+#      sub-files are named docs/DESIGN__<slug>__tokens.yaml etc. Triggered when
+#      the upstream PRD/UX has metadata.monorepo: true.
+#
+# Conventions:
+#   - `null` (not omission) means "explicitly unanswered".
+#   - For trade-off fields, a sibling `<field>_rationale` (string) captures
+#     the *why*. For pre-filled answers, a sibling `<field>_confidence`
+#     captures certainty: confirmed | inferred | assumption.
+#   - Enum values are lowercase snake_case strings.
+#
+# -----------------------------------------------------------------------------
+# ID conventions
+# -----------------------------------------------------------------------------
+# Format is always "<PREFIX>-NNN" with zero-padded 3-digit numbers (NNN ≥ 001).
+#
+#   Families this skill EMITS:
+#     AST — `assets[].id` inside DESIGN__assets.yaml. The stable cross-stage
+#           handle for one required asset. Counter: `state.last_ids.AST`.
+#     WRN — `design_warnings[]`. Writer-managed: every entry is prefixed
+#           "WRN-NNN: <message>"; counter `state.last_ids.WRN`.
+#
+#   Families this skill CONSUMES (verbatim — never renumber, never invent):
+#     FR / NFR — from PRD.functional_requirements / non_functional_requirements.
+#                Appear in `implements_requirements` (which requirements the
+#                design realizes — e.g. an accessibility NFR, a brand FR). Both
+#                families are accepted in that field.
+#     SCR — from UX.surface_inventory. Appear in top-level `traces_ux_surfaces`
+#           and in per-asset `traces_ux_surfaces` (the surface an asset is used
+#           on). Omitting top-level traces means "applies to all visual surfaces".
+#     ENT — from PRD.data_model.key_entities. Appear in per-asset
+#           `references_entities` (e.g. a character sprite for an ENT-007 actor).
+#     WKF / JTB / others — may appear in prose (rationale, notes); no dedicated
+#           ref field at the design level.
+#
+#   The validator enforces:
+#     * AST-NNN format on every asset id.
+#     * WRN-NNN format on every design_warnings entry.
+#     * <PREFIX>-NNN family format on every value in implements_requirements
+#       (FR or NFR), traces_ux_surfaces (SCR), references_entities (ENT).
+#       Wrong-family values are errors in `status: complete`, warnings in draft.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# metadata — always at top level, present in both single- and multi-product mode
+# -----------------------------------------------------------------------------
+metadata:
+  design_version: "1.0"                     # schema version this file conforms to
+  last_updated: "2026-06-22T12:00:00Z"      # ISO-8601 UTC timestamp of last write
+  generated_by: sdlc-design                 # always literal string "sdlc-design"
+  session_id: "00000000-0000-0000-0000-000000000000"  # UUID of the interview session
+  monorepo: false                           # mirrors PRD/UX metadata.monorepo
+  status: "draft"                           # "draft" | "complete"
+                                            # writer sets "complete" only when:
+                                            #   1) all required fields are filled,
+                                            #   2) the validator passes,
+                                            #   3) the composition rules hold
+                                            #      (right sub-files present), and
+                                            #   4) every to-be-generated asset has
+                                            #      a generation brief or a WRN
+                                            #      deferral.
+  applicability: null                       # OPTIONAL (added 0.8.0). "applicable" (default when
+                                            # absent — every legacy artifact is applicable) or
+                                            # "not_applicable": this stage RAN and concluded there
+                                            # is nothing to model, so the artifact is deliberately
+                                            # empty and every coverage gate over it is vacuous.
+                                            # Distinct from PRD.pipeline_scope, which says the
+                                            # stage need not run AT ALL (no artifact exists).
+                                            # Downstream consumers treat not_applicable exactly
+                                            # like an absent artifact — without asking.
+  applicability_rationale: null             # one sentence; REQUIRED when applicability is
+                                            # "not_applicable" (string|null)
+  applicability_confidence: null            # confirmed | inferred | assumption (enum|null)
+  changelog: null                           # Optional[list[string]]. Append-only.
+                                            # Each entry one line, format:
+                                            #   "<version> (<YYYY-MM-DD>): <summary>"
+                                            # Most-recent first. Records manual
+                                            # edits / re-runs.
+  upstream_provenance: null                 # Optional[list[mapping]]. One entry per
+                                            # upstream artifact consumed (docs/PRD.yaml,
+                                            # docs/UX.yaml), each a mapping:
+                                            #   {file, session_id, last_updated, sha256}
+                                            # sha256 = 16-hex prefix from
+                                            # docs/INDEX.yaml.generated_from[<file>]
+                                            # (or docs_index.py --hash <file>; the
+                                            # TEXT-level hash - never raw bytes).
+                                            # Re-runs compare this to detect drift;
+                                            # the validator WARNS when a recorded
+                                            # hash no longer matches, and (at
+                                            # design_version >= 2.0) when a complete
+                                            # artifact records none. See CLAUDE.md §7.
+
+# design_warnings — informational notes carried into downstream agent context.
+# Each entry MUST start with a stable ID: "WRN-NNN: <message>".
+# Use for: deferred to-be-generated assets (the trace-or-defer escape — names the
+# AST id and reason), low-confidence answers, deferred optional themes
+# (now/skip/todo), merge conflicts, headless no-op notes, drift deferrals.
+# -----------------------------------------------------------------------------
+# WRN item shape (CLAUDE.md section 2)
+# -----------------------------------------------------------------------------
+# An entry is EITHER the legacy string  "WRN-NNN: <message>"  OR a typed
+# mapping. Both stay valid forever; only the typed form carries a lifecycle a
+# reader - and the generated statusboard - can act on:
+#
+#   - id: WRN-042          # REQUIRED - stable, never renumbered
+#     text: <message>      # REQUIRED - what the string used to carry
+#     kind: deferral       # REQUIRED - deferral | limitation | decision |
+#                          #   exception | scope_change | note
+#     status: open         # REQUIRED - open | resolved
+#     impact: downstream   # REQUIRED - none | local | downstream | risk.
+#                          #   The READER's consequence, never the validator's:
+#                          #   impact can not change an exit code.
+#     refs: [FR-096]       # OPTIONAL - ids this warning is about
+#     defers: [FR-096]     # OPTIONAL - kind: deferral ONLY. The structured
+#                          #   coverage channel the trace-or-defer gates read,
+#                          #   alongside the top-level `deferrals` list.
+#     resolution: null     # REQUIRED once status == resolved
+#     resolved_on: null    # OPTIONAL - YYYY-MM-DD
+#
+# A legacy string reads as {kind: note, status: open, impact: local}, so an
+# untouched artifact keeps behaving exactly as before. A malformed MAPPING
+# never fails the file - it is reported and the entry is dropped or downgraded,
+# the way a malformed `deferrals` entry defers nothing. A malformed STRING is
+# the blocking error it has always been. New writes emit the mapping at
+# <name>_version >= 2.0 (DATA-MODEL: >= 3.0); `.claude/sdlc/migrate_warnings.py`
+# converts an existing artifact.
+design_warnings: []                         # list[string] of "WRN-NNN: <msg>"
+
+# deferrals — the structured DEFER half of the asset-brief coverage gate
+# (CLAUDE.md §6). Read FIRST by the validator; an entry with no reason defers
+# nothing. Declared on the scope that OWNS the asset: top level here in
+# single-product mode, products.<slug>.deferrals in monorepo mode (AST id
+# spaces are per product - a pooled top-level deferral cannot say which
+# product's asset it means, and the validator warns on one in monorepo mode).
+# A design_warnings mention of the AST id still defers it for ONE more version
+# (deprecated, pooled across products - the validator reports every id that
+# fell through to it).
+deferrals: null                             # Optional[list[{id, reason}]]
+                                            #   - {id: "AST-003", reason: "brief blocked on art direction"}
+                                            # alias accepted: deferred_requirements
+
+# =============================================================================
+# SINGLE-PRODUCT MODE — axis blocks at top level
+# (omit the entire `products:` key in this mode)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# functional_structure — AXIS A. How visuals are realized in code.
+# Multi-select. `headless` is exclusive — it cannot co-occur with the others.
+# Derived from UX.surface_family + PRD product type, confirmed with the user:
+#   web / mobile / desktop / tui  → token_based_ui (+ asset_pipeline if the
+#                                   product is a game / creative / graphic tool)
+#   cli / service / library       → headless
+#   voice                         → headless structure, but aesthetic_direction
+#                                   still captures persona/voice
+# -----------------------------------------------------------------------------
+functional_structure: null                  # REQUIRED — list of:
+                                            #   token_based_ui | asset_pipeline | headless
+functional_structure_confidence: null       # confirmed | inferred | assumption
+functional_structure_rationale: null        # one-sentence justification (string|null)
+
+# -----------------------------------------------------------------------------
+# aesthetic_direction — AXIS B. The visual style/mood. Rides on any structure.
+# REQUIRED unless functional_structure == [headless] (pure headless). For a
+# headless CLI the user MAY still fill a light terminal aesthetic; for a
+# service/library it is normally null (record a design_warnings note).
+# -----------------------------------------------------------------------------
+aesthetic_direction:
+  style_family: null            # REQUIRED — OPEN vocabulary (free-form string).
+                                # Recommended anchors (not a closed cap):
+                                #   minimal_flat | material | skeuomorphic |
+                                #   neumorphic | glassmorphic | claymorphic |
+                                #   brutalist | corporate_brand | editorial |
+                                #   retro_terminal | pixel_art | vaporwave |
+                                #   hand_drawn | comic_ink | manga | pop_art |
+                                #   painterly | data_ink | custom
+                                # The free-form fields below express any style
+                                # the anchor set doesn't name.
+  style_family_confidence: null # confirmed | inferred | assumption
+  mood_keywords: null           # REQUIRED — 3–7 evocative adjectives (list[string]),
+                                # e.g. ["calm","trustworthy","spacious"]
+  palette_intent: null          # high-level colour intent (string|null), e.g.
+                                # "cool neutrals with a single warm accent"
+  style_references: null        # list[string] — URLs / named works / artists /
+                                # art movements. Fed to web_fetch during the
+                                # interview to ground the look. Never invent URLs.
+  typographic_voice: null       # how type should feel (string|null), e.g.
+                                # "geometric sans, generous leading, few weights"
+  motion_character: null        # one of: none | subtle | expressive | playful (enum)
+  texture_and_finish: null      # the cues that make a look read as itself
+                                # (string|null), e.g. "rough ink borders, paper
+                                # grain, halftone shading" — THIS is what lets a
+                                # token UI read as hand-drawn/comic.
+  requires_custom_assets: null  # REQUIRED — boolean. True ⇒ emit an asset
+                                # manifest EVEN on a pure token_based_ui (bespoke
+                                # illustration/icon/texture assets). The bridge
+                                # that makes "token UI + artistic style" buildable.
+
+# -----------------------------------------------------------------------------
+# sub_artifacts — names the sub-files that exist for this product. The validator
+# enforces these against the composition rules (a path must be set iff the
+# corresponding axis condition holds, and the file must exist on disk).
+# -----------------------------------------------------------------------------
+sub_artifacts:
+  tokens: null                  # docs/DESIGN__tokens.yaml — set iff token_based_ui
+                                # ∈ functional_structure; else null.
+  assets: null                  # docs/DESIGN__assets.yaml — set iff asset_pipeline
+                                # ∈ functional_structure OR
+                                # aesthetic_direction.requires_custom_assets; else null.
+
+# -----------------------------------------------------------------------------
+# brand_identity — OPTIONAL. Present when the product has a defined brand.
+# (The former "brand-driven" paradigm: brand was always an aesthetic, never a
+# structure. style_family == corporate_brand when the brand IS the dominant look.)
+# Set the whole block to null when there is no brand.
+# -----------------------------------------------------------------------------
+brand_identity:
+  logo_usage: null              # placement / clear-space / do-and-don't (string|null)
+  brand_palette: null           # list[string] — locked brand colours (hex or token
+                                # refs). These constrain DESIGN__tokens.yaml.color.
+  brand_voice: null             # verbal identity (string|null) — distinct from
+                                # typographic_voice; e.g. "confident, never jargony"
+  imagery_style: null           # photography / illustration direction (string|null)
+
+# -----------------------------------------------------------------------------
+# global traces — which upstream items this design realizes. IDs only.
+# -----------------------------------------------------------------------------
+implements_requirements: null   # list[string] — FR-NNN / NFR-NNN ids the design
+                                # realizes (e.g. an accessibility NFR the palette
+                                # honours, a "brand-consistent UI" FR). Optional.
+traces_ux_surfaces: null        # list[string] — SCR-NNN ids this design system
+                                # covers. Optional; OMIT to mean "all visual
+                                # surfaces" (the common case for a global system).
+
+# -----------------------------------------------------------------------------
+# surface_overrides — OPTIONAL per-surface styling on top of the global system.
+# The global system is the default for every surface; add an entry here ONLY
+# when a surface deliberately deviates (a denser data grid, a hero page with a
+# bespoke look, an inverted-scheme modal). Downstream `task` derives one
+# per-surface design task per entry (in addition to the global theme/token
+# task), so an entry = concrete design work (realized by task's design coverage
+# check #15).
+# -----------------------------------------------------------------------------
+surface_overrides: null         # dict[SCR-NNN, SurfaceOverride] — each:
+                                #   SCR-004:
+                                #     density: compact          # compact | comfortable | spacious | null
+                                #     token_overrides: {}       # DTCG-shaped partial set overriding
+                                #                               #   DESIGN__tokens.yaml for this surface
+                                #     component_variants: {}    # component type/id -> variant to use
+                                #                               #   (e.g. {button: ghost, table: striped})
+                                #     notes: <one or two lines> # the bespoke intent, concrete enough
+                                #                               #   to style from
+                                # Keys are UX SCR-NNN ids (validated when UX.yaml
+                                # is readable). Absent/null = no surface deviates.
+
+# =============================================================================
+# MULTI-PRODUCT MODE (monorepo) — uncomment and use *instead of* the top-level
+# blocks above. Each entry under `products:` mirrors the single-product shape.
+# Sub-files are named docs/DESIGN__<slug>__tokens.yaml / docs/DESIGN__<slug>__assets.yaml
+# so they don't collide. AST/WRN counters reset per product.
+# =============================================================================
+#
+# products:
+#   game-client:
+#     functional_structure: [token_based_ui, asset_pipeline]
+#     aesthetic_direction: { style_family: pixel_art, mood_keywords: [...], requires_custom_assets: true }
+#     sub_artifacts: { tokens: docs/DESIGN__game-client__tokens.yaml, assets: docs/DESIGN__game-client__assets.yaml }
+#     brand_identity: null
+#     implements_requirements: ["FR-012"]
+#     traces_ux_surfaces: ["SCR-001", "SCR-002"]
+#   marketing-site:
+#     functional_structure: [token_based_ui]
+#     aesthetic_direction: { style_family: editorial, mood_keywords: [...], requires_custom_assets: false }
+#     sub_artifacts: { tokens: docs/DESIGN__marketing-site__tokens.yaml, assets: null }

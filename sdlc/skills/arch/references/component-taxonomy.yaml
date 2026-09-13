@@ -1,0 +1,197 @@
+# Component taxonomy.
+#
+# Each entry is a candidate component archetype, used during the
+# component_inventory and per_component_deepdive themes.
+#
+# `typical_edges` is a derivation hint for the edge-derivation phase
+# (`edge-derivation.md`). Edges are still confirmed by the user; this
+# is the priors-source.
+
+archetypes:
+
+  - canonical: controller
+    aliases: [handler, route-handler, endpoint]
+    description: Entry point for one or more API endpoints. Parses input, calls services, formats output.
+    typical_responsibilities:
+      - parse / validate request
+      - dispatch to service
+      - format response
+    typical_edges:
+      - { to_archetype: service, type: calls }
+      - { to_archetype: validator, type: calls }
+      - { to_archetype: serializer, type: calls }
+
+  - canonical: service
+    aliases: [use-case, application-service, business-logic]
+    description: Encapsulates one piece of business logic.
+    typical_responsibilities:
+      - enforce business rules
+      - orchestrate repositories and clients
+      - emit events
+    typical_edges:
+      - { to_archetype: repository, type: calls }
+      - { to_archetype: cache_client, type: calls }
+      - { to_archetype: event_handler, type: publishes }
+
+  - canonical: repository
+    aliases: [data-access, dao, store]
+    description: Data-access abstraction over a persistent store.
+    typical_responsibilities:
+      - read and write one entity type
+      - hide ORM / SQL details
+    typical_edges:
+      - { to_container_archetype: primary-database, type: reads }
+      - { to_container_archetype: primary-database, type: writes }
+
+  - canonical: middleware
+    aliases: [interceptor, filter]
+    description: Cross-cutting concern that wraps controllers (auth, logging, rate limiting).
+    typical_responsibilities:
+      - inspect / mutate request or response
+      - short-circuit on error
+    typical_edges:
+      - { to_archetype: middleware, type: depends_on }  # chained order
+
+  - canonical: use_case
+    aliases: [interactor, command-handler]
+    description: Hexagonal-style use case. Distinct from `service` in pattern-driven projects.
+    typical_responsibilities:
+      - implement one user-facing operation end-to-end
+    typical_edges:
+      - { to_archetype: repository, type: calls }
+
+  - canonical: view
+    aliases: [page, screen, component]
+    description: Frontend view component (renders one UX surface).
+    typical_responsibilities:
+      - render markup
+      - bind to state store
+      - dispatch user interactions
+    typical_edges:
+      - { to_archetype: state_store, type: reads }
+      - { to_archetype: state_store, type: writes }
+      - { to_archetype: api_client, type: calls }
+
+  - canonical: state_store
+    aliases: [redux-store, signals, store]
+    description: Client-side state container.
+    typical_responsibilities:
+      - hold reactive state
+      - notify subscribers
+    typical_edges: []
+
+  - canonical: api_client
+    aliases: [http-client, sdk, client]
+    description: Calls a backend API; serializes / deserializes.
+    typical_responsibilities:
+      - build HTTP requests
+      - parse responses
+      - handle auth headers
+    typical_edges:
+      - { to_container_archetype: backend-api, type: calls }
+
+  - canonical: event_handler
+    aliases: [subscriber, listener, consumer]
+    description: Reacts to an event from a bus / queue.
+    typical_responsibilities:
+      - consume one event channel
+      - delegate to a service
+      - ack / nack
+    typical_edges:
+      - { to_container_archetype: message-bus, type: subscribes_to }
+      - { to_archetype: service, type: calls }
+
+  - canonical: scheduler
+    aliases: [cron, periodic-trigger]
+    description: Inside a worker/scheduler container; triggers a job at intervals.
+    typical_responsibilities:
+      - hold the schedule
+      - dispatch jobs at the right time
+    typical_edges:
+      - { to_archetype: service, type: calls }
+
+  - canonical: validator
+    aliases: [request-validator, dto-validator]
+    description: Validates structured input against a schema.
+    typical_edges: []
+
+  - canonical: serializer
+    aliases: [response-formatter, view-model]
+    description: Translates internal types to wire format.
+    typical_edges: []
+
+  - canonical: cache_client
+    aliases: [redis-client, kv-client]
+    description: Component that fronts a cache container.
+    typical_responsibilities:
+      - get/set keys
+      - handle TTL
+    typical_edges:
+      - { to_container_archetype: cache, type: reads }
+      - { to_container_archetype: cache, type: writes }
+
+  - canonical: blob_client
+    aliases: [s3-client, storage-client]
+    description: Component that fronts a blob/object store.
+    typical_edges:
+      - { to_container_archetype: blob-store, type: reads }
+      - { to_container_archetype: blob-store, type: writes }
+
+  - canonical: background_worker
+    aliases: [job, task-worker]
+    description: Long-running component inside a worker container.
+    typical_edges:
+      - { to_archetype: service, type: calls }
+
+  - canonical: config_loader
+    aliases: [config, settings]
+    description: Loads configuration at startup.
+    typical_edges: []
+
+  - canonical: observability_bootstrap
+    aliases: [otel-init, telemetry-setup]
+    description: Initializes logging / metrics / tracing at process start.
+    typical_edges: []
+
+  - canonical: error_handler
+    aliases: [exception-handler]
+    description: Translates internal errors to user-facing responses.
+    typical_edges: []
+
+  # --- Build-time deliverable classes -------------------------------------
+  # Components whose output SHIPS with the build/authoring process rather
+  # than running as a service. Runtime-driven derivation (API resources, UX
+  # surfaces, store bindings) never proposes these — the deliverable sweep
+  # (component-discovery.md → Pass 6) does. They are NON-plumbing: they need
+  # code_location and work_units like any traced component, or downstream
+  # `task` can never schedule building them.
+
+  - canonical: schema_model
+    aliases: [domain-model, schema-layer, pydantic-models, typed-models]
+    description: Typed schema / domain-model layer shipped as code (Pydantic models, TS types, JSON-schemas).
+    typical_responsibilities:
+      - define the typed shapes other components exchange
+      - own (de)serialization boundaries for those shapes
+    typical_edges: []       # others `depends_on` it; it imports nothing upward
+
+  - canonical: dev_tool
+    aliases: [tooling, repo-tool, validator-script, generator, migration-script]
+    description: Repo-shipped tool (validator, generator, migration) run at build/authoring time, not in the service process.
+    typical_responsibilities:
+      - implement one repo tool's entry point
+      - exit non-zero on violation (for validators/lints)
+    typical_edges:
+      - { to_archetype: schema_model, type: depends_on }
+
+  - canonical: content_asset
+    aliases: [templates, prompt-pack, question-inventory, archetype-pack, static-content]
+    description: Shipped content (templates/, prompts, question inventories, packs). work_units are AUTHORING units, not code callables.
+    typical_responsibilities:
+      - author and maintain the shipped asset set
+      - keep assets in sync with the schema/contract they instantiate
+    typical_edges: []
+
+  - canonical: other
+    aliases: []
+    description: Escape hatch for unusual component shapes.
+    typical_edges: []

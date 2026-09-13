@@ -1,0 +1,420 @@
+# =============================================================================
+# UX.yaml — Canonical Schema Reference (global UX contract)
+# =============================================================================
+# This file documents the full structure of UX.yaml. It is *not* a runtime
+# config — it is the human-readable source of truth for the schema that
+# `validate_schema.py` enforces.
+#
+# Two top-level shapes are supported, mirroring PRD.yaml:
+#   1. SINGLE-PRODUCT (default): theme blocks live at the top level.
+#   2. MULTI-PRODUCT (monorepo): themes live under `products.<slug>.<theme>`.
+#      Triggered when the upstream PRD has `metadata.monorepo: true`.
+#
+# Conventions:
+#   - `null` (not omission) means "explicitly unanswered".
+#   - For trade-off fields, a sibling `<field>_rationale` (string) captures
+#     the *why*.
+#   - For pre-filled answers, a sibling `<field>_confidence` captures
+#     certainty: confirmed | inferred | assumption.
+#   - Enum values are lowercase snake_case strings.
+#   - Per-surface contents live in sibling files `docs/UX__<surface>.yaml`
+#     (see UX__SURFACE.schema.yaml). UX.yaml lists them in
+#     `surface_inventory:` and never duplicates their content.
+#
+# ID conventions:
+#   The UX skill emits and consumes the following ID families. Format is
+#   always "<PREFIX>-NNN" with zero-padded 3-digit numbers (NNN ≥ 001).
+#
+#   Families this skill EMITS:
+#     SCR — `surface_inventory[].id`, also the top-level `id` of every
+#           `docs/UX__<surface>.yaml`. Assigned in collection order when
+#           a candidate is accepted in theme 4. Stable across renames of
+#           `surface_id` (the kebab-case slug). Counter:
+#           `state.last_ids.SCR`.
+#     WRN — `ux_warnings[]`. Writer-managed: every entry appended to
+#           `ux_warnings` is prefixed `"WRN-NNN: <message>"` and the
+#           counter `state.last_ids.WRN` is persisted.
+#
+#   Families this skill CONSUMES from `docs/PRD.yaml` (verbatim — never
+#   renumber, never invent new items in these families):
+#     WKF — `PRD.use_cases.core_workflows` — referenced from
+#           `surface_inventory[].traces_workflows` and from per-surface
+#           `traces_workflows`. Coverage check requires every WKF-NNN in
+#           PRD to be referenced by at least one surface.
+#     FR  — `PRD.functional_requirements.must_have_features` and
+#           `nice_to_have_features` — referenced from
+#           `implements_requirements` and from `cli.exit_codes[code].
+#           implements_requirements`.
+#     NFR — `PRD.non_functional_requirements.performance_targets` / `.other`
+#           — may ALSO appear in `implements_requirements` when a surface is
+#           the place an NFR is realized (e.g. a per-call timeout, an
+#           input-containment boundary). The validator accepts FR-NNN or
+#           NFR-NNN in `implements_requirements`.
+#     ENT — `PRD.data_model.key_entities` — referenced from
+#           `references_entities`. Catches surfaces implied by entities
+#           (e.g. a `ProjectRegistry` entity implies a `list` command).
+#     JTB — `PRD.use_cases.primary_jobs_to_be_done` / `secondary_jobs` —
+#           consulted during the scope-completeness sweep in theme 4 but
+#           does not appear as an explicit ref field at the surface level;
+#           per-surface yamls may cite JTB-NNN ids inside notes when the
+#           surface addresses a specific job.
+#     NFR, INT, AIF, PER, GOL, PAN, EDG, and any future PRD families —
+#           may appear in prose (notes, rationale) but no dedicated ref
+#           field exists at the UX level.
+#
+#   The validator enforces:
+#     * SCR-NNN format on `surface_inventory[].id` and per-surface `id`.
+#     * WRN-NNN format on `ux_warnings[]`.
+#     * <PREFIX>-NNN format on every value in `traces_workflows`,
+#       `implements_requirements`, and `references_entities`. Values
+#       carrying the wrong prefix (e.g. an FR-NNN inside `traces_workflows`)
+#       are flagged as errors in `status: complete`, warnings in `draft`.
+#
+#   In monorepo mode, each product carries its own independent ID space
+#   for SCR and WRN. PRD ID consumption still draws from the matching
+#   product's PRD subtree.
+#
+#   The validator's coverage check matches WKF-NNN IDs (not verbatim
+#   strings). This means PRD text edits do NOT break UX traces — the IDs
+#   are the stable contract.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# metadata — always at top level, present in both single- and multi-product mode
+# -----------------------------------------------------------------------------
+metadata:
+  ux_version: "1.1"                        # schema version this file conforms to
+  last_updated: "2026-05-21T12:00:00Z"     # ISO-8601 UTC timestamp of last write
+  generated_by: sdlc-ux                    # always literal string "sdlc-ux"
+  session_id: "00000000-0000-0000-0000-000000000000"  # UUID of the interview session
+  monorepo: false                          # mirrors PRD.metadata.monorepo
+  status: "draft"                          # "draft" | "complete"
+                                           # writer sets to "complete" only when:
+                                           #   1) all required fields are filled,
+                                           #   2) the validator passes,
+                                           #   3) every PRD WKF-NNN is traced by
+                                           #      at least one surface.
+  applicability: null                      # OPTIONAL (added 0.8.0). "applicable" (default when
+                                           # absent — every legacy artifact is applicable) or
+                                           # "not_applicable": this stage RAN and concluded there
+                                           # is nothing to model, so the artifact is deliberately
+                                           # empty and every coverage gate over it is vacuous.
+                                           # Distinct from PRD.pipeline_scope, which says the
+                                           # stage need not run AT ALL (no artifact exists).
+                                           # Downstream consumers treat not_applicable exactly
+                                           # like an absent artifact — without asking.
+  applicability_rationale: null            # one sentence; REQUIRED when applicability is
+                                           # "not_applicable" (string|null)
+  applicability_confidence: null           # confirmed | inferred | assumption (enum|null)
+  changelog: null                          # Optional[list[string]]. Append-only.
+                                           # Each entry one line, format:
+                                           #   "<version> (<YYYY-MM-DD>): <one-line summary>"
+                                           # Most-recent entry first. Used to record
+                                           # post-generation manual edits or skill
+                                           # re-runs that materially changed the file.
+  upstream_provenance: null                # Optional[list[mapping]]. One entry per
+                                           # upstream artifact consumed, each a mapping:
+                                           #   {file, session_id, last_updated, sha256}
+                                           # sha256 = the 16-hex prefix from
+                                           # docs/INDEX.yaml.generated_from[<file>]
+                                           # (or docs_index.py --hash <file>; the
+                                           # TEXT-level hash - never raw bytes).
+                                           # Re-runs compare this to detect upstream
+                                           # drift; the validator WARNS when a
+                                           # recorded hash no longer matches, and
+                                           # (at ux_version >= 2.0) when a complete
+                                           # artifact records none. Type-checked as
+                                           # list-of-mappings only. See CLAUDE.md §7.
+
+# ux_warnings — informational notes carried into downstream agent context.
+# Each entry MUST start with a stable ID: "WRN-NNN: <message>".
+# IDs are assigned in collection order by the writer (WRN-001, WRN-002, …)
+# and are stable across re-runs. The writer-managed counter lives in
+# `state.last_ids.WRN`.
+#
+# Use for:
+#   * uncovered PRD workflows ("WRN-NNN: coverage: WKF-007 has no surface trace")
+#   * low-confidence answers
+#   * merge conflicts
+#   * deferred optional themes (now/skip/todo) recorded for downstream visibility
+#   * surfaces dropped from the sweep with the user's "defer" decision
+# -----------------------------------------------------------------------------
+# WRN item shape (CLAUDE.md section 2)
+# -----------------------------------------------------------------------------
+# An entry is EITHER the legacy string  "WRN-NNN: <message>"  OR a typed
+# mapping. Both stay valid forever; only the typed form carries a lifecycle a
+# reader - and the generated statusboard - can act on:
+#
+#   - id: WRN-042          # REQUIRED - stable, never renumbered
+#     text: <message>      # REQUIRED - what the string used to carry
+#     kind: deferral       # REQUIRED - deferral | limitation | decision |
+#                          #   exception | scope_change | note
+#     status: open         # REQUIRED - open | resolved
+#     impact: downstream   # REQUIRED - none | local | downstream | risk.
+#                          #   The READER's consequence, never the validator's:
+#                          #   impact can not change an exit code.
+#     refs: [FR-096]       # OPTIONAL - ids this warning is about
+#     defers: [FR-096]     # OPTIONAL - kind: deferral ONLY. The structured
+#                          #   coverage channel the trace-or-defer gates read,
+#                          #   alongside the top-level `deferrals` list.
+#     resolution: null     # REQUIRED once status == resolved
+#     resolved_on: null    # OPTIONAL - YYYY-MM-DD
+#
+# A legacy string reads as {kind: note, status: open, impact: local}, so an
+# untouched artifact keeps behaving exactly as before. A malformed MAPPING
+# never fails the file - it is reported and the entry is dropped or downgraded,
+# the way a malformed `deferrals` entry defers nothing. A malformed STRING is
+# the blocking error it has always been. New writes emit the mapping at
+# <name>_version >= 2.0 (DATA-MODEL: >= 3.0); `.claude/sdlc/migrate_warnings.py`
+# converts an existing artifact.
+ux_warnings: []                            # list[string] of "WRN-NNN: <msg>" items
+
+# deferrals — the structured DEFER half of the FR-coverage trace-or-defer
+# (CLAUDE.md §6). Read FIRST by the validator's FR-coverage warning; an entry
+# with no reason defers nothing. In monorepo mode declare per product
+# (products.<slug>.deferrals). A prose ux_warnings mention of the id still
+# defers it for ONE more version (deprecated - the validator reports every id
+# that fell through to it); keep the WRN as the human-readable companion.
+deferrals: null                            # Optional[list[{id, reason}]]
+                                           #   - {id: "FR-012", reason: "backend-only; no surface"}
+                                           # alias accepted: deferred_requirements
+
+# =============================================================================
+# SINGLE-PRODUCT MODE — themes at top level, in interview order
+# (omit the entire `products:` key in this mode)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# platform_and_shell — surface family, device targets, viewport breakpoints
+# -----------------------------------------------------------------------------
+surface_family: null            # one of: cli | web | mobile | desktop | tui |
+                                #         voice | service | library | mixed (enum)
+                                #   HEADLESS families (cli, service, library) have
+                                #   no visual screens — their "surfaces" are
+                                #   commands / endpoints / public API symbols, and
+                                #   the interview emits a minimal spec (see
+                                #   references/surface-discovery.md). tui is
+                                #   screen-like (full-screen terminal UI); voice is
+                                #   turn-based conversational.
+surface_family_confidence: null # confirmed | inferred | assumption (enum)
+surface_family_members: null    # list[surface_family]; populated only when
+                                # surface_family == 'mixed'; e.g. ["web","cli"],
+                                # ["service","cli"]
+device_targets: null            # list[string] — e.g. ["desktop","tablet","mobile"]
+device_targets_confidence: null
+viewport_breakpoints: null      # list[string] — e.g. ["sm=640","md=768","lg=1024"]
+
+# -----------------------------------------------------------------------------
+# design_principles — tenets that govern every surface
+# -----------------------------------------------------------------------------
+design_principles:
+  tenets: null                  # 3–7 short tenet phrases (list[string])
+  anti_patterns: null           # things to explicitly avoid (list[string])
+  inspiration_refs: null        # named products to echo (list[string])
+
+# -----------------------------------------------------------------------------
+# navigation_model — how surfaces relate to each other
+# -----------------------------------------------------------------------------
+navigation_model:
+  type: null                    # one of: sitemap | command_tree | state_graph | hybrid (enum)
+  type_confidence: null         # confirmed | inferred | assumption
+  top_level_nodes: null         # list of top-level routes / menu groups / command groups (list[string])
+  deep_link_strategy: null      # routing strategy summary (string|null)
+  auth_required_routes: null    # which nodes require auth (list[string])
+  # Optional structured representations (populated when the agent infers them
+  # from PRD workflows; otherwise null):
+  sitemap: null                 # nested tree, only if type == sitemap (any)
+  command_tree: null            # nested tree, only if type == command_tree (any)
+  state_graph: null             # node + edge list, only if type == state_graph (any)
+
+# -----------------------------------------------------------------------------
+# surface_inventory — the registry of UI surfaces.
+# Each entry POINTS to a docs/UX__<surface_id>.yaml file. The full surface
+# spec lives there (see UX__SURFACE.schema.yaml).
+# -----------------------------------------------------------------------------
+# ID conventions for entries below:
+#   id                       — REQUIRED. Stable "SCR-NNN" assigned by the writer
+#                              when a candidate is accepted in theme 4. Survives
+#                              `surface_id` renames; only retired when the user
+#                              explicitly drops the surface in an update session.
+#   traces_workflows         — list of WKF-NNN ids from PRD.use_cases.core_workflows
+#                              that this surface participates in. Drives the
+#                              coverage check.
+#   implements_requirements  — list of FR-NNN ids from PRD.functional_requirements
+#                              (must_have + nice_to_have) that this surface
+#                              implements, and/or NFR-NNN ids from
+#                              PRD.non_functional_requirements that this surface
+#                              realizes. Optional; absent for navigation-only
+#                              or chrome surfaces.
+#   references_entities      — list of ENT-NNN ids from PRD.data_model.key_entities
+#                              that this surface displays, edits, or directly
+#                              acts on. Optional; populated when the surface's
+#                              purpose is anchored on an entity (CRUD screens,
+#                              list/registry views, detail surfaces).
+surface_inventory:                # list[SurfaceInventoryItem]
+  - id: null                      # REQUIRED — "SCR-NNN" (string, zero-padded 3-digit)
+    surface_id: null              # kebab-case slug, unique within the project (string)
+    surface_type: null            # one of: screen | modal | panel | drawer |
+                                  #         cli_command | flow_step |
+                                  #         empty_state | toast | overlay |
+                                  #         tab | page | dialog | other (enum)
+    status: defined               # one of: defined | draft | confirmed | proposed (enum)
+                                  #   defined  = id + type known, no deep-dive yet
+                                  #   draft    = deep-dive started, not approved
+                                  #   confirmed= deep-dive complete + user-approved
+                                  #   proposed = fully specced but deferred — targets a
+                                  #              nice-to-have / post-MVP FR; kept in the
+                                  #              inventory so the contract isn't lost
+                                  # LIFECYCLE: status must track downstream reality.
+                                  # A surface claimed by ARCH (owns_ux_surfaces) — and
+                                  # possibly already tested — must not linger as
+                                  # proposed/defined/draft: the validator warns
+                                  # ("claimed downstream but not 'confirmed'") and the
+                                  # re-run flow reconciles it (SKILL.md Phase 2 →
+                                  # downstream-claim reconciliation). Never bump
+                                  # silently — the mismatch may mean ARCH is wrong.
+    file_path: null               # always docs/UX__<surface_id>.yaml (string)
+    traces_workflows: null        # list[string] of "WKF-NNN" ids (no verbatim text).
+                                  # Drives the coverage check at validation.
+    implements_requirements: null # list[string] of "FR-NNN" / "NFR-NNN" ids (optional)
+    references_entities: null     # list[string] of "ENT-NNN" ids (optional)
+
+# -----------------------------------------------------------------------------
+# component_library — library choice + theming tokens
+# -----------------------------------------------------------------------------
+component_library:
+  name: null                    # library name (string)
+  name_rationale: null          # one-sentence justification (string|null)
+  name_confidence: null         # confirmed | inferred | assumption
+  theming_approach: null        # one of: design_tokens_dtcg | tailwind_utility |
+                                #         css_variables | library_theme |
+                                #         none | custom (enum)
+  theming_approach_confidence: null
+  theming_tokens:               # any tokens worth pinning at the global level;
+                                # may be null/{} if punted to library defaults.
+                                # PRECEDENCE: this block is a HINT — it records
+                                # the theming decision + a few placeholder
+                                # values captured during the UX interview. When
+                                # /sdlc:design has run, docs/DESIGN__tokens.yaml
+                                # is the CANONICAL, complete token set; any
+                                # conflict resolves in DESIGN's favour, and
+                                # downstream consumers (task/code) read tokens
+                                # from DESIGN, never from here.
+    colors: null                # color tokens (any — list, map, or string)
+    typography: null            # font + scale (any)
+    spacing: null               # spacing scale (any)
+    radii: null                 # border radius scale (any)
+    shadows: null               # elevation tokens (any)
+    motion: null                # easings / durations (any)
+
+# -----------------------------------------------------------------------------
+# state_patterns — global rules for the five canonical surface states
+# Each surface inherits these unless its UX__<surface>.yaml overrides them.
+# -----------------------------------------------------------------------------
+state_patterns:
+  default: null                 # how a "normal" surface renders (string|null)
+  loading: null                 # loading pattern (string|null)
+  empty: null                   # empty pattern (string|null)
+  error: null                   # REQUIRED — error pattern (string)
+  error_confidence: null        # confirmed | inferred | assumption
+  success: null                 # success pattern (string|null)
+
+# -----------------------------------------------------------------------------
+# content_rules — voice, copy guidelines
+# -----------------------------------------------------------------------------
+content_rules:
+  tone: null                    # REQUIRED — brand voice / tone (string)
+  tone_confidence: null         # confirmed | inferred | assumption
+  error_message_style: null     # style guideline (string|null)
+  terminology: null             # list of {term, definition} pairs (list[any])
+  copy_length_limits: null      # caps in chars per copy type (any — map or string)
+
+# -----------------------------------------------------------------------------
+# accessibility — global baseline; surfaces may add notes
+# -----------------------------------------------------------------------------
+accessibility:
+  wcag_target: null             # REQUIRED — one of: wcag_a | wcag_aa | wcag_aaa |
+                                #                    none_yet | not_applicable_cli (enum)
+  wcag_target_confidence: null
+  keyboard_only: null           # boolean — every action reachable by keyboard
+  screen_reader_notes: null     # ARIA / live region notes (list[string])
+  color_contrast_minimum: null  # ratio descriptor (string|null)
+  motion_preferences: null      # boolean — honor prefers-reduced-motion
+
+# -----------------------------------------------------------------------------
+# localisation — optional theme; omitted entirely if not enabled
+# -----------------------------------------------------------------------------
+localisation:
+  enabled: null                 # boolean
+  default_locale: null          # BCP-47 tag (string|null)
+  target_locales: null          # list[string] BCP-47 tags
+  framework: null               # i18n library (string|null)
+  rtl_support: null             # boolean
+
+# -----------------------------------------------------------------------------
+# cli — CLI-specific spec; present only when surface_family in ['cli','mixed']
+# When absent, downstream agents may assume the product has no CLI surface.
+# -----------------------------------------------------------------------------
+cli:
+  root_command: null            # REQUIRED when present — top-level binary name (string)
+  root_command_confidence: null
+  command_shape: null           # one of: verb_noun | noun_verb | flat | mixed (enum)
+  arg_parsing_library: null     # REQUIRED — library name (string)
+  arg_parsing_library_rationale: null
+  arg_parsing_library_confidence: null
+  arg_conventions: null         # one of: posix | gnu | custom (enum)
+  help_text_format: null        # one of: auto_generated | authored | hybrid (enum)
+  output_formats:
+    supported: null             # REQUIRED — list[string] of supported formats
+    default: null               # REQUIRED — the default emitted format (string)
+  exit_code_convention: null    # description of exit-code scheme (string)
+  # exit_codes — explicit per-code semantics. Each key is the exit-code value
+  # as a string (so YAML preserves ordering and codes like "130" sort cleanly);
+  # each value is a mapping with at least `description`. The optional
+  # `implements_requirements` field lists FR-NNN ids the exit code traces to
+  # (the FR(s) that mandate that this exit code exists or that determine its
+  # semantics). The validator allows extra keys (e.g. project-specific tags).
+  #
+  # Example:
+  #   exit_codes:
+  #     "0":   { description: "success",       implements_requirements: [] }
+  #     "3":   { description: "gate failure",  implements_requirements: ["FR-018", "FR-019"] }
+  #     "130": { description: "SIGINT graceful shutdown", implements_requirements: [] }
+  exit_codes: null              # Optional[Dict[str, ExitCodeSpec]]
+  interactive_mode: null        # description; or false/None if non-interactive (any)
+  config_file:
+    location: null              # path/pattern (string|null)
+    precedence: null            # e.g. "cli_flag > env > config_file > default" (string)
+    env_prefix: null            # e.g. "ACME_" (string|null)
+
+# =============================================================================
+# MULTI-PRODUCT MODE (monorepo) — uncomment and use *instead of* the top-level
+# blocks above. Each entry under `products:` mirrors the single-product shape.
+# Each product also has its own surface_inventory; per-surface files are
+# named docs/UX__<product-slug>__<surface-slug>.yaml so they don't collide.
+# SCR-NNN and WRN-NNN counters reset per product (each product carries its
+# own independent ID space).
+# =============================================================================
+#
+# products:
+#   auth:
+#     surface_family: web
+#     design_principles:
+#       tenets: [...]
+#     navigation_model: { ... }
+#     surface_inventory:
+#       - id: SCR-001
+#         surface_id: login
+#         surface_type: screen
+#         status: confirmed
+#         file_path: docs/UX__auth__login.yaml
+#         traces_workflows: ["WKF-001", "WKF-002"]
+#         implements_requirements: ["FR-005"]
+#         references_entities: []
+#     component_library: { ... }
+#     state_patterns: { ... }
+#     content_rules: { ... }
+#     accessibility: { ... }
+#     # localisation, cli — optional
+#   billing:
+#     # ...

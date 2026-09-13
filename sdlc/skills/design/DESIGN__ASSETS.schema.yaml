@@ -1,0 +1,111 @@
+# =============================================================================
+# DESIGN__assets.yaml — asset manifest + per-asset generation briefs
+# =============================================================================
+# Written next to docs/DESIGN.yaml in the consumer project, when
+#   asset_pipeline ∈ functional_structure  OR
+#   aesthetic_direction.requires_custom_assets == true.
+# In monorepo mode the file is docs/DESIGN__<slug>__assets.yaml.
+#
+# This is a REQUIREMENTS manifest, not a bag of binaries. `sdlc:design`
+# specifies WHICH assets must exist and, for each asset that has to be
+# generated, a ready-to-run GENERATION BRIEF (a prompt, not the bytes). It does
+# NOT produce binary assets — that is a downstream / out-of-band step. The
+# brief makes the requirement actionable today: a human or a future
+# asset-generation agent can run it as-is.
+#
+# -----------------------------------------------------------------------------
+# ID conventions (see DESIGN.schema.yaml header for the full family map)
+# -----------------------------------------------------------------------------
+#   id (per asset)            — REQUIRED. Stable "AST-NNN" assigned by the writer
+#                               when an asset is accepted. Counter state.last_ids.AST.
+#   traces_ux_surfaces        — list of SCR-NNN ids (the surface an asset is used on).
+#   references_entities       — list of ENT-NNN ids (the domain entity an asset depicts).
+#
+# Validator rules:
+#   * `id` MUST match AST-\d{3,}.
+#   * Values in traces_ux_surfaces MUST match SCR-\d{3,}; references_entities ENT-\d{3,}.
+#   * asset_type SHOULD be one of asset_taxonomy (soft check — warning only).
+#   * COVERAGE (trace-or-defer): every asset with source == "to_be_generated"
+#     MUST carry a non-null generation_brief, OR be deferred via a
+#     "WRN-NNN: ... AST-NNN ..." entry in DESIGN.yaml.design_warnings. A
+#     deferred asset counts as covered. Errors in complete, warnings in draft.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# metadata — always at top level
+# -----------------------------------------------------------------------------
+metadata:
+  design_assets_version: "1.0"             # schema version this file conforms to
+  last_updated: "2026-06-22T12:00:00Z"     # ISO-8601 UTC timestamp of last write
+  generated_by: sdlc-design
+  session_id: "00000000-0000-0000-0000-000000000000"
+  status: "draft"                          # "draft" | "complete"
+                                           # "complete" only when asset_taxonomy
+                                           # and assets are filled AND the
+                                           # to-be-generated coverage holds.
+  changelog: null                          # Optional[list[string]]. Append-only.
+
+# -----------------------------------------------------------------------------
+# asset_taxonomy — the KINDS of asset this product needs. Recommended set
+# (open — add project-specific kinds): sprite | tileset | background |
+# character | ui_skin | icon | illustration | texture | audio_sfx |
+# audio_music | font | shader | vfx | model_3d | animation
+# -----------------------------------------------------------------------------
+asset_taxonomy: null            # REQUIRED — list[string] of the kinds in use
+
+# -----------------------------------------------------------------------------
+# render_pipeline / style_guide — how the assets are produced and consumed.
+# -----------------------------------------------------------------------------
+render_pipeline: null           # string|null — engine / canvas / format notes,
+                                # e.g. "WebGL via PixiJS; sprites as packed atlas;
+                                # 2x and 3x density variants"
+style_guide: null               # string|null — the cross-asset look rules every
+                                # asset must obey (line weight, palette, grid,
+                                # perspective). Distinct from aesthetic_direction:
+                                # this is the asset-production checklist.
+
+# -----------------------------------------------------------------------------
+# assets — the manifest. One entry per required asset.
+# -----------------------------------------------------------------------------
+assets:                         # REQUIRED — list[AssetSpec]
+  - id: null                    # REQUIRED — "AST-NNN" (string, zero-padded 3-digit)
+    asset_type: null            # REQUIRED — one of asset_taxonomy (string)
+    name: null                  # REQUIRED — short stable name (string), e.g.
+                                # "hero-knight-idle"
+    description: null           # REQUIRED — what the asset depicts / does (string)
+    format_hint: null           # target format (string|null), e.g. png | svg |
+                                # wav | ogg | glb | ttf | json(spritesheet)
+    source: null                # REQUIRED — one of:
+                                #   to_be_generated | user_supplied | placeholder
+    traces_ux_surfaces: null    # list[string] of SCR-NNN ids (optional)
+    references_entities: null   # list[string] of ENT-NNN ids (optional)
+
+    # generation_brief — REQUIRED when source == "to_be_generated" (unless the
+    # asset is explicitly deferred via a WRN entry). A ready-to-run prompt, NOT
+    # a binary. Authored from aesthetic_direction (+ brand_identity) so every
+    # brief inherits one coherent look. Set to null for user_supplied /
+    # placeholder / deferred assets.
+    generation_brief:
+      target_modality: null     # REQUIRED — one of:
+                                #   image | audio | model_3d | font | shader |
+                                #   vfx | animation
+                                # (the coarse generator modality, derived from
+                                # asset_type)
+      recommended_tools: null   # REQUIRED — list[string] of modality-appropriate
+                                # external generators (a warning, not an endorsement),
+                                # e.g. ["SDXL","Midjourney"] for image,
+                                # ["ElevenLabs","Suno"] for audio,
+                                # ["Meshy","TripoSR"] for model_3d
+      prompt: null              # REQUIRED — the ready-to-run generation prompt (string)
+      negative_prompt: null     # string|null — diffusion-image negatives; null for
+                                # non-image modalities
+      style_anchors: null       # REQUIRED — list[string] of look anchors pulled
+                                # from aesthetic_direction (mood_keywords /
+                                # palette_intent / style_references /
+                                # texture_and_finish) + brand_identity
+      technical_constraints: null  # string|null — dimensions / format / duration /
+                                # sample-rate / poly-budget, derived from
+                                # format_hint + render_pipeline
+      acceptance_criteria: null # REQUIRED — list[string] of what the produced
+                                # asset must satisfy to be usable
+      variation_notes: null     # string|null — seed / batch / variation guidance

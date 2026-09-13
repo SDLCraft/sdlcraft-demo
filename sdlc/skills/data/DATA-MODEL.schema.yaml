@@ -1,0 +1,883 @@
+# =============================================================================
+# DATA-MODEL.yaml — Canonical Schema Reference (persistent data model)
+# =============================================================================
+# Documents the full structure of docs/DATA-MODEL.yaml. NOT a runtime config — it
+# is the human-readable source of truth that `validate_schema.py` enforces.
+#
+# Two top-level shapes are supported, mirroring PRD.yaml / UX.yaml / API.yaml:
+#   1. SINGLE-PRODUCT (default): theme blocks live at the top level.
+#   2. MULTI-PRODUCT (monorepo): themes live under `products.<slug>.<theme>`.
+#      Triggered when the upstream PRD has `metadata.monorepo: true`.
+#
+# Conventions:
+#   - `null` (not omission) means "explicitly unanswered".
+#   - For trade-off fields, a sibling `<field>_rationale` (string) captures
+#     the *why*.
+#   - For pre-filled answers, a sibling `<field>_confidence` captures
+#     certainty: confirmed | inferred | assumption.
+#   - Enum values are lowercase snake_case strings.
+#   - Entity names are PascalCase (e.g. `User`, `Order`, `LineItem`).
+#   - Field names are snake_case (e.g. `created_at`, `user_id`).
+#   - `data_classification` lists fields by `Entity.field` reference, not
+#     inline on each field. Downstream agents cross-reference both blocks.
+#
+# ID conventions (format is always "<PREFIX>-NNN" with zero-padded 3-digit
+# numbers, NNN ≥ 001):
+#
+#   Families this skill EMITS:
+#     WRN — `data_warnings[]`. Writer-managed: every entry is prefixed
+#           `"WRN-NNN: <message>"` and the counter `state.last_ids.WRN`
+#           (or `state.last_ids_by_product[<slug>].WRN` in monorepo mode)
+#           is persisted after each append.
+#
+#   (Entities themselves are addressed by their PascalCase dict key — `User`,
+#   `Order`. The matching upstream `ENT-NNN` id lives in
+#   `PRD.data_model.key_entities` as `"ENT-NNN: <Name>"`; the dict key here
+#   is the unprefixed name. No fresh entity-level ID family is emitted.)
+#
+#   Families this skill CONSUMES from `docs/PRD.yaml` (verbatim — never
+#   renumber, never invent new items in these families):
+#     FR  — `PRD.functional_requirements.must_have_features` and
+#           `nice_to_have_features` — referenced from
+#           `entities.<E>.traces_prd_features`. Drives the feature-coverage
+#           cross-check (every PRD must-have FR-NNN must be traced by ≥1
+#           entity or deferred via the top-level `deferrals` list; an id named
+#           in a `data_warnings` note still counts for one more version and is
+#           reported as a prose-only deferral).
+#     WKF — `PRD.use_cases.core_workflows` — referenced from optional
+#           `entities.<E>.traces_prd_workflows`. Catches entities the
+#           model implies via a workflow even when no FR-NNN directly
+#           names them.
+#     ENT — `PRD.data_model.key_entities` (each entry is `"ENT-NNN: <Name>"`).
+#           Entries here pre-seed the `entities` dict keys: the agent
+#           strips the `ENT-NNN: ` prefix and treats the remainder
+#           (`<Name>` or `<Name> — <description>`) as the PascalCase
+#           entity name. Treated as `✓ found` candidates during Phase 3
+#           entity discovery.
+#
+#   Families this skill CONSUMES from `docs/UX.yaml` (verbatim — never
+#   renumber, never invent new items in these families):
+#     SCR — `UX.surface_inventory[].id` — referenced from
+#           `entities.<E>.traces_ux_surfaces`. SCR-NNN is the stable id;
+#           the slug `surface_id` is editable and MUST NOT appear here.
+#
+#   The validator enforces:
+#     * WRN-NNN format on every `data_warnings[]` entry.
+#     * FR-NNN format on every value in `entities.<E>.traces_prd_features`.
+#     * SCR-NNN format on every value in `entities.<E>.traces_ux_surfaces`.
+#     * WKF-NNN format on every value in `entities.<E>.traces_prd_workflows`.
+#     Values carrying the wrong prefix are warnings in `status: draft`,
+#     errors in `status: complete`.
+#
+#   In monorepo mode, the WRN counter resets per product
+#   (`state.last_ids_by_product[<slug>].WRN`). PRD/UX ID consumption draws
+#   from the matching product's PRD/UX subtree.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# metadata — always at top level, present in both single- and multi-product mode
+# -----------------------------------------------------------------------------
+metadata:
+  data_model_version: "1.1"                # schema version this file conforms to
+  last_updated: "2026-05-25T12:00:00Z"     # ISO-8601 UTC timestamp of last write
+  generated_by: sdlc-data                  # always literal string "sdlc-data"
+  session_id: "00000000-0000-0000-0000-000000000000"  # UUID of the interview session
+  monorepo: false                          # mirrors PRD.metadata.monorepo
+  status: "draft"                          # "draft" | "complete"
+                                           # writer sets to "complete" only when:
+                                           #   1) all required fields are filled,
+                                           #   2) the validator passes schema +
+                                           #      every cross-check (feature
+                                           #      coverage, relationship integrity,
+                                           #      classification integrity,
+                                           #      bounded-context partition,
+                                           #      mode-mismatch, volume-vs-scale).
+  changelog: null                          # Optional[list[string]]. Append-only.
+                                           # Each entry one line, format:
+                                           #   "<version> (<YYYY-MM-DD>): <one-line summary>"
+                                           # Most-recent entry first. Used to record
+                                           # post-generation manual edits or skill
+                                           # re-runs that materially changed the file.
+  upstream_provenance: null                # Optional[list[mapping]]. One entry per
+                                           # upstream artifact consumed, each a mapping:
+                                           #   {file, session_id, last_updated, sha256}
+                                           # sha256 = the 16-hex prefix from
+                                           # docs/INDEX.yaml.generated_from[<file>]
+                                           # (what `docs_index.py --hash` prints).
+                                           # Re-runs compare this to detect upstream
+                                           # drift. Validator type-checks list-of-
+                                           # mappings only — AND warns (never blocks)
+                                           # when a recorded sha256 no longer matches
+                                           # the upstream's current hash ("built
+                                           # against an older docs/<X>"), or when a
+                                           # complete artifact at data_model_version
+                                           # >= 3.0 carries no provenance at all.
+                                           # See CLAUDE.md §7.
+
+# data_warnings — informational notes carried into downstream agent context.
+# Each entry MUST start with a stable ID: "WRN-NNN: <message>".
+# IDs are assigned in collection order by the writer (WRN-001, WRN-002, …)
+# and are stable across re-runs. The writer-managed counter lives in
+# `state.last_ids.WRN`.
+#
+# Use for:
+#   * uncovered PRD FR-NNN features ("WRN-NNN: coverage: FR-007 has no entity trace")
+#   * surface-coverage gaps ("WRN-NNN: surface SCR-004 has no entity trace")
+#   * classification orphans ("WRN-NNN: data_classification.pii_fields[2] = User.foo not in User")
+#   * low-confidence answers
+#   * merge conflicts
+#   * deferred optional themes (now/skip/todo) recorded for downstream visibility
+#   * entities dropped from the scope-completeness sweep with the user's "defer" decision
+# -----------------------------------------------------------------------------
+# WRN item shape (CLAUDE.md section 2)
+# -----------------------------------------------------------------------------
+# An entry is EITHER the legacy string  "WRN-NNN: <message>"  OR a typed
+# mapping. Both stay valid forever; only the typed form carries a lifecycle a
+# reader - and the generated statusboard - can act on:
+#
+#   - id: WRN-042          # REQUIRED - stable, never renumbered
+#     text: <message>      # REQUIRED - what the string used to carry
+#     kind: deferral       # REQUIRED - deferral | limitation | decision |
+#                          #   exception | scope_change | note
+#     status: open         # REQUIRED - open | resolved
+#     impact: downstream   # REQUIRED - none | local | downstream | risk.
+#                          #   The READER's consequence, never the validator's:
+#                          #   impact can not change an exit code.
+#     refs: [FR-096]       # OPTIONAL - ids this warning is about
+#     defers: [FR-096]     # OPTIONAL - kind: deferral ONLY. The structured
+#                          #   coverage channel the trace-or-defer gates read,
+#                          #   alongside the top-level `deferrals` list.
+#     resolution: null     # REQUIRED once status == resolved
+#     resolved_on: null    # OPTIONAL - YYYY-MM-DD
+#
+# A legacy string reads as {kind: note, status: open, impact: local}, so an
+# untouched artifact keeps behaving exactly as before. A malformed MAPPING
+# never fails the file - it is reported and the entry is dropped or downgraded,
+# the way a malformed `deferrals` entry defers nothing. A malformed STRING is
+# the blocking error it has always been. New writes emit the mapping at
+# <name>_version >= 2.0 (DATA-MODEL: >= 3.0); `.claude/sdlc/migrate_warnings.py`
+# converts an existing artifact.
+data_warnings: []                          # list[string] of "WRN-NNN: <msg>" items
+
+# deferrals — the structured DEFER half of trace-or-defer (CLAUDE.md §6).
+# Each entry waives ONE upstream requirement id for this artifact, with an
+# auditable reason. The feature-coverage gate reads this list FIRST; an entry
+# with no reason defers nothing (the gate stays armed). Alias accepted:
+# `deferred_requirements`. In monorepo mode the top-level list applies to
+# every product, and each `products.<slug>` may carry its own beside it.
+# The WRN-NNN note stays the human-readable companion, never the machine
+# channel (prose mentions still count for exactly one more version, reported).
+deferrals: []                              # list[{id: "FR-NNN", reason: "<why>"}]
+
+# =============================================================================
+# SINGLE-PRODUCT MODE — themes at top level, in interview order
+# (omit the entire `products:` key in this mode)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# persistence — modelled as TWO ORTHOGONAL AXES plus the primary durable store
+# and any secondary stores (cache, blob, search). Pre-filled from
+# PRD.data_model.storage_preferences.
+#
+#   AXIS 1 — `paradigm` (the FAMILY: the data shape). THE DISCRIMINATOR for the
+#     whole document; decides which theme blocks are required and which validator
+#     cross-checks run.
+#   AXIS 2 — `topology` (WHERE/HOW the store runs). Orthogonal to the family — a
+#     `relational` family may run self-hosted (networked_server), managed
+#     (cloud_managed), or embedded (local_embedded). Captured independently;
+#     NOT a discriminator (never changes the required set). Optional + back-compat.
+#
+# `paradigm` is chosen early (Phase 4) — the agent recommends one from PRD
+# signals, the user confirms; `topology` is recommended in the same step.
+# Absence of `paradigm` defaults to `relational` so pre-paradigm files validate
+# unchanged — BUT that silent default hides a forgotten paradigm on a
+# file-native/CLI project (⚠D). From `data_model_version >= 3.0`, `paradigm` is
+# REQUIRED at `status: complete` (a blocking error); older versions keep the
+# silent default plus a validator warning. The 3.0 floor clears the meta-corpus's
+# self-stamped versions (CLAUDE.md §10 — a new blocking check must not hard-fail
+# legacy artifacts).
+#
+#   paradigm      required blocks (besides entities + data_classification)   shape of `entities`
+#   ----------    ---------------------------------------------------------  -------------------------------------
+#   relational    id_strategy, relationships, indexes_and_queries,           fields: type/nullable/unique/
+#                 integrity_and_constraints                                  primary_key/references/on_delete
+#   document      id_strategy, indexes_and_queries (+ composition for        fields: type/nullable; embedded
+#                 embedded docs, cross_references for id links)              sub-docs via composition
+#   key_value     key_value_design                                          fields + key design in
+#                                                                           key_value_design.key_patterns
+#   graph         edges (+ graph_config)                                    nodes with node_label + properties;
+#                                                                           edges are first-class (no join table)
+#   vector        vector_config                                             collections: payload_fields +
+#                                                                           one field with embedding: true
+#   file_native   identity_conventions (+ composition, cross_references,    fields: pydantic_type + description;
+#                 serialization_conventions)                                identity is path-derived (no PK)
+#   none          (nothing — stateless project, no persisted state)         entities may be {} or absent
+#
+# Blocks NOT listed for a paradigm are optional/ignored there. Relational-only
+# blocks (relationships with on_delete, indexes_and_queries, integrity_and_
+# constraints, scale_and_retention, migrations_and_evolution, transactions_and_
+# consistency) carry no meaning for graph/vector/file_native and may be omitted.
+# -----------------------------------------------------------------------------
+persistence:
+  paradigm: null                   # REQUIRED at status:complete from
+                                   # data_model_version >= 3.0 (⚠D); below that,
+                                   # defaults to `relational` when absent (+ a
+                                   # warning). One of:
+                                   #   relational | document | key_value |
+                                   #   graph | vector | file_native | none
+                                   # `none` = stateless project: NOTHING is
+                                   # persisted. `entities` may be {} or absent,
+                                   # no primary_store is required, and every
+                                   # check that assumes persisted state
+                                   # (feature coverage, volume gate) is skipped
+                                   # — the validator says what it skipped and
+                                   # why instead of claiming coverage.
+                                   # Downstream: arch maps no store, task emits
+                                   # no migration/DB-fixture tasks, api skips
+                                   # entity links, test skips DATA-invariant
+                                   # seeding.
+  paradigm_confidence: null        # confirmed | inferred | assumption
+  paradigm_rationale: null         # string — why this paradigm? (agent's
+                                   # recommendation reasoning + user's call)
+  topology: null                   # RECOMMENDED — the orthogonal axis: where/how
+                                   # the primary store runs. One of:
+                                   #   local_embedded   | networked_server |
+                                   #   cloud_managed    | serverless       |
+                                   #   in_memory        | other
+                                   # Optional (back-compat); absence = "not yet
+                                   # decided". Concrete provider is finalized at
+                                   # the deploy stage — this is the shape the
+                                   # data model assumes.
+  topology_confidence: null        # confirmed | inferred | assumption
+  topology_rationale: null         # string — why this topology?
+  primary_store: null              # REQUIRED — concrete store technology. One of:
+                                   #   relational: postgres | mysql | sqlite |
+                                   #               sqlserver | oracle
+                                   #   document:   mongodb | firestore | couchbase
+                                   #   key_value:  dynamodb | redis | etcd
+                                   #   graph:      neo4j | arangodb | neptune |
+                                   #               janusgraph
+                                   #   vector:     pinecone | qdrant | weaviate |
+                                   #               milvus | chroma | pgvector |
+                                   #               lancedb
+                                   #   file_native: filesystem
+                                   #   (or `other`)
+  primary_store_confidence: null   # confirmed | inferred | assumption
+  primary_store_rationale: null    # string — why this store?
+  serialization_format: null       # file_native only — yaml | json | toml | other
+  polyglot: false                  # bool — true if any secondary_stores present
+  secondary_stores: null           # list[SecondaryStore]; each:
+                                   #   - store_id: <kebab-slug>
+                                   #       REQUIRED from data_model_version
+                                   #       >= 3.0 (warns below). Stable id,
+                                   #       unique within the scope; "primary"
+                                   #       is RESERVED for the primary store.
+                                   #       Referenced by ARCH data-store
+                                   #       containers (`realizes_store`), by
+                                   #       ARCH persistence bindings, and by
+                                   #       entities.<E>.stored_in — rename the
+                                   #       slug and those references break, so
+                                   #       treat it like an id, not a label.
+                                   #     kind: <paradigm family OR specific tech>
+                                   #       families (engine TBD; mirrors paradigm):
+                                   #         relational | document | key_value |
+                                   #         graph | vector
+                                   #       techs: redis | memcached | elasticsearch |
+                                   #         opensearch | meilisearch | kafka |
+                                   #         rabbitmq | clickhouse | duckdb | other
+                                   #       A secondary MAY be a different paradigm
+                                   #       than the primary (e.g. RAG: primary
+                                   #       relational + secondary vector). Use a
+                                   #       family when the concrete engine is TBD
+                                   #       and name the engine in rationale.
+                                   #     role: cache | search | queue | analytics |
+                                   #           timeseries | source_of_truth | other
+                                   #       source_of_truth = rare, deliberate
+                                   #       multi-source-of-truth (flag with
+                                   #       rationale); the MAIN store goes in
+                                   #       primary_store, never here. There is no
+                                   #       `primary` role — a secondary store
+                                   #       cannot be the primary.
+                                   #     rationale: string
+  secondary_stores_confidence: null  # confirmed | inferred | assumption
+                                   # certainty of the secondary-store inventory as a whole
+  file_blob_store: null            # one of: none | s3 | gcs | azure_blob |
+                                   #         minio | local_fs | other
+  file_blob_store_bucket: null     # string — bucket / container / mount path
+  file_blob_store_rationale: null  # string — why this blob store?
+
+# -----------------------------------------------------------------------------
+# id_strategy — primary-key generation scheme + natural-key policy.
+# PARADIGM: required for relational + document. For file_native, identity is
+# path-derived (see identity_conventions); for key_value/graph/vector the key
+# lives in key_value_design / node identity / point id respectively — omit this
+# block there.
+# -----------------------------------------------------------------------------
+id_strategy:
+  scheme: null                     # REQUIRED — one of:
+                                   #   uuid_v4 | uuid_v7 | ulid | nanoid |
+                                   #   serial_int | bigserial | natural_key | mixed
+  scheme_confidence: null
+  scheme_rationale: null           # string — why this scheme?
+  natural_keys: null               # list[NaturalKey]; each:
+                                   #   - entity: PascalCaseEntityName
+                                   #     fields: [snake_case, ...]   # composite OK
+                                   #     reason: string
+
+# -----------------------------------------------------------------------------
+# entities — the heart of the data model. Dict keyed by PascalCaseEntityName.
+# Each entity carries its fields, primary key, and traceability back to PRD
+# features / UX surfaces.
+# -----------------------------------------------------------------------------
+entities:                          # REQUIRED — dict[<PascalCaseEntityName>, Entity]
+                                   # MUST be non-empty in status: complete.
+  User:                            # example entity
+    description: "Authenticated end-user of the platform."
+    primary_key: id                # string OR list[string] (composite). REQUIRED
+                                   # for relational/document; omit for
+                                   # file_native (path-derived) / key_value /
+                                   # graph / vector.
+    # --- paradigm-specific entity attributes (all optional) ---
+    # category: stage_artifact     # file_native — discriminator (free string)
+    # composes: [ArtifactBase]     # file_native — Pydantic mixins this extends
+    # serialization:               # file_native — on-disk placement
+    #   scope: per_stage           #   per_stage | per_project | nested_in:<E> | runtime_only
+    #   filename_pattern: "02_product_requirements.yaml"
+    # node_label: User             # graph — node label (defaults to entity key)
+    # payload_fields: [title, body]# vector — fields stored alongside the vector
+    # --- discriminated union (any paradigm; ledger IMP-080) ---
+    # one_of: [CardPayload, BankPayload]   # this entity is a UNION PARENT: an
+    #                                #   instance is exactly one of these
+    #                                #   entities. A union parent may omit
+    #                                #   `fields` and `primary_key` (the
+    #                                #   variants carry them); every variant
+    #                                #   must exist in `entities` and carry the
+    #                                #   discriminator field. Not `composes`
+    #                                #   (mixins) and not `composition`
+    #                                #   (containment): a union is "is one of",
+    #                                #   not "has".
+    # discriminator: kind            # REQUIRED with one_of - the field every
+    #                                #   variant carries whose value selects the
+    #                                #   variant. Errors at data_model_version
+    #                                #   >= 3.0, warnings below.
+    fields:                        # REQUIRED — dict[snake_case, Field]; a union
+                                   # parent (one_of above) may omit it
+      id:
+        # relational/document: a SQL-ish column type from the enum below.
+        type: uuid                 # one of: uuid | string | text | int | bigint |
+                                   #         decimal | float | bool | date | time |
+                                   #         timestamp | timestamptz | json | jsonb |
+                                   #         enum | binary | blob | array | other
+        # file_native: use `pydantic_type` + `description` INSTEAD of `type`.
+        # pydantic_type: str       #   literal Python type expr, e.g.
+                                   #   "Optional[list[FeatureSpec]]". Optionality
+                                   #   is encoded in the type, not `nullable`.
+        # vector: mark the embedding-source field.
+        # embedding: true          #   the vector is computed from this field
+        nullable: false            # bool — default false (relational/document)
+        primary_key: true          # bool — default false
+        unique: true               # bool — default false
+        default: null              # string | null — SQL/codegen default expression
+        references: null           # null OR "<Entity>.<field>" string (FK;
+                                   #   relational/document)
+        on_delete: null            # one of: cascade | restrict | set_null |
+                                   #         no_action (applies only if references)
+        check: null                # string — check constraint expression
+        validation: null           # OPTIONAL structured app-level validation —
+                                   #   dict with any of: min, max, min_length,
+                                   #   max_length, regex, format (email | url |
+                                   #   uuid | iso8601 | slug | semver | other),
+                                   #   enum (list of allowed values). This is
+                                   #   what codegen turns into Pydantic/zod
+                                   #   validators WITHOUT parsing SQL `check`
+                                   #   strings; `check` stays the DB-level twin.
+                                   #   Applies to every paradigm (file_native
+                                   #   included — its only other home was prose).
+        comment: null              # string — human-readable note
+        description: null          # string — preferred note field for file_native
+      email:
+        type: string
+        nullable: false
+        unique: true
+        comment: "Login identifier; case-insensitive."
+      created_at:
+        type: timestamptz
+        nullable: false
+        default: "now()"
+    traces_prd_features: ["FR-001"] # REQUIRED list[string] of "FR-NNN" ids (no
+                                   # verbatim PRD text). FR ids come from
+                                   # PRD.functional_requirements.must_have_features /
+                                   # nice_to_have_features. Empty list `[]` is valid
+                                   # for purely-backend entities (e.g. AuditLog);
+                                   # `null` is rejected by the validator.
+                                   # Drives the feature-coverage cross-check at
+                                   # validation: every PRD must_have FR-NNN must
+                                   # be traced by ≥1 entity or deferred via the
+                                   # top-level `deferrals` list (a WRN-NNN
+                                   # mention still works for one more version).
+    traces_ux_surfaces: null       # list[string] of "SCR-NNN" ids (no kebab slugs).
+                                   # SCR ids come from UX.surface_inventory[].id.
+                                   # Use SCR-NNN — never the editable slug
+                                   # `surface_id`. Empty list `[]` is allowed for
+                                   # purely-backend entities.
+    traces_prd_workflows: null     # Optional list[string] of "WKF-NNN" ids
+                                   # (from PRD.use_cases.core_workflows). Use when
+                                   # an entity participates in a workflow even if
+                                   # no FR-NNN directly names it. The sweep at
+                                   # the end of the entities theme catches entities
+                                   # implied by an upstream WKF whose draft list
+                                   # missed.
+    lifecycle: null                # OPTIONAL per-entity state machine. Enums
+                                   #   list the status VALUES; this block adds
+                                   #   the allowed-transition graph `test` needs
+                                   #   for state-transition cases and `task`/
+                                   #   `code` need for guard logic. Shape:
+                                   #   lifecycle:
+                                   #     field: status              # the status-bearing field
+                                   #     initial: pending           # state a new row starts in
+                                   #     transitions:               # list — one per allowed move
+                                   #       - {from: pending,  to: paid,     trigger: "payment confirmed"}
+                                   #       - {from: paid,     to: shipped,  trigger: "fulfilment"}
+                                   #       - {from: paid,     to: refunded, trigger: "refund", guard: "within 30 days"}
+                                   #     terminal: [refunded, shipped]  # states with no exit
+                                   #   Any move not listed is forbidden — that is
+                                   #   the machine-readable contract. Omit for
+                                   #   entities with no meaningful state machine.
+                                   #   Validator cross-checks (warn-level):
+                                   #   `field` must exist in `fields`; a
+                                   #   terminal state has no outgoing
+                                   #   transition; the state set must appear in
+                                   #   the field's validation.enum (or a
+                                   #   declared enums_and_lookups enum) when
+                                   #   one exists.
+                                   #   Consumers: test seeds state-transition
+                                   #   cases from it; task copies it VERBATIM
+                                   #   into entity_slice embeds (with
+                                   #   `invariants`) [ENTSLICE], drift-checked;
+                                   #   code renders guard logic.
+    invariants: null               # OPTIONAL list[string] — plain-language
+                                   #   always-true statements about a valid row
+                                   #   (e.g. "end_date >= start_date"). task
+                                   #   copies invariants (and lifecycle)
+                                   #   VERBATIM into each entity_slice embed
+                                   #   [ENTSLICE] — the task-side drift
+                                   #   comparator includes them ONLY when
+                                   #   declared here; code renders model
+                                   #   validators / DB CHECKs; test seeds
+                                   #   invariant-violation cases.
+    stored_in: null                # OPTIONAL list[string] — which store(s)
+                                   #   hold this entity: "primary" (the default
+                                   #   when absent) or a declared
+                                   #   secondary_stores[].store_id. Unknown ids
+                                   #   warn (never block). Lets ARCH bind each
+                                   #   entity to a concrete store.
+
+# -----------------------------------------------------------------------------
+# relationships — explicit edges between entities. Inline FK references on
+# field-level (entities.<E>.fields.<f>.references) are still allowed, but
+# this block is the canonical place to express cardinality + cascade rules
+# and any many-to-many join tables.
+# PARADIGM: required for relational. document may use it for id links (but
+# prefer composition/cross_references). For graph use the first-class `edges`
+# block instead (no join tables). Omit for key_value/vector/file_native.
+# -----------------------------------------------------------------------------
+relationships:                     # relational: REQUIRED (list[Relationship];
+                                   # may be empty). Other paradigms: omit.
+                                   # if the model has no cross-entity edges.
+                                   # Each:
+  - from_entity: null              # PascalCaseEntityName (must exist in `entities`)
+    from_field: null               # snake_case field on from_entity
+    to_entity: null                # PascalCaseEntityName (must exist in `entities`)
+    to_field: null                 # snake_case field on to_entity
+    cardinality: null              # one of: "1:1" | "1:N" | "N:M"
+    on_delete: null                # one of: cascade | restrict | set_null | no_action
+    on_update: null                # one of: cascade | restrict | set_null | no_action
+    join_table: null               # PascalCaseEntityName — required only when
+                                   # cardinality == "N:M" (and join_table must
+                                   # itself be an entity in `entities`)
+    comment: null                  # string — semantics, e.g. "A user has many orders."
+
+# =============================================================================
+# PARADIGM-SPECIFIC STRUCTURAL BLOCKS
+# Each is optional at the schema level; the validator's paradigm-gated required
+# set decides which is mandatory (graph→edges, vector→vector_config,
+# key_value→key_value_design, file_native→identity_conventions). All blocks
+# below are OMITTED for paradigms that don't use them.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# edges — GRAPH paradigm. First-class relationships between nodes. Unlike
+# relational `relationships`, edges carry their own properties and never need a
+# join table. Validator checks every from_entity/to_entity resolves to an
+# entity key or its node_label.
+# -----------------------------------------------------------------------------
+edges:                             # graph: REQUIRED (list[Edge]; may be empty
+  null                             # for a nodes-only graph). Other paradigms: omit.
+  # - type: FOLLOWS                # edge/relationship type (UPPER_SNAKE by convention)
+  #   from_entity: User            # must exist in entities (key or node_label)
+  #   to_entity: User
+  #   cardinality: "N:M"           # "1:1" | "1:N" | "N:M"
+  #   direction: directed          # directed | undirected
+  #   properties: { since: timestamp }  # dict — edge attributes
+
+# -----------------------------------------------------------------------------
+# graph_config — GRAPH paradigm. Node-label inventory + named traversal patterns
+# (the graph analogue of relational access_patterns).
+# -----------------------------------------------------------------------------
+graph_config:                      # graph only
+  null
+  # node_labels: [User, Post]
+  # traversal_patterns:
+  #   - description: "Friends-of-friends up to 3 hops."
+  #     start_label: User
+  #     pattern: "(:User)-[:FOLLOWS*1..3]->(:User)"
+
+# -----------------------------------------------------------------------------
+# vector_config — VECTOR paradigm. Embedding model + ANN index configuration.
+# Validator requires embedding_model + dimensions + distance_metric.
+# -----------------------------------------------------------------------------
+vector_config:                     # vector only — REQUIRED for that paradigm
+  null
+  # embedding_model: "text-embedding-3-large"
+  # dimensions: 3072
+  # distance_metric: cosine        # cosine | euclidean | dot_product | manhattan
+  # ann_index: hnsw                # hnsw | ivf | ivf_flat | ivf_pq | flat | diskann | other
+  # index_params: { m: 16, ef_construct: 200 }
+
+# -----------------------------------------------------------------------------
+# key_value_design — KEY_VALUE paradigm. Access-pattern-first key design:
+# partition/sort key templates and secondary indexes (e.g. DynamoDB GSIs).
+# Validator requires non-empty key_patterns; each pattern's entity must resolve.
+# -----------------------------------------------------------------------------
+key_value_design:                  # key_value only — REQUIRED for that paradigm
+  null
+  # key_patterns:
+  #   - entity: Session
+  #     key_template: "user#{user_id}#session#{session_id}"
+  #     partition_key: user_id
+  #     sort_key: session_id
+  # secondary_indexes:
+  #   - name: GSI1-by-session
+  #     partition_key: session_id
+  #     projection: ALL
+
+# -----------------------------------------------------------------------------
+# identity_conventions — FILE_NATIVE paradigm (and any keyless paradigm).
+# States how entity identity is derived without a generated primary key.
+# Validator requires a non-empty `rules` list. Replaces id_strategy.
+# -----------------------------------------------------------------------------
+identity_conventions:              # file_native — REQUIRED for that paradigm
+  null
+  # rules:
+  #   - "stage_artifact: NO id field; identity is the on-disk path."
+  #   - "sub_model: carries its domain ID string (FR-NNN, ENT-NNN); no UUIDs."
+
+# -----------------------------------------------------------------------------
+# composition — DOCUMENT / FILE_NATIVE / GRAPH. Pydantic/document-level
+# parent→child containment (the demo's Report→Finding nesting). Validator checks
+# parent and child both exist in entities.
+# -----------------------------------------------------------------------------
+composition:                       # optional list[CompositionItem]
+  null
+  # - parent: ProductRequirements
+  #   child: FeatureSpec
+  #   kind: contains               # embeds | contains | references
+  #   comment: "PR owns its feature specs."
+
+# -----------------------------------------------------------------------------
+# cross_references — DOCUMENT / FILE_NATIVE. String-ID reference relations (the
+# input contract for referential-integrity gates). Each entry needs EITHER a
+# `to_entity` (intra-model link) OR a `references_family` (points at an upstream
+# ID family like FR/ENT). Validator checks from_entity/to_entity resolve.
+#
+# COMPLETENESS CONTRACT (writer-enforced — the gate-clause sweep,
+# references/paradigms/file-native.md): every Entity.field that an
+# upstream-named referential/coverage gate queries must have a row here (with
+# `gate:` naming the clause) OR an explicit WRN-NNN carve-out in
+# data_warnings naming the field and its read-model home. Non-id-family
+# relations (composite tuples like (component, name), paths, hashes) declare
+# their resolution rule in a row `comment` or the carve-out — never silence.
+# -----------------------------------------------------------------------------
+cross_references:                  # optional list[CrossReference]
+  null
+  # - from_entity: FeatureSpec
+  #   field: id
+  #   references_family: FR        # upstream ID family (no local to_entity)
+  #   comment: "FeatureSpec.id is an FR-NNN from the PRD."
+  # - from_entity: TestSpec
+  #   field: covers
+  #   to_entity: FeatureSpec       # intra-model link
+  #   gate: "covers_resolves"      # name of the validator gate that enforces it
+
+# -----------------------------------------------------------------------------
+# serialization_conventions — FILE_NATIVE. Where artifacts live on disk so the
+# tree is human-readable (not "Item001, Item002"). Per-entity placement may also
+# live inline on entities.<E>.serialization.
+# -----------------------------------------------------------------------------
+serialization_conventions:         # file_native only
+  null
+  # root_path: "aicf_artifacts/"
+  # format: yaml                   # yaml | json | toml | other
+  # entries:
+  #   - entity: ProductRequirements
+  #     filename_pattern: "02_product_requirements.yaml"
+  #     scope: per_stage
+
+# -----------------------------------------------------------------------------
+# enums_and_lookups — first-class enum types + entities that act as lookups.
+# Lookup entities are real rows in the DB but conceptually closed sets.
+# (Universal — applies to every paradigm.)
+# -----------------------------------------------------------------------------
+enums_and_lookups:                 # REQUIRED — block may be present-but-empty.
+  enums: null                      # dict[<EnumName>, list[string]]; e.g.
+                                   #   OrderStatus: [pending, paid, shipped, refunded]
+  lookup_tables: null              # list[<PascalCaseEntityName>] — entities in
+                                   # `entities` that are static lookup tables
+                                   # (so codegen can treat them specially).
+
+# -----------------------------------------------------------------------------
+# indexes_and_queries — expected query patterns and the indexes that serve them.
+# Drives downstream index DDL, query optimisation, and access-pattern review.
+# PARADIGM: required for relational + document. graph uses
+# graph_config.traversal_patterns, vector uses vector_config, key_value uses
+# key_value_design — omit this block for those.
+# -----------------------------------------------------------------------------
+indexes_and_queries:               # relational/document: REQUIRED (may be
+                                   # present-but-empty). Other paradigms: omit.
+  access_patterns: null            # list[AccessPattern]; each:
+                                   #   - description: string (e.g. "list orders by user, newest first")
+                                   #     entity: PascalCaseEntityName
+                                   #     fields: [snake_case, ...]
+                                   #     expected_qps: float | null
+                                   #     latency_budget_ms: int | null
+                                   #     read_or_write: read | write | both
+  expected_indexes: null           # list[Index]; each:
+                                   #   - entity: PascalCaseEntityName
+                                   #     fields: [snake_case, ...]
+                                   #     unique: bool
+                                   #     type: btree | hash | gin | gist |
+                                   #           fulltext | composite | other
+                                   #     name: string | null (codegen may auto-name)
+
+# -----------------------------------------------------------------------------
+# integrity_and_constraints — DB-level invariants beyond per-field constraints.
+# PARADIGM: relational only. Document/file_native enforce invariants in app code
+# (Pydantic validators); graph/vector/key_value have no FK/check semantics. Omit
+# for non-relational paradigms.
+# -----------------------------------------------------------------------------
+integrity_and_constraints:         # relational: REQUIRED (may be
+                                   # present-but-empty). Other paradigms: omit.
+  default_on_delete: null          # one of: cascade | restrict | set_null | no_action
+                                   # applied to FKs that don't specify their own
+  default_on_delete_rationale: null  # string — why this default? (cascade is dangerous;
+                                   # restrict surfaces issues at delete time)
+  unique_constraints: null         # list[UniqueConstraint]; each:
+                                   #   - entity: PascalCaseEntityName
+                                   #     fields: [snake_case, ...]   # composite OK
+                                   #     name: string | null
+  check_constraints: null          # list[CheckConstraint]; each:
+                                   #   - entity: PascalCaseEntityName
+                                   #     expression: "amount > 0"     # SQL expr
+                                   #     name: string | null
+                                   #     comment: string | null
+
+# -----------------------------------------------------------------------------
+# data_classification — privacy / compliance tagging at the field level.
+# Fields are referenced as "Entity.field". Heavily pre-filled from
+# PRD.security_compliance (data_sensitivity, regulatory_requirements,
+# encryption_at_rest) and PRD.internationalization (localized_fields).
+# Downstream `api` uses this to gate DTO exposure;
+# `arch` uses it for KMS/segregation decisions.
+# -----------------------------------------------------------------------------
+data_classification:               # REQUIRED — block may have empty lists.
+  pii_fields: null                 # list[string] — "Entity.field" — personally
+                                   # identifying information (email, name, phone).
+  regulated_fields: null           # list[string] — "Entity.field" — PHI (HIPAA),
+                                   # PCI (card data), or other regulated content.
+  localized_fields: null           # list[string] — "Entity.field" — user-visible
+                                   # text stored once per locale (added 2026-09-01;
+                                   # only when PRD.internationalization.enabled).
+                                   # api serves the Accept-Language locale, code
+                                   # stores one value per locale. Same integrity
+                                   # check as pii_fields; optional, no version gate.
+  encrypted_at_rest: null          # list[string] — "Entity.field" — must be
+                                   # column-encrypted independent of disk encryption.
+  encryption_kms_ref: null         # string — KMS key alias or ARN; e.g.
+                                   #   "alias/data-classification-default"
+  retention_policy_default: null   # string — default retention; e.g.
+                                   #   "Indefinite" | "7 years" | "30 days post-deletion"
+
+# -----------------------------------------------------------------------------
+# bounded_contexts — OPTIONAL, opt-in DDD grouping above entities. When
+# present, every entity in `entities` must be assigned to exactly one
+# context. When absent (default), `entities` is treated as one flat context.
+# -----------------------------------------------------------------------------
+bounded_contexts:                  # optional — dict[<context_name>, BoundedContext]
+  null
+  # auth:
+  #   description: "Identity, sessions, tokens."
+  #   entities: [User, Session, Token]
+  # billing:
+  #   description: "Invoices, payments, subscriptions."
+  #   entities: [Invoice, Payment, Subscription]
+
+# -----------------------------------------------------------------------------
+# audit_and_lifecycle — OPTIONAL. Pre-filled from PRD.security_compliance.audit_logging.
+# Defines whether entities carry audit columns and how deletion is modelled.
+# -----------------------------------------------------------------------------
+audit_and_lifecycle:               # optional
+  null
+  # audit_columns:
+  #   created_at: true
+  #   updated_at: true
+  #   created_by: true               # FK to User.id by convention
+  #   updated_by: true
+  #   deleted_at: true               # implies soft_delete: true
+  # soft_delete: true                # bool — affects every read query
+  # archive_strategy: "Move to cold storage after 90 days deleted_at."
+  # applies_to: null                 # null = all entities; list = subset
+
+# -----------------------------------------------------------------------------
+# versioning_and_history — OPTIONAL. Row-level versioning, event sourcing,
+# temporal tables.
+# -----------------------------------------------------------------------------
+versioning_and_history:            # optional
+  null
+  # record_versioning: row_version  # none | row_version | temporal_table | event_sourcing
+  # history_retention: "2 years"
+  # applies_to: [Order, Invoice]    # list[<PascalCaseEntityName>] | null = all
+
+# -----------------------------------------------------------------------------
+# scale_and_retention — OPTIONAL by default, REQUIRED if
+# PRD.data_model.data_volume_estimate ∈ {terabytes, petabytes}.
+# Drives partitioning, sharding, retention policies.
+# -----------------------------------------------------------------------------
+scale_and_retention:               # optional (promoted to required for TB+/PB+)
+  null
+  # partitioning_key: created_at   # string — column name or expression
+  # partitioning_strategy: range   # one of: range | list | hash | none
+  # sharding_key: tenant_id        # string | null — null = single-shard
+  # retention_policies:            # list[RetentionPolicy]
+  #   - entity: AuditLog
+  #     ttl: "1 year"
+  #     policy: hard_delete         # hard_delete | archive | anonymize
+
+# -----------------------------------------------------------------------------
+# migrations_and_evolution — OPTIONAL.
+# -----------------------------------------------------------------------------
+migrations_and_evolution:          # optional
+  null
+  # tool: alembic                  # one of: alembic | flyway | liquibase |
+  #                                #         prisma_migrate | drizzle_kit |
+  #                                #         sqlx | knex | django_migrate |
+  #                                #         activerecord | other
+  # zero_downtime_strategy: "Expand-contract: add column nullable, backfill, then enforce NOT NULL."
+  # rollback_policy: "Every migration must have a tested down() — verified in CI."
+
+# -----------------------------------------------------------------------------
+# transactions_and_consistency — OPTIONAL.
+# -----------------------------------------------------------------------------
+transactions_and_consistency:      # optional
+  null
+  # default_isolation: read_committed  # read_committed | repeatable_read |
+  #                                    # serializable | snapshot
+  # transaction_boundaries:
+  #   - "Order placement spans Order + LineItem + InventoryReservation in one tx."
+
+# -----------------------------------------------------------------------------
+# caching_layer — OPTIONAL. Linked to persistence.secondary_stores when
+# polyglot is true and a redis/memcached store is present.
+# -----------------------------------------------------------------------------
+caching_layer:                     # optional
+  null
+  # layer: redis                   # one of: none | in_process | redis |
+  #                                #         memcached | other
+  # cached_entities:
+  #   - entity: User
+  #     ttl: "5m"
+  #     invalidation: "On write to User; ttl fallback."
+  #   - entity: Project
+  #     ttl: "1h"
+  #     invalidation: "Manual purge on PUT /projects/{id}."
+
+# -----------------------------------------------------------------------------
+# search_and_analytics — OPTIONAL.
+# -----------------------------------------------------------------------------
+search_and_analytics:              # optional
+  null
+  # fulltext_engine: postgres_fts  # none | postgres_fts | elasticsearch |
+  #                                # opensearch | meilisearch | typesense
+  # indexed_entities:              # only when fulltext_engine != none
+  #   - entity: Project
+  #     fields: [name, description]
+  # analytics_target: bigquery     # none | bigquery | snowflake | redshift |
+  #                                # duckdb | other
+  # cdc_strategy: outbox           # none | debezium | outbox | trigger | other
+
+# -----------------------------------------------------------------------------
+# seed_and_fixtures — OPTIONAL. `seed_data` is the CONCRETE half: the actual
+# rows lookup/enum-backed tables ship with, so codegen and test fixtures don't
+# invent values. Keep it to reference data (roles, statuses, categories,
+# plans) — never bulk sample data.
+# -----------------------------------------------------------------------------
+seed_and_fixtures:                 # optional
+  null
+  # seed_strategy: "Idempotent SQL script run in entrypoint; checks SeedMarker."
+  # dev_fixtures_path: "fixtures/dev/"
+  # seed_data:                     # dict[PascalCaseEntityName, list[row]] — each
+  #   Role:                        # row a dict of field: value for that entity;
+  #     - {id: 1, name: admin}     # entity must exist in `entities`, and the
+  #     - {id: 2, name: member}    # entity SHOULD be named in lookup_tables.
+  #   Plan:
+  #     - {id: free,  monthly_price: 0}
+  #     - {id: pro,   monthly_price: 12}
+
+# -----------------------------------------------------------------------------
+# external_data_sources — OPTIONAL. Pre-filled from
+# PRD.functional_requirements.integrations_required. Each entry describes
+# how an outside data feed is ingested.
+# -----------------------------------------------------------------------------
+external_data_sources:             # optional — list[ExternalDataSource]
+  null
+  # - name: stripe
+  #   sync_model: webhook            # pull | push | webhook | stream
+  #   conflict_resolution: "Last-writer-wins; Stripe is source of truth for amounts."
+  #   refresh_interval: "real-time (webhook)"
+  #   maps_to_entity: Payment
+
+# =============================================================================
+# MULTI-PRODUCT MODE (monorepo) — uncomment and use *instead of* the top-level
+# blocks above. Each entry under `products:` mirrors the single-product shape.
+# Triggered when the upstream PRD has metadata.monorepo: true.
+# =============================================================================
+#
+# products:
+#   billing:
+#     persistence:
+#       primary_store: postgres
+#     id_strategy:
+#       scheme: uuid_v7
+#     entities:
+#       Invoice:
+#         primary_key: id
+#         fields:
+#           id: { type: uuid, primary_key: true, nullable: false }
+#           amount_cents: { type: bigint, nullable: false }
+#           customer_id: { type: uuid, nullable: false, references: Customer.id }
+#         traces_prd_features: [FR-001, FR-002]
+#     relationships:
+#       - from_entity: Invoice
+#         from_field: customer_id
+#         to_entity: Customer
+#         to_field: id
+#         cardinality: "1:N"
+#         on_delete: restrict
+#     enums_and_lookups: { enums: { InvoiceStatus: [draft, open, paid, void] } }
+#     indexes_and_queries: { access_patterns: [], expected_indexes: [] }
+#     integrity_and_constraints: { default_on_delete: restrict }
+#     data_classification:
+#       pii_fields: ["Customer.email"]
+#       regulated_fields: []
+#       encrypted_at_rest: []
+#   notifications:
+#     # ...

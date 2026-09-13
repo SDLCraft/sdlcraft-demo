@@ -1,0 +1,249 @@
+# =============================================================================
+# UX__<surface>.yaml — Per-surface schema reference
+# =============================================================================
+# One file per UI surface, written next to docs/UX.yaml in the consumer
+# project. <surface> is the kebab-case `surface_id` (unique within the
+# product, same `surface_id` used in UX.yaml's surface_inventory). The
+# stable cross-stage handle is the `SCR-NNN` id, not the slug — downstream
+# agents reference surfaces by `SCR-NNN`.
+#
+# Conventions:
+#   - `null` (not omission) means "explicitly unanswered".
+#   - For state defaults inherited from UX.yaml.state_patterns, the field
+#     can be set to the literal string "inherit" (or omitted) — downstream
+#     agents fall back to the global pattern.
+#   - All ids inside (component ids, interaction ids) are kebab-case.
+#
+# ID conventions for this file (see UX.schema.yaml header for the full
+# family map):
+#   id                       — REQUIRED. The SCR-NNN id of this surface;
+#                              matches the `id` in UX.yaml.surface_inventory
+#                              for the same `surface_id`.
+#   traces_workflows         — list of WKF-NNN ids from PRD.use_cases.
+#                              core_workflows. Drives the validator's
+#                              coverage check.
+#   implements_requirements  — list of FR-NNN ids from PRD.functional_
+#                              requirements that this surface implements.
+#   references_entities      — list of ENT-NNN ids from PRD.data_model.
+#                              key_entities that this surface displays,
+#                              edits, or directly acts on.
+#
+# Validator rules:
+#   * `id` MUST match the regex SCR-\d{3,}.
+#   * Values in `traces_workflows` MUST match WKF-\d{3,}.
+#   * Values in `implements_requirements` MUST match FR-\d{3,}.
+#   * Values in `references_entities` MUST match ENT-\d{3,}.
+#   * Mis-prefixed values (e.g. an FR-NNN inside `traces_workflows`) are
+#     errors in `status: complete`, warnings in `draft`.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# metadata — always at top level
+# -----------------------------------------------------------------------------
+metadata:
+  ux_surface_version: "1.1"               # schema version this file conforms to
+  last_updated: "2026-05-21T12:00:00Z"     # ISO-8601 UTC timestamp of last write
+  generated_by: sdlc-ux
+  session_id: "00000000-0000-0000-0000-000000000000"
+  status: "draft"                          # "draft" | "complete" | "proposed"
+                                           # writer sets to "complete" only when
+                                           # all required fields below are filled
+                                           # and the surface is user-confirmed.
+                                           # "proposed" = fully specced but its
+                                           # owning FR is nice-to-have / post-MVP,
+                                           # so the surface is intentionally
+                                           # deferred (terminal, non-draft). The
+                                           # parent UX.yaml stays draft|complete;
+                                           # only per-surface files may be proposed.
+  changelog: null                          # Optional[list[string]]. Append-only.
+                                           # Same format as UX.yaml.metadata.changelog:
+                                           #   "<version> (<YYYY-MM-DD>): <one-line summary>"
+
+# -----------------------------------------------------------------------------
+# identity
+# -----------------------------------------------------------------------------
+id: null                        # REQUIRED — "SCR-NNN" (string). Matches
+                                # UX.yaml.surface_inventory[<n>].id for the same
+                                # surface_id.
+surface_id: null                # REQUIRED — kebab-case slug; matches the
+                                # surface_id in UX.yaml.surface_inventory (string)
+surface_type: null              # REQUIRED — one of: screen | modal | panel |
+                                #             drawer | cli_command | flow_step |
+                                #             empty_state | toast | overlay |
+                                #             tab | page | dialog | other (enum)
+parent_surface: null            # null OR another surface_id that contains this one
+                                # (e.g. a modal's parent screen) (string|null)
+
+# -----------------------------------------------------------------------------
+# routing / addressing
+# -----------------------------------------------------------------------------
+route: null                     # graphical surfaces: URL/path or screen route name
+cli_invocation: null            # CLI surfaces: full invocation pattern, e.g.
+                                #   "<root> task add <title> [--priority=<n>]"
+                                # (string|null)
+
+# -----------------------------------------------------------------------------
+# entry / exit conditions
+# -----------------------------------------------------------------------------
+entry_conditions: null          # list[string] — what triggers the user reaching
+                                # this surface. e.g.
+                                #   ["clicked 'New project' on dashboard",
+                                #    "deep-link with valid project id"]
+exit_conditions: null           # list[string] — what causes the user to leave
+                                # (and where they end up). e.g.
+                                #   ["clicked Save -> dashboard",
+                                #    "pressed Esc -> previous surface"]
+
+# -----------------------------------------------------------------------------
+# layout — region tree for graphical surfaces; arg structure for CLI.
+# Use whichever shape applies to the surface_type.
+# -----------------------------------------------------------------------------
+layout:
+  # Graphical (screen|modal|panel|drawer|page|dialog|tab|overlay):
+  region_tree: null             # nested list of regions (any). Each region:
+                                #   { id, role, children?, sizing?, sticky? }
+                                #   role examples:
+                                #     header | sidebar | content | aside |
+                                #     footer | toolbar | nav | feed | grid |
+                                #     detail_pane | hero | banner
+
+  # CLI surfaces (cli_command):
+  # Downstream `task` embeds this whole block VERBATIM as the CLI handler task's
+  # `cli_contract` (a self-contained slice — the worker codes a parser straight
+  # from it, no UX lookup). Keep every CLIArg complete enough to generate an
+  # argument parser from: name, kind, type, required, and description at minimum.
+  cli_args:                     # null OR list of CLIArg
+    # Each CLIArg:
+    #   - name: kebab-case
+    #     kind: positional | option | flag | subcommand
+    #     short: "-x" | null
+    #     long:  "--name" | null
+    #     type:  string | int | float | bool | path | choice
+    #     required: true | false
+    #     repeatable: true | false
+    #     default: <value> | null
+    #     choices: [<...>] | null
+    #     description: short help text
+    null
+
+# -----------------------------------------------------------------------------
+# states — one block per canonical state. Use "inherit" to fall back to the
+# global state_patterns block in UX.yaml.
+# -----------------------------------------------------------------------------
+states:
+  default:                      # null/"inherit" or { description, content_outline }
+    description: null
+    content_outline: null       # what's actually rendered (list[string] or string)
+  loading:
+    description: null
+    content_outline: null
+  empty:
+    description: null
+    content_outline: null
+  error:
+    description: null
+    content_outline: null
+    recovery_action: null       # the affordance offered to recover (string)
+  success:
+    description: null
+    content_outline: null
+
+# -----------------------------------------------------------------------------
+# interactions — ordered list of user actions on this surface.
+# Each interaction is one event handler downstream. TYPED — the validator
+# enforces this exact field set (extra keys tolerated, wrong types rejected),
+# so every run emits the same interaction shape for codegen.
+# -----------------------------------------------------------------------------
+interactions:                   # list[Interaction]; VALIDATED
+  # Each Interaction:
+  #   - id: kebab-case unique within this surface (string)
+  #     actor: user | system
+  #     trigger: click | submit | keypress | hover | focus | blur |
+  #              long_press | swipe | drag | drop | timer | navigation |
+  #              cli_invoke | cli_signal
+  #     trigger_target: component_id | "surface"
+  #     preconditions: list[string]   # state requirements before this fires
+  #     effects: list[string]         # what changes in app state / UI
+  #     target_surface: SCR-NNN|surface_id|null   # destination surface, if any
+  #     error_paths: list[string]    # observable failures + their UI fallback
+  null
+
+# -----------------------------------------------------------------------------
+# components — list of components used on this surface, inline (v1).
+# Downstream agents read this list to know exactly what to instantiate.
+# If the catalog grows large, a future split into a separate
+# `docs/UX-COMPONENTS.yaml` is an easy migration path.
+# -----------------------------------------------------------------------------
+components:                     # list[Component]; VALIDATED (typed field set)
+  # Each Component:
+  #   - id: kebab-case unique within this surface
+  #     type: button | input | textarea | select | checkbox | radio |
+  #           switch | slider | table | list | card | tabs | modal |
+  #           toast | alert | banner | breadcrumb | menu | tooltip |
+  #           popover | progress | spinner | avatar | badge | tag |
+  #           link | icon | divider | code_block | empty_state |
+  #           custom
+  #     library_ref: <import-path-or-package-name> | null
+  #     variants: list[string]            # e.g. ["primary","secondary","ghost"]
+  #     content_slots:                    # named slots that downstream agents
+  #       label: <copy or i18n_key>       # need to fill with copy
+  #       placeholder: <copy or i18n_key>
+  #     aria_role: <ARIA role string> | null
+  #     keyboard_shortcuts: list[string]  # e.g. ["Cmd+K","Enter"]
+  #     binds: list[string]               # "Entity.field" data bindings — which
+  #                                       # DATA-MODEL field this input/display
+  #                                       # component reads or writes (e.g.
+  #                                       # ["Task.title"]). OPTIONAL, but it is
+  #                                       # what lets codegen scaffold a form
+  #                                       # without guessing field mappings;
+  #                                       # entity names should match PRD ENT /
+  #                                       # DATA-MODEL entities.
+  null
+
+# -----------------------------------------------------------------------------
+# validation_rules — for input fields on this surface
+# -----------------------------------------------------------------------------
+validation_rules:               # list[ValidationRule]; VALIDATED (typed field set)
+  # Each ValidationRule:
+  #   - field: <component_id of the input>
+  #     rules: list[string]    # e.g. ["required","max_length=140","regex=^[A-Z]"]
+  #     error_message: <copy or i18n_key>
+  null
+
+# -----------------------------------------------------------------------------
+# accessibility_notes — surface-specific overrides on top of the global
+# accessibility section in UX.yaml. Set to "inherit" or omit if no overrides.
+# -----------------------------------------------------------------------------
+accessibility_notes:            # list[string] | "inherit" | null
+  # Examples:
+  #   - "focus moves to first input on mount"
+  #   - "Esc closes the modal and returns focus to invoking trigger"
+  #   - "live region announces row count after filter changes"
+  null
+
+# -----------------------------------------------------------------------------
+# PRD references — IDs only, never verbatim text.
+# `traces_workflows` is the field the coverage check reads. The other two
+# are optional but recommended whenever the surface clearly implements a
+# specific FR or is anchored on a specific ENT.
+# -----------------------------------------------------------------------------
+traces_workflows: null          # list[string] — WKF-NNN ids from PRD
+                                # use_cases.core_workflows that this surface
+                                # participates in. Empty list [] is allowed
+                                # for non-flow surfaces (chrome, settings,
+                                # diagnostic helpers); record a ux_warnings
+                                # entry when this happens so the validator
+                                # knows it's intentional.
+implements_requirements: null   # list[string] — FR-NNN ids the surface
+                                # implements. Optional.
+references_entities: null       # list[string] — ENT-NNN ids the surface
+                                # displays / edits / acts on. Optional;
+                                # populated when the surface's purpose is
+                                # anchored on an entity (CRUD, list views,
+                                # detail pages, registries).
+
+# -----------------------------------------------------------------------------
+# notes — free-form, optional. For caveats that don't fit elsewhere.
+# May cite IDs from any PRD family (JTB, NFR, INT, etc.) in prose.
+# -----------------------------------------------------------------------------
+notes: null                     # string | null

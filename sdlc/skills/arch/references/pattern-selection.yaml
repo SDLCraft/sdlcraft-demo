@@ -1,0 +1,193 @@
+# Architecture pattern matrix.
+#
+# Each entry: pattern × {best_when, tradeoffs, disqualifiers,
+# ai_builder_notes}. The agent loads this file ONLY when running the
+# architecture_pattern theme at root.
+#
+# Patterns enumerated match the `ArchPattern` enum in validate_schema.py.
+
+patterns:
+
+  - id: monolith
+    summary: >
+      Single deployable that owns all features. Simplest possible
+      topology.
+    best_when:
+      - Small team (≤ 3 engineers).
+      - Domain is simple, mostly CRUD.
+      - Time-to-MVP outweighs long-term modularity.
+      - No independent-scaling requirements.
+    tradeoffs:
+      - Easiest to deploy and debug.
+      - Coupling tends to grow without explicit module discipline.
+      - Scaling axes are limited (you scale the whole monolith).
+    disqualifiers:
+      - More than 3 teams that want independent release cycles.
+      - One capability needs 100× the resources of others.
+      - PRD demands geo-distributed active-active topology.
+    ai_builder_notes: >
+      Best AI-build target. Few moving parts; fast iteration; one log
+      stream; one CI pipeline. Use modular_monolith over plain
+      monolith if there's any chance of growth.
+
+  - id: modular_monolith
+    summary: >
+      One deployable, but with hard internal module boundaries
+      (clear public APIs, no cross-module reaching).
+    best_when:
+      - You want monolith's simplicity but expect to extract modules
+        into services later.
+      - Multiple feature areas with distinct owners share one deploy.
+      - Domain has 3–6 cohesive sub-domains.
+    tradeoffs:
+      - Discipline-heavy at module boundaries.
+      - Easier evolution path to microservices than starting from
+        plain monolith.
+    disqualifiers:
+      - Single tiny feature set (overkill).
+      - Strong independent-deploy requirements from day 1.
+    ai_builder_notes: >
+      Excellent AI-build target. Typed module boundaries are easy
+      for agents to respect and test; module-local refactors don't
+      cascade.
+
+  - id: microservices
+    summary: >
+      Multiple independently deployable services with their own
+      data stores. Communicate via HTTP/RPC or events.
+    best_when:
+      - Multiple teams need independent deploys.
+      - Capabilities have very different scale axes.
+      - Polyglot persistence is genuinely required.
+      - Ops maturity is high (SRE function, distributed tracing,
+        service mesh).
+    tradeoffs:
+      - High operational overhead.
+      - Distributed-systems failure modes are now in scope (timeouts,
+        retries, eventual consistency).
+      - Observability investment is non-optional.
+    disqualifiers:
+      - < 2 teams.
+      - Ops maturity = "we run a single Heroku dyno".
+      - Domain hasn't been modelled yet (premature service split is
+        expensive to undo).
+    ai_builder_notes: >
+      Risky for AI builds. Each service-to-service contract is a new
+      integration surface where agents can introduce subtle bugs.
+      Distributed-systems testing requires fixtures or contract-test
+      tooling. Only recommend when the PRD requires it.
+
+  - id: event_driven
+    summary: >
+      Producers emit events to a bus; consumers react. Strong
+      decoupling, eventual consistency by design.
+    best_when:
+      - Workflows are inherently async (notifications, ETL, ML
+        pipelines, billing reconciliation).
+      - Multiple consumers need the same event stream.
+      - Independence of producer/consumer release cycles is a hard
+        requirement.
+    tradeoffs:
+      - Eventual consistency complicates UX.
+      - Debugging requires a tracing setup and event-replay tooling.
+      - Schema evolution is harder than synchronous contracts.
+    disqualifiers:
+      - Strong-consistency invariants the business will not tolerate
+        relaxing.
+      - No tolerance for delayed updates.
+    ai_builder_notes: >
+      Use only when async is intrinsic to the domain. Event-schema
+      versioning is the #1 footgun for AI builds — recommend a schema
+      registry from day 1.
+
+  - id: hexagonal
+    summary: >
+      "Ports and adapters". Domain logic at the centre; transports
+      and persistence are adapters at the edges.
+    best_when:
+      - Domain logic is rich (many invariants, behaviour-heavy).
+      - Multiple transports (HTTP, CLI, jobs) need to share the same
+        domain.
+      - Long-lived codebases that will outlive any given persistence
+        choice.
+    tradeoffs:
+      - More upfront design effort.
+      - Test ergonomics are excellent (pure domain unit tests).
+    disqualifiers:
+      - Pure CRUD with no behaviour.
+      - Throwaway / prototype scope.
+    ai_builder_notes: >
+      Great AI-build target when paired with strong typing. Agents
+      can test the domain in isolation, and adapter changes don't
+      need to touch the core. Recommend over plain monolith when the
+      domain has invariants worth defending.
+
+  - id: serverless
+    summary: >
+      Functions-as-a-service (Lambda / Cloud Functions / etc.) with
+      managed eventing and storage.
+    best_when:
+      - Traffic is spiky or low-baseline.
+      - Pay-per-execution beats always-on infra cost.
+      - You want zero server management.
+    tradeoffs:
+      - Cold-start latency.
+      - Vendor lock-in.
+      - Local-dev parity is hard.
+    disqualifiers:
+      - Sustained high traffic (cost flips).
+      - Long-running workloads (function timeouts).
+      - Heavy stateful protocols (WebSockets long-lived).
+    ai_builder_notes: >
+      Each function is tiny; AI agents can author and test them in
+      isolation. But the inter-function event wiring is where the
+      complexity lives — make sure the agent has the events spec.
+
+  - id: plugin
+    summary: >
+      Stable core; functionality extended by third-party or
+      first-party plugins via a documented contract.
+    best_when:
+      - Extensibility is a core product feature.
+      - You expect contributions from non-trusted developers.
+      - The domain has clear extension points.
+    tradeoffs:
+      - Contract design is hard and consequential.
+      - Sandboxing / permission model is non-optional.
+    disqualifiers:
+      - No extension story in PRD.
+      - Single-tenant closed product.
+    ai_builder_notes: >
+      Good AI target if the plugin contract is typed and well-documented.
+      The core is small and the plugin layer is shallow.
+
+  - id: pipeline
+    summary: >
+      Stages run in sequence (ETL, build, ML training/inference).
+      Each stage takes input from the previous.
+    best_when:
+      - Workflow is intrinsically sequential.
+      - Steps are big enough to warrant isolation.
+      - Reproducibility / lineage is important.
+    tradeoffs:
+      - End-to-end latency = sum of stages.
+      - Restart-from-failed-stage tooling is its own product.
+    disqualifiers:
+      - Highly interactive workflows.
+    ai_builder_notes: >
+      Solid AI target. Pipelines naturally produce isolated, testable
+      stages. Stage I/O contracts are the integration points to mind.
+
+  - id: other
+    summary: >
+      Escape hatch for genuinely unusual architectures.
+    best_when:
+      - None of the above fit and the user can articulate why.
+    tradeoffs:
+      - You're on your own for downstream pattern-driven heuristics.
+    disqualifiers:
+      - The user is just picking it because they don't know which
+        else fits — push them back to the matrix.
+    ai_builder_notes: >
+      Use sparingly. Downstream agents will fall back to generic
+      defaults for anything pattern-specific.

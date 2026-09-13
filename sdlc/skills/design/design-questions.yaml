@@ -1,0 +1,676 @@
+# =============================================================================
+# design-questions.yaml — Question inventory for the sdlc-design skill
+# =============================================================================
+# Same shape as sdlc-ux's ux-questions.yaml. Two top-level keys: `themes` (the
+# canonical interview order) and `questions` (each carrying a schema_path that
+# points into DESIGN.yaml OR into a sub-file).
+#
+# schema_path prefixes (the agent rewrites these to the real target at runtime):
+#   <no prefix>   → a field in docs/DESIGN.yaml          (e.g. "functional_structure")
+#   tokens.<…>    → a field in docs/DESIGN__tokens.yaml  (e.g. "tokens.color")
+#   assets.<…>    → a top-level field in docs/DESIGN__assets.yaml (e.g. "assets.asset_taxonomy")
+#   asset.<…>     → a field on ONE asset entry; rewritten per asset in theme 4
+#   brief.<…>     → a field on ONE asset's generation_brief; rewritten per asset in theme 5
+#
+# Field reference (same as ux-questions.yaml):
+#   theme / id / schema_path / question / hint / suggested_answers /
+#   free_text_allowed / required / required_if / capture_rationale /
+#   confidence_field / importance (med | high | critical — see PRD's
+#   importance-flows.md for the tier mechanics; same semantics here).
+#
+# Theme order is the canonical interview order. Required themes run
+# unconditionally; optional themes get a now/skip/todo gate. `required_if`
+# expressions are evaluated against already-answered fields at the start of
+# each theme. Reading: PROMOTION — a theme-level `required_if` promotes the
+# THEME to required when true; when false the theme falls back to the
+# now/skip/todo gate (canonical activation-vs-promotion definition:
+# ../prd/references/interview-mechanics.md).
+# =============================================================================
+
+themes:
+  - id: functional_structure
+    title: "Functional Structure (Axis A)"
+    required: true
+    description: >
+      HOW the visuals are realized in code: token_based_ui (component/CSS UI),
+      asset_pipeline (sprites/audio/3D/bespoke graphics), and/or headless
+      (no visuals). Multi-select — a game with menus is BOTH token_based_ui +
+      asset_pipeline. `headless` is exclusive. Derived from UX surface_family +
+      PRD product type, confirmed with the user. This is a STRUCTURAL question
+      (Phase 4) — it decides which sub-files and later themes exist.
+
+  - id: aesthetic_direction
+    title: "Aesthetic Direction (Axis B)"
+    required: true
+    required_if: "'token_based_ui' in functional_structure or 'asset_pipeline' in functional_structure"
+    description: >
+      WHAT it looks and feels like — the open style vocabulary, mood, palette
+      intent, references, typographic voice, motion, and texture/finish. Rides
+      on ANY structure, so a token UI can be hand-drawn / comic / vaporwave.
+      Required for any visual structure; optional (opt-in light terminal/voice
+      persona) for pure headless. The `requires_custom_assets` answer here is
+      the bridge that can flip an asset manifest on even for a token UI.
+
+  - id: design_tokens
+    title: "Design Tokens (DTCG)"
+    required: false
+    required_if: "'token_based_ui' in functional_structure"
+    description: >
+      The CONCRETE DTCG token set a coding agent compiles into CSS vars /
+      tailwind.config / theme files: colour, typography, spacing, radius,
+      elevation, motion, plus theme modes. Authored from scratch or seeded by
+      importing a named preset (shadcn / Tailwind / Tokens Studio). Written to
+      docs/DESIGN__tokens.yaml.
+
+  - id: asset_manifest
+    title: "Asset Manifest"
+    required: false
+    required_if: "'asset_pipeline' in functional_structure or aesthetic_direction.requires_custom_assets == true"
+    synthesis: true
+    description: >
+      The REQUIREMENTS manifest for bespoke assets — a taxonomy + render
+      pipeline + style guide, then a per-asset drill-down assigning AST-### ids.
+      Seeded from the taxonomy, PRD entities (a Character/Sprite entity implies
+      a sprite), UX surfaces (a canvas/overlay surface implies a backdrop), and
+      product-type heuristics (a game implies sfx/music/font). A scope-
+      completeness sweep runs before the list closes. Written to
+      docs/DESIGN__assets.yaml.
+
+  - id: asset_generation_briefs
+    title: "Asset Generation Briefs"
+    required: false
+    required_if: "asset_manifest present and any asset.source == 'to_be_generated'"
+    synthesis: true
+    description: >
+      For each asset whose source is `to_be_generated`, author a ready-to-run
+      generation brief (modality, recommended tools, prompt, negative prompt,
+      style anchors, technical constraints, acceptance criteria). A PROMPT, not
+      a binary — every to-be-generated asset must end with a brief or an
+      explicit WRN deferral (the coverage gate). Skipped entirely when no asset
+      is to_be_generated.
+
+  - id: brand_identity
+    title: "Brand Identity"
+    required: false
+    description: >
+      Present only when the product has a defined brand: logo usage, locked
+      brand palette (constrains the tokens), brand voice, imagery style. Skipped
+      via the now/skip/todo gate when there is no brand.
+
+questions:
+
+  # ---------------------------------------------------------------------------
+  # functional_structure (Axis A) — structural, asked in Phase 4
+  # ---------------------------------------------------------------------------
+  - theme: functional_structure
+    id: structure
+    schema_path: functional_structure
+    question: "How are this product's visuals realized in code? (Pick all that apply.)"
+    hint: >
+      Axis A. Derived from UX.surface_family (web/mobile/desktop/tui →
+      token_based_ui; cli/service/library → headless; voice → headless) plus PRD
+      product type (a game / creative / graphic tool adds asset_pipeline even on
+      a web target). token_based_ui + asset_pipeline co-occur for a game with
+      menus. `headless` is exclusive. Decides which sub-files and themes exist.
+    suggested_answers:
+      - "token_based_ui"
+      - "asset_pipeline"
+      - "headless"
+    free_text_allowed: false
+    required: true
+    capture_rationale: true
+    confidence_field: true
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # aesthetic_direction (Axis B) — the creative core
+  # ---------------------------------------------------------------------------
+  - theme: aesthetic_direction
+    id: style_family
+    schema_path: aesthetic_direction.style_family
+    question: "What visual style family best fits this product?"
+    hint: >
+      OPEN vocabulary — the suggestions are anchors, not a cap; type any style.
+      Seed from PRD product_identity + UX.design_principles.inspiration_refs.
+      Artistic families (hand_drawn, comic_ink, manga, pop_art, painterly,
+      pixel_art, vaporwave) on a token UI strongly imply requires_custom_assets.
+    suggested_answers:
+      - "minimal_flat"
+      - "material"
+      - "glassmorphic"
+      - "editorial"
+      - "Also: skeuomorphic, neumorphic, claymorphic, brutalist, corporate_brand, retro_terminal, pixel_art, vaporwave, hand_drawn, comic_ink, manga, pop_art, painterly, data_ink — or type your own."
+    free_text_allowed: true
+    required: true
+    capture_rationale: true
+    confidence_field: true
+    importance: high
+
+  - theme: aesthetic_direction
+    id: mood_keywords
+    schema_path: aesthetic_direction.mood_keywords
+    question: "Give 3–7 mood adjectives for the look and feel."
+    hint: "Evocative adjectives downstream agents use to break styling ties (e.g. 'calm, trustworthy, spacious')."
+    suggested_answers:
+      - "calm, trustworthy, spacious"
+      - "bold, energetic, confident"
+      - "playful, friendly, warm"
+      - "gritty, atmospheric, retro"
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: aesthetic_direction
+    id: palette_intent
+    schema_path: aesthetic_direction.palette_intent
+    question: "High-level colour intent? (Not exact values yet — the mood of the palette.)"
+    hint: "Anchors the concrete colour tokens later. e.g. 'cool neutrals + one warm accent'."
+    suggested_answers:
+      - "Cool neutrals with a single warm accent"
+      - "Warm earthy tones, low saturation"
+      - "High-contrast monochrome + vivid accent"
+      - "Dark-first with neon accents"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: aesthetic_direction
+    id: style_references
+    schema_path: aesthetic_direction.style_references
+    question: "Reference URLs, named works, or artists that capture the look? (The agent can fetch URLs to ground the look.)"
+    hint: "Fed to web_fetch during the interview. Never invent URLs — only use what the user supplies or confirms."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: aesthetic_direction
+    id: typographic_voice
+    schema_path: aesthetic_direction.typographic_voice
+    question: "How should typography feel?"
+    hint: "Steers font + scale choices in the token set. e.g. 'geometric sans, generous leading, few weights'."
+    suggested_answers:
+      - "Geometric sans, generous leading, few weights"
+      - "Humanist sans, friendly and legible"
+      - "Serif for content, sans for UI"
+      - "Monospace / technical"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: aesthetic_direction
+    id: motion_character
+    schema_path: aesthetic_direction.motion_character
+    question: "How much motion / animation should the product have?"
+    hint: "Should agree with the motion tokens. Respect prefers-reduced-motion regardless (from UX.accessibility)."
+    suggested_answers:
+      - "none"
+      - "subtle"
+      - "expressive"
+      - "playful"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: aesthetic_direction
+    id: texture_and_finish
+    schema_path: aesthetic_direction.texture_and_finish
+    question: "Any texture / finish cues? (The details that make the look read as itself.)"
+    hint: >
+      THE field that lets a token UI read as hand-drawn/comic — rough ink
+      borders, paper grain, halftone, cel-shading, CRT scanlines, glassy blur.
+      Often implies bespoke assets (see requires_custom_assets next).
+    suggested_answers:
+      - "None — clean, flat surfaces"
+      - "Soft shadows + subtle depth"
+      - "Frosted glass / blur"
+      - "Rough ink borders + paper grain (hand-drawn)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: aesthetic_direction
+    id: requires_custom_assets
+    schema_path: aesthetic_direction.requires_custom_assets
+    question: "Does this look need bespoke assets (illustration / icons / textures) beyond what a component library ships?"
+    hint: >
+      THE BRIDGE. An artistic style_family or a textured finish on a
+      token_based_ui still needs hand-made assets — set true to emit an asset
+      manifest even for a pure component UI. The agent should pre-answer true
+      when style_family is artistic or texture_and_finish is non-trivial, then
+      confirm. False for a plain library-default look.
+    suggested_answers:
+      - "true"
+      - "false"
+    free_text_allowed: false
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  # ---------------------------------------------------------------------------
+  # design_tokens — only when token_based_ui ∈ functional_structure
+  # ---------------------------------------------------------------------------
+  - theme: design_tokens
+    id: token_source
+    schema_path: tokens.token_source
+    question: "Author the design tokens from scratch, or seed them from a preset?"
+    hint: "Importing a preset (shadcn theme / tailwind.config / Tokens Studio export) gives a complete starting set the interview then refines. Much faster than hand-authoring."
+    suggested_answers:
+      - "import_shadcn"
+      - "import_tailwind"
+      - "import_tokens_studio"
+      - "dtcg_authored (hand-author from scratch)"
+    free_text_allowed: true
+    required: true
+    required_if: "'token_based_ui' in functional_structure"
+    capture_rationale: false
+    confidence_field: true
+    importance: high
+
+  - theme: design_tokens
+    id: imported_from
+    schema_path: tokens.imported_from
+    question: "Which preset / source? (Name or URL the agent can fetch.)"
+    hint: "Only when token_source is an import_* value. The agent fetches/parses it into a DTCG starting set."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    required_if: "tokens.token_source in ['import_shadcn','import_tailwind','import_tokens_studio','import_other']"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: design_tokens
+    id: theme_modes
+    schema_path: tokens.theme_modes
+    question: "Which theme modes must the token set cover? (Pick all that apply.)"
+    hint: "Each mode the colour group must resolve under. high_contrast pairs with an accessibility target."
+    suggested_answers:
+      - "light"
+      - "dark"
+      - "high_contrast"
+    free_text_allowed: true
+    required: true
+    required_if: "'token_based_ui' in functional_structure"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: design_tokens
+    id: color
+    schema_path: tokens.color
+    question: "Confirm the colour palette / ramps."
+    hint: >
+      The agent drafts a concrete DTCG colour group from the import (if any) +
+      palette_intent + brand_palette + UX.component_library.theming_tokens.colors,
+      honouring the accessibility contrast target, then the user approves or
+      iterates. Brand colours are locked, not regenerated.
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    required_if: "'token_based_ui' in functional_structure"
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: design_tokens
+    id: typography
+    schema_path: tokens.typography
+    question: "Confirm the typography tokens (font families, type scale, weights)."
+    hint: "Drafted from typographic_voice + any imported preset. Use a modular scale unless the user has specific sizes."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    required_if: "'token_based_ui' in functional_structure"
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: design_tokens
+    id: spacing
+    schema_path: tokens.spacing
+    question: "Spacing scale?"
+    hint: "4px or 8px base is industry standard; only deviate with a reason."
+    suggested_answers:
+      - "4px base ramp (Tailwind-like)"
+      - "8px base ramp (Material-like)"
+      - "Use the imported preset's scale"
+      - "Custom (will provide)"
+    free_text_allowed: true
+    required: true
+    required_if: "'token_based_ui' in functional_structure"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: design_tokens
+    id: radius
+    schema_path: tokens.radius
+    question: "Border-radius scale?"
+    hint: "Sharp (0) reads brutalist/technical; large radii read friendly. Should match the aesthetic."
+    suggested_answers:
+      - "Subtle (2–8px)"
+      - "Rounded / friendly (8–16px)"
+      - "Sharp / 0 (brutalist, pixel)"
+      - "Use the imported preset's radii"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: design_tokens
+    id: elevation
+    schema_path: tokens.elevation
+    question: "Elevation / shadow tokens?"
+    hint: "Flat aesthetics use few/no shadows; material/glass use a graded set."
+    suggested_answers:
+      - "None / flat"
+      - "Subtle 2-step set"
+      - "Graded material elevation (sm/md/lg/xl)"
+      - "Use the imported preset's shadows"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: design_tokens
+    id: motion
+    schema_path: tokens.motion
+    question: "Motion tokens (durations + easings)?"
+    hint: "Should agree with aesthetic_direction.motion_character. Keep durations short (120–300ms) unless the look is expressive."
+    suggested_answers:
+      - "Minimal (one fast duration, ease-out)"
+      - "Standard set (fast/base/slow + ease-in-out)"
+      - "Expressive (spring / custom easings)"
+      - "None"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: design_tokens
+    id: contrast_notes
+    schema_path: tokens.contrast_notes
+    question: "How does the palette satisfy the accessibility / contrast target?"
+    hint: "Ties the colour tokens to UX.accessibility.wcag_target / a PRD NFR. e.g. 'all text/bg pairs ≥ 4.5:1 (AA)'."
+    suggested_answers:
+      - "All text/bg pairs meet WCAG AA (4.5:1)"
+      - "Meets WCAG AAA (7:1)"
+      - "Large-text only (3:1)"
+      - "Not applicable (decorative only)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: design_tokens
+    id: component_library
+    schema_path: tokens.component_library
+    question: "Which component library binds these tokens?"
+    hint: "Pre-filled from UX.component_library.name. Tokens must be expressible in this library's theme."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # asset_manifest — critical synthesis; the agent drives a per-asset state
+  # machine + scope sweep (see references/asset-pipeline.md). The questions
+  # below are the entry points; the drill-down lives in the reference file.
+  # ---------------------------------------------------------------------------
+  - theme: asset_manifest
+    id: asset_taxonomy
+    schema_path: assets.asset_taxonomy
+    question: "Which KINDS of asset does this product need? (Pick all that apply.)"
+    hint: >
+      Seeds the per-asset drill-down. A 2D game typically needs sprite +
+      tileset + background + character + audio_sfx + audio_music + font; a
+      hand-drawn token UI typically needs illustration + icon + texture.
+    suggested_answers:
+      - "sprite"
+      - "tileset"
+      - "background"
+      - "character"
+      - "Also: ui_skin, icon, illustration, texture, audio_sfx, audio_music, font, shader, vfx, model_3d, animation — pick any (multi-select) or type your own."
+    free_text_allowed: true
+    required: true
+    required_if: "'asset_pipeline' in functional_structure or aesthetic_direction.requires_custom_assets == true"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: asset_manifest
+    id: render_pipeline
+    schema_path: assets.render_pipeline
+    question: "How are assets rendered / consumed at runtime?"
+    hint: "Engine / canvas / packaging notes a coding agent scaffolds against. e.g. 'WebGL via PixiJS; packed atlas; 2x/3x density'."
+    suggested_answers:
+      - "DOM/CSS (inline SVG + raster fallback)"
+      - "2D canvas / WebGL (sprite atlas)"
+      - "3D engine (glTF models + textures)"
+      - "Native game engine (Unity/Godot import)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: asset_manifest
+    id: style_guide
+    schema_path: assets.style_guide
+    question: "Cross-asset style rules every asset must obey?"
+    hint: "The asset-production checklist: line weight, grid, shared palette, perspective. Distinct from aesthetic_direction (that's the mood; this is the spec)."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: asset_manifest
+    id: assets
+    schema_path: assets.assets
+    question: "Confirm or revise the asset inventory."
+    hint: >
+      Per-asset drill-down. Each accepted asset gets the next AST-### and
+      asset_type / name / description / format_hint / source
+      (to_be_generated | user_supplied | placeholder) + optional traces. A
+      scope-completeness sweep over the taxonomy + PRD entities + product type
+      catches missing kinds (e.g. you have sprites but no UI sfx). See
+      references/asset-pipeline.md.
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    required_if: "'asset_pipeline' in functional_structure or aesthetic_direction.requires_custom_assets == true"
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  # ---------------------------------------------------------------------------
+  # asset_generation_briefs — runs once per to_be_generated asset from theme 4.
+  # schema_path prefixed `brief.` — rewritten per asset. See asset-pipeline.md.
+  # ---------------------------------------------------------------------------
+  - theme: asset_generation_briefs
+    id: target_modality
+    schema_path: brief.target_modality
+    question: "Generator modality for this asset?"
+    hint: "Derived from asset_type: sprite/character/background/texture/illustration → image; audio_* → audio; model_3d → model_3d; font → font; shader/vfx/animation → as named."
+    suggested_answers:
+      - "image"
+      - "audio"
+      - "model_3d"
+      - "Also: font, shader, vfx, animation."
+    free_text_allowed: false
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: asset_generation_briefs
+    id: recommended_tools
+    schema_path: brief.recommended_tools
+    question: "Which external generators are appropriate? (Advisory list.)"
+    hint: "Modality-appropriate, advisory (not endorsements): image → SDXL/Midjourney/Flux; audio → ElevenLabs/Suno; model_3d → Meshy/TripoSR."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: asset_generation_briefs
+    id: prompt
+    schema_path: brief.prompt
+    question: "Approve the ready-to-run generation prompt."
+    hint: >
+      The core deliverable. The agent drafts a concrete prompt from the asset
+      description + aesthetic_direction + style_guide + brand, then the user
+      approves or iterates. Must be specific enough to run as-is.
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  - theme: asset_generation_briefs
+    id: negative_prompt
+    schema_path: brief.negative_prompt
+    question: "Negative prompt? (Diffusion-image assets only.)"
+    hint: "What to exclude — e.g. 'anti-aliasing, gradients, photorealism' for pixel art. Null for non-image modalities."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: asset_generation_briefs
+    id: style_anchors
+    schema_path: brief.style_anchors
+    question: "Confirm the style anchors carried into the prompt."
+    hint: "Auto-pulled from aesthetic_direction (mood_keywords / palette_intent / style_references / texture_and_finish) + brand. Confirm or trim so every brief inherits one coherent look."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: asset_generation_briefs
+    id: technical_constraints
+    schema_path: brief.technical_constraints
+    question: "Technical constraints? (Dimensions / format / duration / poly-budget.)"
+    hint: "Derived from format_hint + render_pipeline. e.g. '16x16 px, indexed PNG, transparent bg' or '< 5k tris, 1k texture'."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: asset_generation_briefs
+    id: acceptance_criteria
+    schema_path: brief.acceptance_criteria
+    question: "What must the produced asset satisfy to be usable?"
+    hint: "Concrete pass/fail checks a human or agent can verify. e.g. 'readable at 1x', 'palette ⊆ shared set', 'loops seamlessly'."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: asset_generation_briefs
+    id: variation_notes
+    schema_path: brief.variation_notes
+    question: "Seed / batch / variation guidance?"
+    hint: "Optional. e.g. 'generate 3 seeds, pick clearest silhouette' or 'produce idle + walk + attack variants'."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # brand_identity — optional theme (now/skip/todo gate)
+  # ---------------------------------------------------------------------------
+  - theme: brand_identity
+    id: logo_usage
+    schema_path: brand_identity.logo_usage
+    question: "Logo usage rules? (Placement, clear-space, do/don't.)"
+    hint: "Only when the product has a brand. Guides where/how a coding agent places the logo."
+    suggested_answers:
+      - "No logo / wordmark only"
+      - "Logo in header, clear-space = logo height"
+      - "Provided logo asset (will supply)"
+      - "Generate a logo (add it to the asset manifest)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: brand_identity
+    id: brand_palette
+    schema_path: brand_identity.brand_palette
+    question: "Locked brand colours? (These constrain the design tokens.)"
+    hint: "Brand colours are LOCKED — the token colour group must include them verbatim, not regenerate them."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: brand_identity
+    id: brand_voice
+    schema_path: brand_identity.brand_voice
+    question: "Brand voice? (Verbal identity — distinct from typographic voice.)"
+    hint: "Echoes UX.content_rules.tone but at the brand level. e.g. 'confident, never jargony'."
+    suggested_answers:
+      - "Confident + concise"
+      - "Warm + human"
+      - "Playful + irreverent"
+      - "Authoritative + precise"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: brand_identity
+    id: imagery_style
+    schema_path: brand_identity.imagery_style
+    question: "Imagery / photography / illustration direction?"
+    hint: "Guides any photographic or illustrative assets. e.g. 'natural-light product photography, no stock clichés'."
+    suggested_answers:
+      - "Photography (natural light, candid)"
+      - "Flat illustration"
+      - "3D renders"
+      - "No imagery / iconography only"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med

@@ -1,0 +1,173 @@
+# =============================================================================
+# API__<resource>.yaml — Per-resource schema reference
+# =============================================================================
+# One file per API resource, written next to docs/API.yaml in the consumer
+# project. <resource> is kebab-case and unique (same resource_id used in
+# API.yaml's resource_inventory).
+#
+# A resource is the smallest cohesive unit of the API — typically all
+# endpoints that operate on the same primary DATA entity (e.g. all
+# /users endpoints, all /orders endpoints). Cross-cutting resources
+# (e.g. /search) carry primary_entity: null.
+#
+# Conventions:
+#   - `null` (not omission) means "explicitly unanswered".
+#   - Endpoint operation objects are OpenAPI 3.1 operations embedded
+#     verbatim (method, path, parameters, requestBody, responses, security).
+#     See references/openapi-embedding.md for the subset supported.
+#   - SDLC-specific sibling fields on each endpoint (idempotent,
+#     rate_limit_override, auth_override) live alongside the OpenAPI keys
+#     and are stripped before any OpenAPI-tool round-trip.
+#   - Schemas in this file are wire DTOs. Persistent entity shapes live in
+#     docs/DATA-MODEL.yaml. DTOs MAY $ref DATA entities (use the
+#     `$ref: "data-model://<EntityName>"` form documented in
+#     references/openapi-embedding.md).
+#   - Optional annotation `projects_from: <EntityName>` on a schema marks
+#     it as a projection of a DATA entity (used by downstream agents to
+#     wire ORM ↔ DTO mappers).
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# metadata — always at top level
+# -----------------------------------------------------------------------------
+metadata:
+  api_resource_version: "1.1"             # schema version this file conforms to
+  last_updated: "2026-05-25T12:00:00Z"     # ISO-8601 UTC timestamp of last write
+  generated_by: sdlc-api
+  session_id: "00000000-0000-0000-0000-000000000000"
+  status: "draft"                          # "draft" | "complete"
+                                           # writer sets to "complete" only when
+                                           # all required fields below are filled
+                                           # and the resource is user-confirmed.
+  changelog: null                          # Optional[list[string]]. Append-only.
+                                           # Same format as API.yaml.metadata.changelog.
+
+# -----------------------------------------------------------------------------
+# identity
+# -----------------------------------------------------------------------------
+resource_id: null               # REQUIRED — kebab-case unique slug, matches the
+                                # resource_id in API.yaml.resource_inventory (string)
+base_path: null                 # REQUIRED — e.g. "/v1/users" (string)
+primary_entity: null            # DATA-MODEL entity NAME (PascalCase dict key in
+                                # DATA-MODEL.yaml.entities) this resource fronts
+                                # (string|null). Null is allowed for cross-cutting
+                                # resources like /search or /health. NOT an
+                                # ENT-NNN id.
+
+# -----------------------------------------------------------------------------
+# traces — REQUIRED for coverage checks
+# -----------------------------------------------------------------------------
+traces_prd_features: null       # REQUIRED — list[string] of "FR-NNN" ids
+                                # (verbatim from PRD, no description text), e.g.
+                                #   - "FR-001"
+                                #   - "FR-003"
+                                # Validator enforces FR-NNN format.
+traces_ux_surfaces: null        # REQUIRED — list[string] of "SCR-NNN" ids
+                                # (from UX.surface_inventory[].id), e.g.
+                                #   - "SCR-001"
+                                #   - "SCR-002"
+                                # Never the editable `surface_id` slug. Empty
+                                # list [] is allowed ONLY when the resource
+                                # sets `internal: true` below — the validator
+                                # then waives the required-field gate for both
+                                # trace lists and reports the waiver as a
+                                # warning. Validator enforces SCR-NNN format.
+traces_prd_workflows: null      # Optional list[string] of "WKF-NNN" ids
+                                # (from PRD.use_cases.core_workflows). Use
+                                # when a resource is the API entry point for
+                                # a workflow even though no single FR anchors
+                                # it directly. Validator enforces WKF-NNN
+                                # format.
+internal: null                  # Optional bool. true = internal-only resource
+                                # (health, metrics, ops) that serves no PRD
+                                # feature / UX screen BY DESIGN. The validator
+                                # then accepts empty traces_prd_features /
+                                # traces_ux_surfaces at status complete and
+                                # reports the waiver as a warning, so the
+                                # choice stays visible. Mirror the flag on the
+                                # matching API.yaml resource_inventory entry.
+
+# -----------------------------------------------------------------------------
+# endpoints — list of OpenAPI 3.1 operations + SDLC siblings.
+# Each entry is one endpoint = one (method, path) pair.
+# -----------------------------------------------------------------------------
+endpoints:                      # REQUIRED — list[Endpoint]
+  # Each Endpoint embeds an OpenAPI 3.1 operation object with SDLC siblings:
+  #
+  #   - id: "OPR-001"             # REQUIRED — stable OPR-NNN identifier; the
+  #                               # downstream cross-stage reference contract
+  #                               # for test cases, task graph, architecture
+  #                               # components. Assigned by the writer in
+  #                               # collection order during theme 10. Stable
+  #                               # across renames of `operation_id` or path.
+  #                               # Counter: state.last_ids.OPR.
+  #     operation_id: kebab-or-snake-case, unique within this file
+  #                   (REQUIRED — used by downstream codegen for function names;
+  #                   editable; OPR-NNN is the stable id)
+  #     method: GET | POST | PUT | PATCH | DELETE | HEAD | OPTIONS
+  #     path: full HTTP path, e.g. "/v1/users/{id}" (REQUIRED — usually starts
+  #           with base_path; surface deviations as a warning during the deep-dive)
+  #     summary: short one-line description (REQUIRED)
+  #     description: optional longer description
+  #     tags: optional list[string]
+  #     parameters:                         # OpenAPI parameter objects
+  #       - name: id
+  #         in: path                        # path | query | header
+  #         required: true
+  #         schema: { type: string, format: uuid }
+  #         description: optional
+  #     requestBody:                        # OpenAPI requestBody (optional)
+  #       required: true
+  #       content:
+  #         application/json:
+  #           schema: { $ref: "#/components/schemas/UserCreate" }
+  #     responses:                          # REQUIRED — at least one
+  #       "200":
+  #         description: ok
+  #         content:
+  #           application/json:
+  #             schema: { $ref: "#/components/schemas/User" }
+  #       "404":
+  #         description: not found
+  #         content:
+  #           application/problem+json:
+  #             schema: { $ref: "../API.yaml#/shared_schemas/Problem" }
+  #     security:                           # OpenAPI security requirements
+  #       - bearer_jwt: ["read:users"]
+  #
+  #     # SDLC siblings — present but NOT part of OpenAPI; stripped before
+  #     # round-tripping to OpenAPI tooling:
+  #     idempotent: true|false|null         # null = inherit API.yaml default
+  #     rate_limit_override: string|null    # null = inherit API.yaml default
+  #     auth_override: string|null          # null = inherit API.yaml default
+  null
+
+# -----------------------------------------------------------------------------
+# schemas — OpenAPI 3.1 component schemas owned by this resource.
+# DTOs only (wire shapes). Persistent entities live in DATA-MODEL.yaml.
+# -----------------------------------------------------------------------------
+schemas:                        # object — OpenAPI 3.1 schemas keyed by name
+                                # e.g.
+                                #   User:
+                                #     projects_from: User      # DATA entity name
+                                #     type: object
+                                #     required: [id, email]
+                                #     properties:
+                                #       id:    { type: string, format: uuid }
+                                #       email: { type: string, format: email }
+                                #       name:  { type: string }
+                                #   UserCreate:
+                                #     projects_from: User
+                                #     type: object
+                                #     required: [email]
+                                #     properties:
+                                #       email: { type: string, format: email }
+                                #       name:  { type: string }
+                                #       # password_hash deliberately omitted —
+                                #       # DTOs do not expose persistence fields.
+  null
+
+# -----------------------------------------------------------------------------
+# notes — free-form, optional. For caveats that don't fit elsewhere.
+# -----------------------------------------------------------------------------
+notes: null                     # string | null

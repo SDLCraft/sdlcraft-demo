@@ -1,0 +1,1094 @@
+# =============================================================================
+# ux-questions.yaml — Question inventory for the sdlc-ux skill
+# =============================================================================
+# Same shape as sdlc-prd's prd-questions.yaml. Two top-level keys:
+# `themes` (the canonical interview order) and `questions` (each carrying
+# a schema_path that points into UX.yaml OR into a per-surface yaml under
+# the special prefix `surface.<...>`).
+#
+# Field reference (same as prd-questions.yaml):
+#   theme              — grouping label; matches a top-level key in UX.yaml
+#                        (or the synthesis themes `surface_inventory` and
+#                        `per_surface_deepdive`).
+#   id                 — unique slug, kebab-case.
+#   schema_path        — dotted path to the target field.
+#                        For UX.yaml fields:      "design_principles" or
+#                                                 "component_library.name"
+#                        For surface fields:      "surface.<field>" — the
+#                                                 agent rewrites the prefix
+#                                                 to "<UX__surface.yaml>.
+#                                                 <field>" for each surface
+#                                                 in theme 11.
+#   question           — prompt shown to the user.
+#   hint               — why this matters for downstream agents (short).
+#   suggested_answers  — 3–5 plausible options shown as a numbered list.
+#   free_text_allowed  — if true, "Other / type your own" appears.
+#   required           — true => must be answered (or explicitly nulled with
+#                        a warning) before status: complete.
+#   required_if        — optional expression evaluated at the start of each
+#                        new theme batch against already-answered fields.
+#                        Reading: PROMOTION (canonical activation-vs-promotion
+#                        definition: ../prd/references/interview-mechanics.md).
+#   capture_rationale  — if true, follow with one "Why?" question.
+#   confidence_field   — if true, a sibling <field>_confidence is written.
+#   importance         — med | high | critical (see PRD's importance-flows.md
+#                        for tier mechanics; same semantics here).
+#
+# Theme order is the canonical interview order. Required themes run
+# unconditionally; optional themes get a now/skip/todo gate.
+# =============================================================================
+
+themes:
+  - id: platform_and_shell
+    title: "Platform & Shell"
+    required: true
+    description: >
+      Surface family (cli | web | mobile | desktop | tui | voice | service |
+      library | mixed) — derived from the PRD.technical_constraints.
+      runtime_platform LIST (two or more families in it → mixed) but
+      confirmed with the user. For graphical surfaces, also captures device
+      targets and viewport breakpoints.
+
+  - id: design_principles
+    title: "Design Principles"
+    required: true
+    description: "3–7 tenets that govern every surface."
+
+  - id: navigation_model
+    title: "Navigation Model"
+    required: true
+    description: >
+      Sitemap (graphical), command tree (CLI), or state graph
+      (neither). Defines how surfaces relate to each other.
+
+  - id: surface_inventory
+    title: "Surface Inventory"
+    required: true
+    synthesis: true
+    description: >
+      The full list of surfaces (screens, modals, panels, CLI commands,
+      flow steps). Seeded from multiple PRD families: WKF-### workflows
+      (primary), FR-### features (often imply verbs/screens), ENT-### data
+      entities (often imply CRUD/list/detail surfaces), and JTB-### jobs
+      (orthogonal lens). Per-item drill-down assigns SCR-### ids and traces
+      back to the upstream PRD ids. A dynamic scope-completeness sweep
+      reflects on the draft inventory + every upstream family before the
+      list closes — this is the gate that catches surfaces implied by an
+      entity or feature but not by any explicit workflow (e.g. a
+      ProjectRegistry entity implies a `list` command).
+
+  - id: component_library
+    title: "Component Library"
+    required: true
+    description: "Library choice + rationale; theming tokens."
+
+  - id: state_patterns
+    title: "Standard State Patterns"
+    required: true
+    description: >
+      Rules for default / loading / empty / error / success states
+      that apply across every surface.
+
+  - id: content_rules
+    title: "Content & Copy Rules"
+    required: true
+    description: "Tone, voice, error-message style, copy guidelines."
+
+  - id: accessibility
+    title: "Accessibility"
+    required: true
+    description: "WCAG target, keyboard-only paths, screen-reader notes."
+
+  - id: localisation
+    title: "Localisation"
+    required: false
+    description: >
+      Default locale, target locales, RTL, framework. Pre-filled ✓ found from
+      PRD.internationalization (PRD 1.1) when present — PRD enabled: true
+      promotes this theme's gate to "now".
+
+  - id: cli_specifics
+    title: "CLI Specifics"
+    required: false
+    required_if: "surface_family in ['cli', 'mixed']"
+    description: >
+      Subcommand tree, arg parsing library, output formats, exit codes,
+      interactive mode, config file precedence.
+
+  - id: per_surface_deepdive
+    title: "Per-Surface Deep-Dive"
+    required: true
+    synthesis: true
+    description: >
+      For every surface from theme 4: layout, states, interactions,
+      components, validation, accessibility notes, and traces back to
+      PRD flows. Each surface is its own critical mini-section.
+
+questions:
+
+  # ---------------------------------------------------------------------------
+  # platform_and_shell
+  # ---------------------------------------------------------------------------
+  - theme: platform_and_shell
+    id: surface_family
+    schema_path: surface_family
+    question: "What surface family does this product target?"
+    hint: >
+      Derived from PRD runtime_platform; confirms how every later question is
+      shaped. Nine valid values — more than one AskUserQuestion call can show —
+      so present the PRD-derived candidate first plus the 2–3 next most likely,
+      and let the user type any other via "Other". HEADLESS families
+      (cli, service, library) have no visual screens: the interview emits a
+      minimal spec (no SCR-### screens; commands/components/API symbols
+      instead — see references/surface-discovery.md), accessibility is
+      not_applicable_cli, and no component_library/theming applies. tui is
+      screen-like (full-screen terminal UI); voice is turn-based conversational.
+    suggested_answers:
+      - "cli"
+      - "web"
+      - "mobile"
+      - "desktop"
+      - "tui"
+      - "voice"
+      - "service"
+      - "library"
+      - "mixed"
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: platform_and_shell
+    id: surface_family_members
+    schema_path: surface_family_members
+    question: "Which surface families are included? (Pick all that apply.)"
+    hint: "Only asked when surface_family == 'mixed'. Each member family runs its own sub-interview later. Members may include headless families (cli/service/library) alongside visual ones (web/mobile/desktop/tui/voice)."
+    suggested_answers:
+      - "cli"
+      - "web"
+      - "mobile"
+      - "desktop"
+      - "tui"
+      - "voice"
+      - "service"
+      - "library"
+    free_text_allowed: true
+    required: false
+    required_if: "surface_family == 'mixed'"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: platform_and_shell
+    id: device_targets
+    schema_path: device_targets
+    question: "Which devices should this UI be designed for? (Pick all that apply.)"
+    hint: "Drives responsive breakpoints, touch vs. mouse assumptions, density choices."
+    suggested_answers:
+      - "desktop"
+      - "tablet"
+      - "mobile"
+      - "tv_large_display"
+    free_text_allowed: true
+    required: false
+    required_if: "surface_family in ['web', 'mobile', 'desktop', 'mixed']"
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: platform_and_shell
+    id: viewport_breakpoints
+    schema_path: viewport_breakpoints
+    question: "Viewport breakpoints? (Pick a preset or specify custom widths.)"
+    hint: "Concrete pixel breakpoints downstream agents can drop straight into CSS or layout config."
+    suggested_answers:
+      - "Tailwind defaults: sm=640, md=768, lg=1024, xl=1280, 2xl=1536"
+      - "Material defaults: xs=0, sm=600, md=960, lg=1280, xl=1920"
+      - "Bootstrap defaults: sm=576, md=768, lg=992, xl=1200, xxl=1400"
+      - "Single breakpoint: mobile<768, desktop>=768"
+    free_text_allowed: true
+    required: false
+    required_if: "surface_family in ['web', 'mixed']"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # design_principles
+  # ---------------------------------------------------------------------------
+  - theme: design_principles
+    id: tenets
+    schema_path: design_principles.tenets
+    question: "What 3–7 design tenets should govern every surface? (Short phrases.)"
+    hint: "Used by downstream agents to break ties — e.g. 'speed over discoverability' guides default-states decisions."
+    suggested_answers:
+      - "Keyboard-first — every action reachable without a mouse"
+      - "Speed over discoverability — power users first"
+      - "Progressive disclosure — hide advanced options until needed"
+      - "One primary action per screen"
+      - "Match platform conventions — don't invent new patterns"
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: design_principles
+    id: design_anti_patterns
+    schema_path: design_principles.anti_patterns
+    question: "Are there design anti-patterns to explicitly avoid? (Pick all that apply.)"
+    hint: "Negative space matters — telling agents what NOT to build is as valuable as what to build."
+    suggested_answers:
+      - "Modal dialogs for routine confirmations"
+      - "Multi-step wizards for short tasks"
+      - "Hover-only affordances (kills mobile)"
+      - "Auto-advancing carousels"
+      - "Toasts as the only error channel"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: design_principles
+    id: design_inspiration
+    schema_path: design_principles.inspiration_refs
+    question: "Any products whose UX style we explicitly want to echo? (Pick or describe.)"
+    hint: "References anchor abstract principles in concrete examples downstream agents can study."
+    suggested_answers:
+      - "Linear (focus + speed)"
+      - "Notion (flexibility + content density)"
+      - "Stripe Dashboard (clarity + trust)"
+      - "GitHub (data density + power-user features)"
+      - "Apple HIG (platform-native)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # navigation_model
+  # ---------------------------------------------------------------------------
+  - theme: navigation_model
+    id: model_type
+    schema_path: navigation_model.type
+    question: "How is navigation structured?"
+    hint: "Sitemap = static tree of named locations; command tree = verb/noun CLI; state graph = entry/exit conditions only (no fixed hierarchy)."
+    suggested_answers:
+      - "sitemap"
+      - "command_tree"
+      - "state_graph"
+      - "hybrid"
+    free_text_allowed: false
+    required: true
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: navigation_model
+    id: top_level_nodes
+    schema_path: navigation_model.top_level_nodes
+    question: "Name the top-level navigation nodes. (Routes, menu items, or command groups.)"
+    hint: "Direct seed for the sitemap / menu structure / CLI command groups."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: navigation_model
+    id: deep_link_strategy
+    schema_path: navigation_model.deep_link_strategy
+    question: "Deep-link / URL strategy? (Web/mobile only.)"
+    hint: "Affects routing library config and shareability."
+    suggested_answers:
+      - "Path-based (/projects/abc/tasks/123)"
+      - "Hash-based (#/projects/abc)"
+      - "Query-string params only"
+      - "Not applicable (CLI / single-screen)"
+    free_text_allowed: true
+    required: false
+    required_if: "surface_family in ['web', 'mobile', 'mixed']"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: navigation_model
+    id: auth_required_routes
+    schema_path: navigation_model.auth_required_routes
+    question: "Which navigation nodes require authentication? (Pick or describe.)"
+    hint: "Drives route guards and the unauthenticated redirect flow."
+    suggested_answers:
+      - "All routes except login/signup"
+      - "Public landing + authenticated app"
+      - "Mixed (will detail per surface)"
+      - "None — no auth in v1"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # surface_inventory — critical theme; the agent drives a per-item state
+  # machine (see references/surface-discovery.md). The single question below
+  # is the entry point; the rest of the flow is in the reference file.
+  # ---------------------------------------------------------------------------
+  - theme: surface_inventory
+    id: surfaces
+    schema_path: surface_inventory
+    question: "Confirm or revise the surface inventory drawn from PRD."
+    hint: >
+      Candidates are seeded from WKF-### workflows, FR-### features
+      (verbs/screens), ENT-### entities (CRUD/list/detail surfaces), and
+      JTB-### jobs. Each accepted candidate is assigned the next SCR-NNN
+      and persisted in state.last_ids.SCR. After the per-item loop closes,
+      a scope-completeness sweep reflects on the draft list + every
+      upstream PRD family to surface surfaces likely missed (e.g. a
+      doctor/diagnostic command, a cross-project enumeration view).
+      Every WKF-### must end up referenced by at least one surface's
+      traces_workflows (coverage check at validation).
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  # ---------------------------------------------------------------------------
+  # component_library
+  # ---------------------------------------------------------------------------
+  - theme: component_library
+    id: library_choice
+    schema_path: component_library.name
+    question: "Which component library will we use? (Pick or describe.)"
+    hint: "Lib choice determines a huge amount about how every component contract is written downstream."
+    suggested_answers:
+      - "shadcn/ui (Tailwind + Radix)"
+      - "Material UI"
+      - "Chakra UI"
+      - "Ant Design"
+      - "Headless UI"
+      - "Rich (Python CLI)"
+      - "Ink (React-for-CLI / Node)"
+      - "Bubble Tea (Go TUI)"
+      - "Custom / hand-rolled"
+      - "Not applicable"
+    free_text_allowed: true
+    required: true
+    capture_rationale: true
+    confidence_field: true
+    importance: high
+
+  - theme: component_library
+    id: theming_approach
+    schema_path: component_library.theming_approach
+    question: "Theming approach?"
+    hint: "Tokens-first (DTCG / Tailwind) is the safest seed for downstream agents."
+    suggested_answers:
+      - "Design tokens (DTCG / W3C format)"
+      - "Tailwind-only utility classes"
+      - "CSS variables + theme switcher"
+      - "Library's built-in theme provider"
+      - "No theming (single fixed style)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: component_library
+    id: color_tokens
+    schema_path: component_library.theming_tokens.colors
+    question: "Color tokens? (Brand-primary, accent, semantic — list or describe.)"
+    hint: "Even a few named tokens are enough for downstream agents to keep colors consistent."
+    suggested_answers:
+      - "Use library defaults (no custom palette)"
+      - "Brand primary + secondary + library defaults for the rest"
+      - "Full custom palette (will provide)"
+      - "Defer — pick a placeholder palette"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: component_library
+    id: typography_tokens
+    schema_path: component_library.theming_tokens.typography
+    question: "Typography tokens? (Font family, type scale.)"
+    hint: "Drives Tailwind config or theme.ts. Library defaults are usually fine for v1."
+    suggested_answers:
+      - "Library defaults (Inter / system font)"
+      - "Inter + sans-serif fallback"
+      - "Serif for content, sans for UI"
+      - "Custom font stack (will provide)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: component_library
+    id: spacing_scale
+    schema_path: component_library.theming_tokens.spacing
+    question: "Spacing scale?"
+    hint: "4px or 8px grid is industry standard; only deviate if you have a reason."
+    suggested_answers:
+      - "4px base (Tailwind default)"
+      - "8px base (Material)"
+      - "Library default — no custom scale"
+      - "Custom scale (will provide)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # state_patterns
+  # ---------------------------------------------------------------------------
+  - theme: state_patterns
+    id: loading_pattern
+    schema_path: state_patterns.loading
+    question: "Loading-state pattern across all surfaces?"
+    hint: "Per-surface yamls all default to this unless they override."
+    suggested_answers:
+      - "Skeleton placeholders matching final layout"
+      - "Spinner centered on the surface"
+      - "Top progress bar + greyed content"
+      - "Optimistic UI — render assumed result, reconcile on response"
+      - "None — synchronous only"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: state_patterns
+    id: empty_pattern
+    schema_path: state_patterns.empty
+    question: "Empty-state pattern?"
+    hint: "Empty states are first impressions — call out the canonical anatomy here so downstream agents follow it."
+    suggested_answers:
+      - "Illustration + headline + primary CTA"
+      - "Plain helper text + primary CTA"
+      - "Inline guidance (no separate empty layout)"
+      - "Hide the surface entirely until non-empty"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: state_patterns
+    id: error_pattern
+    schema_path: state_patterns.error
+    question: "Error-state pattern?"
+    hint: "Drives recovery affordances. Recoverable errors should always offer a retry."
+    suggested_answers:
+      - "Inline error in the affected region + retry button"
+      - "Banner at top of surface + retry"
+      - "Toast notification + auto-dismiss"
+      - "Full-screen error page (for hard failures)"
+      - "Mix of toast (transient) + inline (persistent)"
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: true
+    importance: high
+
+  - theme: state_patterns
+    id: success_pattern
+    schema_path: state_patterns.success
+    question: "Success / confirmation pattern?"
+    hint: "Crucial for trust. Silence on success often reads as failure."
+    suggested_answers:
+      - "Toast notification + content updates in place"
+      - "Inline confirmation in the affected region"
+      - "Navigate to a confirmation screen"
+      - "No explicit confirmation — content change is the confirmation"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: state_patterns
+    id: default_pattern
+    schema_path: state_patterns.default
+    question: "Default-state default — what does a 'normal' surface look like before any user action?"
+    hint: "Often overlooked. Worth documenting so the per-surface yamls don't drift."
+    suggested_answers:
+      - "Render data immediately if cached; loading state otherwise"
+      - "Always show loading until data is fetched"
+      - "Show empty state until user takes an action"
+      - "Show last-seen data with a refresh affordance"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # content_rules
+  # ---------------------------------------------------------------------------
+  - theme: content_rules
+    id: tone
+    schema_path: content_rules.tone
+    question: "Brand voice / tone in UI copy?"
+    hint: "Drives every label, button, error message. 'Professional + concise' vs 'playful' is night and day."
+    suggested_answers:
+      - "Professional + concise"
+      - "Friendly + plain-spoken"
+      - "Playful + witty"
+      - "Technical + precise"
+      - "Neutral / utilitarian"
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: true
+    importance: high
+
+  - theme: content_rules
+    id: error_message_style
+    schema_path: content_rules.error_message_style
+    question: "Error-message style?"
+    hint: "Apple's 'Indicate Resolution' guideline beats blame-the-user phrasing."
+    suggested_answers:
+      - "Plain language + what to do next"
+      - "Plain language only (no resolution suggested)"
+      - "Technical detail (developer audience)"
+      - "Short label + 'Learn more' link"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: content_rules
+    id: terminology
+    schema_path: content_rules.terminology
+    question: "Any domain terms that must be used consistently? (term : definition)"
+    hint: "Stops downstream agents from inventing synonyms."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: content_rules
+    id: copy_length_limits
+    schema_path: content_rules.copy_length_limits
+    question: "Copy-length limits? (Buttons, headings, error toasts.)"
+    hint: "Concrete caps prevent over-long generated copy."
+    suggested_answers:
+      - "Buttons ≤ 24 chars, headings ≤ 60, toasts ≤ 120"
+      - "Buttons ≤ 16 chars (mobile-friendly)"
+      - "No specific caps"
+      - "Defer — agent picks reasonable defaults"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # accessibility
+  # ---------------------------------------------------------------------------
+  - theme: accessibility
+    id: wcag_target
+    schema_path: accessibility.wcag_target
+    question: "WCAG conformance target?"
+    hint: "Matches PRD non_functional_requirements.accessibility but may be tightened here."
+    suggested_answers:
+      - "wcag_a"
+      - "wcag_aa"
+      - "wcag_aaa"
+      - "none_yet"
+      - "not_applicable_cli"
+    free_text_allowed: false
+    required: true
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: accessibility
+    id: keyboard_only
+    schema_path: accessibility.keyboard_only
+    question: "Must every action be reachable via keyboard only?"
+    hint: "If yes, downstream agents will add focus rings, tab order, keyboard shortcuts to every surface."
+    suggested_answers:
+      - "true"
+      - "false"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: accessibility
+    id: screen_reader_notes
+    schema_path: accessibility.screen_reader_notes
+    question: "Screen-reader notes? (ARIA conventions, live regions, etc.)"
+    hint: "Use ARIA role names — downstream agents drop them into JSX/components directly."
+    suggested_answers:
+      - "Standard ARIA roles (button, navigation, main, complementary)"
+      - "Live regions for async results (aria-live: polite)"
+      - "Skip-link to main content"
+      - "No specific notes — library handles it"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: accessibility
+    id: color_contrast_minimum
+    schema_path: accessibility.color_contrast_minimum
+    question: "Minimum text/background color contrast ratio?"
+    hint: "AA = 4.5:1 normal text, 3:1 large. AAA = 7:1 normal, 4.5:1 large."
+    suggested_answers:
+      - "4.5:1 (WCAG AA)"
+      - "7:1 (WCAG AAA)"
+      - "3:1 (AA large text only)"
+      - "Defer to library defaults"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: accessibility
+    id: motion_preferences
+    schema_path: accessibility.motion_preferences
+    question: "Honor prefers-reduced-motion?"
+    hint: "If yes, downstream agents will gate animations behind the media query."
+    suggested_answers:
+      - "true"
+      - "false"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # localisation — optional
+  # ---------------------------------------------------------------------------
+  - theme: localisation
+    id: enabled
+    schema_path: localisation.enabled
+    question: "Is the product localised (i.e. translatable)?"
+    hint: "If false, copy goes in directly; if true, every string goes through an i18n key. Pre-filled from PRD.internationalization.enabled (PRD 1.1) when the PRD carries it."
+    suggested_answers:
+      - "true"
+      - "false"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: localisation
+    id: default_locale
+    schema_path: localisation.default_locale
+    question: "Default locale? (BCP-47 tag, e.g. en-US.)"
+    hint: "Falls back to en-US if not specified. Pre-filled from PRD.internationalization.default_locale."
+    suggested_answers:
+      - "en-US"
+      - "en-GB"
+      - "de-DE"
+      - "fr-FR"
+      - "ja-JP"
+    free_text_allowed: true
+    required: false
+    required_if: "localisation.enabled == true"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: localisation
+    id: target_locales
+    schema_path: localisation.target_locales
+    question: "Target locales to ship in v1? (BCP-47 tags.)"
+    hint: "Each locale adds testing surface; pick conservatively. Pre-filled from PRD.internationalization.target_locales."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    required_if: "localisation.enabled == true"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: localisation
+    id: framework
+    schema_path: localisation.framework
+    question: "i18n framework?"
+    hint: "Library choice determines key syntax and pluralization handling."
+    suggested_answers:
+      - "react-i18next"
+      - "next-intl"
+      - "FormatJS / react-intl"
+      - "vue-i18n"
+      - "gettext"
+      - "Custom / native platform"
+    free_text_allowed: true
+    required: false
+    required_if: "localisation.enabled == true"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: localisation
+    id: rtl_support
+    schema_path: localisation.rtl_support
+    question: "Right-to-left (RTL) language support required?"
+    hint: "If yes, every layout must mirror logically (margin-inline-start, not margin-left). Pre-filled from PRD.internationalization.rtl_support."
+    suggested_answers:
+      - "true"
+      - "false"
+    free_text_allowed: false
+    required: false
+    required_if: "localisation.enabled == true"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # cli_specifics — only when surface_family in ['cli', 'mixed']
+  # ---------------------------------------------------------------------------
+  - theme: cli_specifics
+    id: root_command
+    schema_path: cli.root_command
+    question: "Root command name?"
+    hint: "Pre-fills from PRD product_identity.slug. Defines `<root> <verb> <noun> [args]` shape."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    required_if: "surface_family in ['cli', 'mixed']"
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: cli_specifics
+    id: command_shape
+    schema_path: cli.command_shape
+    question: "Command shape?"
+    hint: "`verb_noun` (`git commit`) is the most common; `noun_verb` (`docker container ls`) suits hierarchical CLIs."
+    suggested_answers:
+      - "verb_noun (git commit, git push)"
+      - "noun_verb (docker container ls)"
+      - "flat (single-level commands only)"
+      - "mixed (some verbs, some noun-verb groups)"
+    free_text_allowed: true
+    required: true
+    required_if: "surface_family in ['cli', 'mixed']"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: cli_specifics
+    id: arg_parsing_library
+    schema_path: cli.arg_parsing_library
+    question: "Argument-parsing library?"
+    hint: "Library choice locks in flag syntax, type coercion, and help-text generation."
+    suggested_answers:
+      - "click (Python)"
+      - "typer (Python)"
+      - "argparse (Python stdlib)"
+      - "cobra (Go)"
+      - "clap (Rust)"
+      - "commander (Node)"
+      - "oclif (Node)"
+      - "yargs (Node)"
+    free_text_allowed: true
+    required: true
+    required_if: "surface_family in ['cli', 'mixed']"
+    capture_rationale: true
+    confidence_field: true
+    importance: med
+
+  - theme: cli_specifics
+    id: arg_conventions
+    schema_path: cli.arg_conventions
+    question: "Argument-syntax conventions?"
+    hint: "POSIX (-x, single dash, no equals) vs GNU (--long, equals or space) vs custom."
+    suggested_answers:
+      - "posix"
+      - "gnu"
+      - "custom"
+    free_text_allowed: false
+    required: false
+    required_if: "surface_family in ['cli', 'mixed']"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: cli_specifics
+    id: help_text_format
+    schema_path: cli.help_text_format
+    question: "Help-text format?"
+    hint: "auto_generated relies on the parsing library's --help; authored means we maintain it manually."
+    suggested_answers:
+      - "auto_generated"
+      - "authored"
+      - "hybrid (auto + authored examples)"
+    free_text_allowed: false
+    required: false
+    required_if: "surface_family in ['cli', 'mixed']"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: cli_specifics
+    id: output_formats_supported
+    schema_path: cli.output_formats.supported
+    question: "Which output formats does the CLI emit? (Pick all that apply.)"
+    hint: "json + plain is the bare minimum for scriptable CLIs."
+    suggested_answers:
+      - "table"
+      - "json"
+      - "plain"
+      - "yaml"
+      - "csv"
+    free_text_allowed: true
+    required: true
+    required_if: "surface_family in ['cli', 'mixed']"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: cli_specifics
+    id: output_format_default
+    schema_path: cli.output_formats.default
+    question: "Default output format when no --output flag is passed?"
+    hint: "table for humans, json for machine readers — pick the dominant audience."
+    suggested_answers:
+      - "table"
+      - "json"
+      - "plain"
+      - "yaml"
+    free_text_allowed: false
+    required: true
+    required_if: "surface_family in ['cli', 'mixed']"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: cli_specifics
+    id: exit_code_convention
+    schema_path: cli.exit_code_convention
+    question: "Exit-code convention?"
+    hint: "POSIX = 0 success, 1 generic error, 2 misuse. Some CLIs reserve 64-78 (sysexits.h)."
+    suggested_answers:
+      - "POSIX standard (0=ok, 1=error, 2=misuse)"
+      - "sysexits.h (64-78 range)"
+      - "Custom (will detail per command)"
+    free_text_allowed: true
+    required: false
+    required_if: "surface_family in ['cli', 'mixed']"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: cli_specifics
+    id: interactive_mode
+    schema_path: cli.interactive_mode
+    question: "Interactive mode? (Prompts when args are missing.)"
+    hint: "Interactive mode improves UX but complicates scripting; weigh accordingly."
+    suggested_answers:
+      - "Never — flags only, fail if missing"
+      - "Prompt for missing required args"
+      - "Full interactive REPL alongside non-interactive mode"
+      - "TUI (terminal UI) mode for some commands"
+    free_text_allowed: true
+    required: false
+    required_if: "surface_family in ['cli', 'mixed']"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: cli_specifics
+    id: config_file_location
+    schema_path: cli.config_file.location
+    question: "Where does the config file live?"
+    hint: "XDG standard puts user configs under ~/.config/<app>/config.{yaml,toml,json}."
+    suggested_answers:
+      - "$XDG_CONFIG_HOME/<app>/config.yaml (Linux/macOS)"
+      - "~/.<app>rc"
+      - "./<app>.config.{yaml,toml,json} (cwd)"
+      - "No config file — flags + env only"
+    free_text_allowed: true
+    required: false
+    required_if: "surface_family in ['cli', 'mixed']"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: cli_specifics
+    id: config_precedence
+    schema_path: cli.config_file.precedence
+    question: "Config precedence order?"
+    hint: "Standard CLI convention: flag > env > file > default. Override only with reason."
+    suggested_answers:
+      - "cli_flag > env > config_file > default"
+      - "config_file > env > cli_flag > default (rare)"
+      - "Custom (will describe)"
+    free_text_allowed: true
+    required: false
+    required_if: "surface_family in ['cli', 'mixed']"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: cli_specifics
+    id: env_prefix
+    schema_path: cli.config_file.env_prefix
+    question: "Environment-variable prefix? (e.g. ACME_ for ACME_API_KEY.)"
+    hint: "Prevents name collisions with other CLIs sharing the shell."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    required_if: "surface_family in ['cli', 'mixed']"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # per_surface_deepdive — runs once per surface from theme 4.
+  # All questions below carry schema_path prefixed `surface.` — the agent
+  # rewrites the prefix at runtime per surface. See references/surface-discovery.md
+  # for the critical state machine that runs this theme.
+  # ---------------------------------------------------------------------------
+  - theme: per_surface_deepdive
+    id: layout
+    schema_path: surface.layout
+    question: "Layout for this surface? (Region tree for graphical, args/flags structure for CLI.)"
+    hint: "For graphical: region names + nesting. For CLI: positional args, flags, sub-flags."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  - theme: per_surface_deepdive
+    id: states
+    schema_path: surface.states
+    question: "Which states does this surface render? (default, loading, empty, error, success)"
+    hint: "All five are written by default; we only ask if there's a surface-specific override."
+    suggested_answers:
+      - "All five with global state_patterns defaults"
+      - "Custom default state"
+      - "Custom error state"
+      - "Custom empty state"
+      - "Other override (describe)"
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: per_surface_deepdive
+    id: interactions
+    schema_path: surface.interactions
+    question: "User actions on this surface? (Each action: trigger → effect → next surface.)"
+    hint: "Each interaction becomes an event handler downstream. Be specific about preconditions and resulting state changes."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  - theme: per_surface_deepdive
+    id: components
+    schema_path: surface.components
+    question: "Components used on this surface? (Pick from library or describe custom.)"
+    hint: "List the library components and any custom components; per-component variants and content slots get filled in turn."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: per_surface_deepdive
+    id: validation_rules
+    schema_path: surface.validation_rules
+    question: "Input validation rules? (Field → constraint → error message.)"
+    hint: "Required for any surface with input fields; agent skips if no inputs."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: per_surface_deepdive
+    id: accessibility_notes
+    schema_path: surface.accessibility_notes
+    question: "Surface-specific accessibility notes? (ARIA, focus order, keyboard shortcuts.)"
+    hint: "Falls back to the global accessibility section if not specified."
+    suggested_answers:
+      - "Inherits global accessibility rules (no overrides)"
+      - "Custom focus order (describe)"
+      - "Custom ARIA roles (describe)"
+      - "Surface-specific keyboard shortcuts (describe)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: per_surface_deepdive
+    id: traces_workflows
+    schema_path: surface.traces_workflows
+    question: "Which PRD WKF-### workflows does this surface participate in?"
+    hint: >
+      List WKF-### ids only (e.g. "WKF-001"), not verbatim text. Drives the
+      coverage check. Empty list [] is allowed for non-flow surfaces
+      (chrome, settings, diagnostic helpers) — record a ux_warnings entry
+      via the writer when this happens so downstream agents know it's
+      intentional. The sibling fields `implements_requirements` (FR-### the
+      surface delivers and/or NFR-### the surface realizes — e.g. a per-call
+      timeout, an input-containment boundary) and `references_entities`
+      (ENT-###) are inferred by the agent from
+      the surface's purpose + the deep-dive answers, presented in the
+      final-approval draft, and corrected by the user there — they are
+      not asked here to keep the interview tight.
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  - theme: per_surface_deepdive
+    id: entry_conditions
+    schema_path: surface.entry_conditions
+    question: "Under what conditions does the user reach this surface? (List entry points.)"
+    hint: "Helps downstream agents wire up routing / state machine transitions."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: per_surface_deepdive
+    id: exit_conditions
+    schema_path: surface.exit_conditions
+    question: "Under what conditions does the user leave this surface? (List exit transitions.)"
+    hint: "Pairs with entry_conditions for state-machine wiring."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: high

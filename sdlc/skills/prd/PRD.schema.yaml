@@ -1,0 +1,729 @@
+# =============================================================================
+# PRD.yaml — Canonical Schema Reference
+# =============================================================================
+# This file documents the full structure of PRD.yaml. It is *not* a runtime
+# config — it is the human-readable source of truth for the schema that
+# `validate_schema.py` enforces.
+#
+# Two top-level shapes are supported:
+#   1. SINGLE-PRODUCT (the default): theme blocks live at the top level.
+#   2. MULTI-PRODUCT (monorepo):    themes live under `products.<slug>.<theme>`.
+#      In multi-product mode, the top-level theme blocks MUST be omitted.
+#
+# Conventions used throughout:
+#   - `null` (not omission) means "explicitly unanswered". Downstream agents
+#     can detect gaps without ambiguity.
+#   - For trade-off fields, a sibling `<field>_rationale` (string) captures
+#     the *why*. Downstream agents weight decisions accordingly.
+#   - For pre-filled or uncertain answers, a sibling `<field>_confidence`
+#     captures certainty as one of: confirmed | inferred | assumption.
+#       * confirmed  — user explicitly stated
+#       * inferred   — derived from a project file scan, accepted by user
+#       * assumption — user picked a placeholder, expect to revisit
+#   - Enum values are lowercase snake_case strings. See `validate_schema.py`
+#     for the authoritative enum definitions.
+#   - Theme order matches the interview order in `prd-questions.yaml`.
+#
+# ID conventions:
+#   Several list[string] fields prefix each item with a stable ID so that
+#   downstream SDLC artifacts (UX.yaml, DATA-MODEL.yaml, API.yaml, ARCH.yaml,
+#   TEST-STRATEGY.yaml, TASKS.json) can reference specific items without
+#   ambiguity. Format is always "<PREFIX>-NNN: <content>" with zero-padded
+#   3-digit numbers (NNN ≥ 001). IDs are assigned in collection order and
+#   are stable — they never change once written. Moving an item between
+#   sibling lists that share a counter (e.g. secondary_users → primary_users)
+#   moves the string verbatim without renumbering.
+#
+#   Family map (prefix → field(s); sibling lists in the same row share one
+#   continuous counter):
+#     FR  — functional_requirements.features (legacy: must_have_features + nice_to_have_features)
+#     OOS — functional_requirements.out_of_scope
+#     INT — functional_requirements.integrations_required
+#     AIF — functional_requirements.ai_features
+#     NFR — non_functional_requirements.performance_targets, .other
+#     WRN — prd_warnings (top level)
+#     PER — users_personas.primary_users, .secondary_users
+#     GOL — users_personas.user_goals
+#     PAN — users_personas.user_frustrations
+#     WKF — use_cases.core_workflows
+#     JTB — use_cases.primary_jobs_to_be_done, .secondary_jobs
+#     EDG — use_cases.edge_cases
+#     ENT — data_model.key_entities
+#     ACR — success_metrics.acceptance_criteria (typed acceptance criteria —
+#           the instances downstream ACR→TST coverage gates resolve against;
+#           without them those gates are mechanism-only)
+#     USR — user_stories.stories (1.1). Like QUE, items are typed MAPPINGS
+#           ({id, story, owning_personas}), not "USR-NNN: <text>" strings.
+#     QUE — open_questions.undecided_decisions + .parking_lot (one shared
+#           counter). UNLIKE the other families, QUE items are typed MAPPINGS
+#           ({id, question, status, …}), not "QUE-NNN: <text>" strings — see
+#           the open_questions block below.
+#
+#   In multi-product mode, each product under `products.<slug>` carries its
+#   own independent ID space — counters reset per product. Two products may
+#   each have a FR-001; references are always disambiguated by the product
+#   slug in the dotted path.
+#
+#   `validate_schema.py` enforces the prefix format on every item in these
+#   fields. Items missing the prefix are warnings in `status: draft` and
+#   errors in `status: complete`.
+#
+#   The `conventions` block (see end of file) is intentionally exempt from
+#   ID-family checks — its contents are project-defined nested mappings, not
+#   referenced list items.
+#
+#   Why list items stay "<PREFIX>-NNN: <text>" STRINGS, not typed mappings:
+#   every downstream validator (ux/data/api/arch/test/task) and the codegen
+#   packet builder (code/topo_order.py `_REQ_RE`) parse exactly that string
+#   form out of this file. The typed FeatureSpec / NfrEntry /
+#   AcceptanceCriterion objects the AICF meta-corpus uses for its own
+#   Pydantic PRD would silently break that grounding, so they are NOT
+#   adopted. QUE and USR are typed because no downstream string-scan reads
+#   them.
+#
+# Schema 1.1 (2026-09-01) — adopted from the AICF meta-corpus PRD schema
+#   (DATA-MODEL.yaml `ProductRequirements` + sub-models):
+#     * technical_constraints.runtime_platform is a LIST (every platform the
+#       product ships on); the bare scalar remains accepted as the 1.0 form.
+#     * enum widenings: runtime_platform += tui | service | library | voice;
+#       deployment_target += local | cloud_managed | mobile_app_store;
+#       accessibility += not_applicable_cli; data_sensitivity += phi | pci;
+#       license_type += bsl | sspl | dual; auth_model += mtls.
+#     * seven optional context blocks: glossary, user_stories (USR-NNN),
+#       internationalization, competitive_landscape, legal_and_terms,
+#       analytics_and_telemetry, support_model.
+#     * risks_assumptions.dependencies is DEPRECATED (accepted on read, never
+#       emitted); stakeholders.external_dependencies is organizational-only.
+#   Every 1.0 PRD validates unchanged. Not adopted, on purpose: typed list
+#   items (above), AICF's repo_topology/product_slugs (the `products.<slug>`
+#   shape here is richer), an NFR security_targets bucket (`other` carries
+#   those and every downstream NFR resolver reads the two existing lists).
+#
+# Downstream consumption: each theme block below carries a one-line
+#   "Downstream consumption:" note — MACHINE-GATED (a downstream validator or
+#   the codegen packet builder resolves the ids), CONTEXT (a later skill's
+#   interview reads the field by name), or NONE YET. Audited 2026-09-01 across
+#   every skill's SKILL.md / references / questions / validator.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# metadata — always at top level, present in both single- and multi-product mode
+# -----------------------------------------------------------------------------
+metadata:
+  prd_version: "1.1"                       # schema version this file conforms to;
+                                           # new writes stamp "1.1", 1.0 files validate unchanged
+  last_updated: "2026-05-05T12:00:00Z"     # ISO-8601 UTC timestamp of last write
+  generated_by: sdlc-prd                   # always literal string "sdlc-prd"
+  session_id: "00000000-0000-0000-0000-000000000000"  # UUID of the interview session
+  monorepo: false                           # true => use the `products:` shape below
+  status: "draft"                           # "draft" | "complete"
+                                            # writer sets to "complete" only when all
+                                            # required fields are filled and the
+                                            # validator passes. Downstream agents
+                                            # MUST reject the PRD if status != "complete".
+
+# -----------------------------------------------------------------------------
+# pipeline_scope — which downstream SDLC stages this project needs at all.
+# OPTIONAL, and always at TOP level (never per-product): the pipeline is one
+# pipeline even in a monorepo.
+#
+# This is the SKIP authority. An entry with `applicable: false` means the stage
+# need not be run and its artifact will never exist — so a consumer that finds
+# `docs/UX.yaml` missing reads a recorded intention here instead of guessing
+# from the absence, and does not stop to ask. Distinct from the stage's own
+# `metadata.applicability`, which says "it DID run and concluded there was
+# nothing to model" (an empty artifact exists).
+#
+# Absent block, or an absent key, means UNKNOWN — never "false". A consumer
+# that needs a missing artifact and finds no entry here asks the user once
+# (see each consumer's Phase 2). Downstream skills never write this block;
+# recording it permanently is a `/sdlc:prd` re-run.
+#
+# Keys are stage names: ux | design | api. (data / arch / test / task are not
+# optional — every project has a data story, an architecture, a test strategy
+# and a task graph, even when small.) Unknown keys are ignored, not an error.
+pipeline_scope:               # Optional[Dict[str, {applicable, rationale?, confidence?}]]
+  ux:
+    applicable: true          # REQUIRED per entry (bool)
+    rationale: null           # one sentence; REQUIRED when applicable is false (string|null)
+    confidence: null          # confirmed | inferred | assumption (enum|null)
+  design:
+    applicable: true
+    rationale: null
+    confidence: null
+  api:
+    applicable: true
+    rationale: null
+    confidence: null
+# Seeded from `technical_constraints.runtime_platform` in Phase 4:
+#   only {service, library, embedded}       → ux false, design false, api ask
+#   only {cli, tui} (plus the above)        → ux true,  design false, api false
+#   any of {web, mobile_*, desktop,
+#           browser_extension, voice}       → ux true,  design true,  api true
+# Always surfaced as an inferred proposal the user confirms — never written
+# without confirmation.
+
+# prd_warnings — informational notes populated by the writer.
+# Use for low-confidence answers, merge conflicts, or other notable context.
+# NOT used for required-field acknowledgement — see metadata.status for
+# completeness signalling.
+# Each item starts with a stable ID: "WRN-NNN: <message>".
+# IDs are assigned in collection order (WRN-001, WRN-002, …).
+# -----------------------------------------------------------------------------
+# WRN item shape (CLAUDE.md section 2)
+# -----------------------------------------------------------------------------
+# An entry is EITHER the legacy string  "WRN-NNN: <message>"  OR a typed
+# mapping. Both stay valid forever; only the typed form carries a lifecycle a
+# reader - and the generated statusboard - can act on:
+#
+#   - id: WRN-042          # REQUIRED - stable, never renumbered
+#     text: <message>      # REQUIRED - what the string used to carry
+#     kind: deferral       # REQUIRED - deferral | limitation | decision |
+#                          #   exception | scope_change | note
+#     status: open         # REQUIRED - open | resolved
+#     impact: downstream   # REQUIRED - none | local | downstream | risk.
+#                          #   The READER's consequence, never the validator's:
+#                          #   impact can not change an exit code.
+#     refs: [FR-096]       # OPTIONAL - ids this warning is about
+#     defers: [FR-096]     # OPTIONAL - kind: deferral ONLY. The structured
+#                          #   coverage channel the trace-or-defer gates read,
+#                          #   alongside the top-level `deferrals` list.
+#     resolution: null     # REQUIRED once status == resolved
+#     resolved_on: null    # OPTIONAL - YYYY-MM-DD
+#
+# A legacy string reads as {kind: note, status: open, impact: local}, so an
+# untouched artifact keeps behaving exactly as before. A malformed MAPPING
+# never fails the file - it is reported and the entry is dropped or downgraded,
+# the way a malformed `deferrals` entry defers nothing. A malformed STRING is
+# the blocking error it has always been. New writes emit the mapping at
+# <name>_version >= 2.0 (DATA-MODEL: >= 3.0); `.claude/sdlc/migrate_warnings.py`
+# converts an existing artifact.
+prd_warnings: []
+
+# =============================================================================
+# SINGLE-PRODUCT MODE — themes at top level, in interview order
+# (omit the entire `products:` key in this mode)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# problem_opportunity — what hurts and why this is the moment to fix it
+# Downstream consumption: CONTEXT only — no later skill reads these fields by
+#   name; they frame every later interview and the FR scope sweep.
+# -----------------------------------------------------------------------------
+problem_opportunity:
+  problem_statement: null     # 1–3 sentences naming the user pain (string)
+  who_has_pain: null          # short list of affected groups (list[string])
+  current_workarounds: null   # how people cope today (list[string])
+  why_now: null               # market/tech/regulatory trigger, if any (string|null)
+
+# -----------------------------------------------------------------------------
+# users_personas — who we are building for
+# Downstream consumption: PER-NNN is read by test (persona-tagged scenarios) and
+#   ux; expertise_level by ux. GOL / PAN: CONTEXT only.
+# -----------------------------------------------------------------------------
+# ID conventions for list fields below (downstream agents cross-reference these):
+#   primary_users + secondary_users — share the PER-NNN sequence; secondary_users
+#     IDs continue from where primary_users left off.
+#   user_goals       — GOL-NNN sequence.
+#   user_frustrations — PAN-NNN sequence (pain points).
+users_personas:
+  primary_users: null         # list of primary persona descriptors (list[string]);
+                              # each item: "PER-NNN: <descriptor>" (e.g. "PER-001: …")
+  secondary_users: null       # nice-to-have but not core (list[string]); continues the
+                              # PER-NNN sequence from primary_users — e.g. if
+                              # primary_users ends at PER-003, secondary_users starts at PER-004
+  user_goals: null            # what success looks like for them (list[string]);
+                              # each item: "GOL-NNN: <goal>"
+  user_frustrations: null     # what frustrates them today (list[string]);
+                              # each item: "PAN-NNN: <frustration>"
+  expertise_level: null       # one of: novice | intermediate | expert | mixed (enum)
+
+# -----------------------------------------------------------------------------
+# use_cases — the jobs this product is hired to do
+# Downstream consumption: WKF-NNN is MACHINE-GATED (ux/api/arch/data/test/task
+#   validators + code packets); JTB read by ux/api/data; EDG by test.
+# -----------------------------------------------------------------------------
+# ID conventions for list fields below:
+#   core_workflows           — WKF-NNN sequence.
+#   primary_jobs_to_be_done + secondary_jobs — share the JTB-NNN sequence;
+#     secondary_jobs continues from where primary_jobs_to_be_done left off.
+#   edge_cases               — EDG-NNN sequence.
+use_cases:
+  core_workflows: null        # 3–7 happy-path workflows (list[string]);
+                              # each item: "WKF-NNN: <workflow>"
+  primary_jobs_to_be_done: null  # JTBD statements (list[string]);
+                              # each item: "JTB-NNN: <JTBD statement>"
+  secondary_jobs: null        # supporting JTBD (list[string]); continues the JTB-NNN
+                              # sequence from primary_jobs_to_be_done
+  edge_cases: null            # explicit edge cases worth handling (list[string]);
+                              # each item: "EDG-NNN: <edge case>". When an edge
+                              # case stresses one specific feature, name its
+                              # FR-NNN inside the string ("EDG-004: FR-002 —
+                              # comment body over 10k chars is rejected with a
+                              # clear error") so downstream test/task can slice
+                              # edge cases per requirement.
+
+# -----------------------------------------------------------------------------
+# functional_requirements — what the product must, should, won't do
+# Downstream consumption: FR-NNN is MACHINE-GATED by every downstream validator
+#   and the code packet builder; INT-NNN read by api/data. OOS / AIF: CONTEXT only.
+# -----------------------------------------------------------------------------
+# ID conventions for list fields below:
+#   features                 — one flat FR-NNN sequence (no MVP/backlog split;
+#     every consumer of this skillset is built whole by /sdlc:code, so an
+#     economic must/should/could split has no downstream consumer — de-scoped
+#     ideas live in open_questions.parking_lot instead).
+#   out_of_scope             — OOS-NNN sequence.
+#   integrations_required    — INT-NNN sequence.
+#   ai_features              — AIF-NNN sequence.
+# Deliverable-path convention: when an FR names a concrete repo path this
+#   product builds / writes / ships (a schema layer, a `tools/` validator, a
+#   `templates/` dir, a generated sidecar file), write that path as inline code
+#   (backticks). Leave bare: prose slashes (`and/or`), external product names
+#   (`PyPI/npm`), reference-ID lists (`FR-046/047`), and paths mentioned only as
+#   analogies/references. Downstream `sdlc-arch` cross-check #25 keys on the
+#   backticked paths to verify each build-time deliverable has an owning
+#   component + `code_location`; bare prose slashes are (correctly) ignored.
+functional_requirements:
+  features: null              # the product's functional requirements (list[string]);
+                              # one flat list, each item starting with a stable ID:
+                              #   "FR-001: <title and detail description>"
+                              # IDs are assigned in collection order (FR-001, FR-002, …).
+                              # No must/nice split — see the ID conventions note above.
+                              # BACK-COMPAT: legacy PRDs with must_have_features +
+                              # nice_to_have_features still validate (the reader unions
+                              # them, must then nice); new writes emit only `features`.
+  out_of_scope: null          # explicit non-goals (list[string]);
+                              # each item: "OOS-NNN: <non-goal>"
+  integrations_required: null # external systems we must talk to (list[string]);
+                              # each item: "INT-NNN: <integration target>"
+  ai_features: null           # AI-driven capabilities, if any (list[string]);
+                              # each item: "AIF-NNN: <AI capability>"
+
+# -----------------------------------------------------------------------------
+# technical_constraints — the tech we are committed to (or not)
+# Downstream consumption: primary_language / framework / runtime_platform are
+#   read by ux, api, arch, data. deployment_target, existing_systems,
+#   browser_support: NONE YET (deploy is planned).
+# Note: several fields here capture rationale because trade-offs matter.
+# -----------------------------------------------------------------------------
+technical_constraints:
+  primary_language: null      # one of: python | typescript | javascript | go | rust |
+                              #         java | csharp | ruby | other | undecided (enum)
+  primary_language_rationale: null  # one sentence on *why* this language (string|null)
+  primary_language_confidence: null # confirmed | inferred | assumption (enum)
+  framework: null             # framework name(s) (list[string]|null)
+  runtime_platform: null      # list[enum] — EVERY platform the product ships on,
+                              # e.g. [mobile_ios, mobile_android] or [cli]. Values:
+                              #   web | mobile_ios | mobile_android | desktop | cli |
+                              #   tui | server | service | library | embedded |
+                              #   browser_extension | voice | other | undecided
+                              # `undecided` only ever stands alone; no repeats
+                              # (validator: warning in draft, error in complete).
+                              # New writes ALWAYS emit a list, even for one value;
+                              # a bare scalar is accepted as the legacy 1.0 form.
+                              # The _rationale / _confidence siblings stay scalar —
+                              # one decision, several targets.
+  runtime_platform_rationale: null  # (string|null)
+  deployment_target: null     # one of: cloud_aws | cloud_gcp | cloud_azure |
+                              #         cloud_managed | self_hosted | on_prem | local |
+                              #         edge | serverless | hybrid |
+                              #         mobile_app_store | undecided (enum)
+                              # local = the user's own machine (CLI/desktop tools);
+                              # cloud_managed = PaaS-style, vendor not yet chosen.
+  deployment_target_rationale: null  # (string|null)
+  existing_systems: null      # systems we must integrate with (list[string])
+  browser_support: null       # e.g. ["chrome>=120", "firefox>=115"] (list[string]|null)
+
+# -----------------------------------------------------------------------------
+# product_identity — what is this product, in one breath?
+# Downstream consumption: idea_text and one_liner are read by ux, api, design.
+#   tagline / vision / mission: CONTEXT only.
+# (Asked LAST among required themes so the agent can synthesize candidates
+# from everything answered in earlier themes.)
+# -----------------------------------------------------------------------------
+product_identity:
+  idea_text: null             # original free-text idea description from Phase 3 (string|null, multi-line)
+  name: null                  # Product name as it appears to users (string)
+  slug: null                  # url-safe identifier, kebab-case (string)
+  one_liner: null             # ≤ 140 chars, plain language, no jargon (string)
+  tagline: null               # marketing tagline, optional (string|null)
+  vision: null                # 1–3 sentences: where this product is going (string|null)
+  mission: null               # 1–3 sentences: what it does for users today (string|null)
+
+# -----------------------------------------------------------------------------
+# non_functional_requirements — qualities, not features
+# Downstream consumption: NFR-NNN is MACHINE-GATED (ux/arch/design/task/test +
+#   code packets); scalability / reliability / accessibility read by api, arch,
+#   data, design, test, ux. availability_sla: NONE YET (deploy is planned).
+# -----------------------------------------------------------------------------
+# ID conventions for list fields below:
+#   performance_targets + other — share the NFR-NNN sequence; `other` continues
+#     from where performance_targets left off.
+# Scalar/enum fields (scalability, reliability, availability_sla, accessibility)
+# carry no ID — they're singletons referenced by field name.
+non_functional_requirements:
+  performance_targets: null   # e.g. "NFR-001: p95 < 200ms" (list[string]);
+                              # each item: "NFR-NNN: <target>"
+  scalability: null           # one of: small | medium | large | hyperscale (enum)
+  reliability: null           # one of: best_effort | high | mission_critical (enum)
+  availability_sla: null      # e.g. "99.9%", "business hours" (string|null)
+  accessibility: null         # one of: none_yet | wcag_aa | wcag_aaa |
+                              #         not_applicable_cli (enum) — the last one for
+                              #         headless surfaces (cli/service/library)
+  other: null                 # any other NFRs worth calling out (list[string]);
+                              # continues the NFR-NNN sequence from performance_targets
+
+# -----------------------------------------------------------------------------
+# data_model — what data lives here, who owns it, how much
+# Downstream consumption: ENT-NNN is MACHINE-GATED by data (also read by ux,
+#   api, arch, design); ownership / volume / storage_preferences read by data.
+# -----------------------------------------------------------------------------
+# ID conventions for list fields below:
+#   key_entities             — ENT-NNN sequence.
+# (storage_preferences carries no ID — it's a soft-preference list, not a
+# referenced artifact.)
+data_model:
+  key_entities: null          # primary domain entities (list[string]);
+                              # each item: "ENT-NNN: <entity>" (e.g. "ENT-001: User")
+  data_ownership: null        # one of: user_owned | org_owned | platform_owned |
+                              #         third_party | mixed (enum)
+  data_volume_estimate: null  # one of: kilobytes | megabytes | gigabytes |
+                              #         terabytes | petabytes | unknown (enum)
+  storage_preferences: null   # e.g. ["postgres", "s3"] (list[string]|null) — no ID
+  storage_preferences_rationale: null  # (string|null)
+
+# -----------------------------------------------------------------------------
+# security_compliance — what protects the data and the users
+# Downstream consumption: auth_model read by api + arch; data_sensitivity,
+#   regulatory_requirements, encryption_at_rest, audit_logging read by data
+#   (audit_logging also by ux).
+# -----------------------------------------------------------------------------
+security_compliance:
+  auth_model: null            # one of: none | api_key | oauth2 | oidc | saml |
+                              #         jwt | session_cookie | passkeys | mtls |
+                              #         custom (enum)
+  auth_model_rationale: null  # (string|null)
+  data_sensitivity: null      # one of: public | internal | confidential |
+                              #         restricted | regulated | phi | pci (enum)
+                              # phi = health data (HIPAA), pci = payment-card data;
+                              # `regulated` stays the generic catch-all.
+  regulatory_requirements: null  # e.g. ["gdpr","hipaa","soc2"] (list[string])
+  encryption_at_rest: null    # boolean
+  audit_logging: null         # boolean
+
+# -----------------------------------------------------------------------------
+# business_model — how (and whether) this makes money
+# Downstream consumption: CONTEXT only — no later skill reads these fields by name.
+# -----------------------------------------------------------------------------
+business_model:
+  monetization: null          # one of: free | freemium | paid | subscription |
+                              #         usage_based | enterprise | open_source |
+                              #         internal_tool | undecided (enum)
+  monetization_rationale: null  # (string|null)
+  pricing_model: null         # human-readable summary (string|null)
+  license_type: null          # one of: proprietary | mit | apache_2 | gpl_v3 |
+                              #         agpl_v3 | bsd_3_clause | mpl_2 |
+                              #         cc_by | cc_by_sa | bsl | sspl | dual |
+                              #         other | undecided (enum)
+  license_type_rationale: null  # (string|null)
+  target_market: null         # short description of go-to-market (string|null)
+
+# -----------------------------------------------------------------------------
+# stakeholders — who decides, who builds, who blocks
+# Downstream consumption: CONTEXT only — no later skill reads these fields by name.
+# -----------------------------------------------------------------------------
+stakeholders:
+  product_owner: null         # name or role (string|null)
+  primary_contributors: null  # list of names/roles (list[string])
+  decision_maker: null        # who has final say on scope (string|null)
+  external_dependencies: null # ORGANIZATIONAL dependencies only — teams, vendors,
+                              # sign-offs the project waits on (list[string]).
+                              # Technical/service reliances are NOT declared here:
+                              # they are INT-NNN under functional_requirements.
+                              # integrations_required (consumed by api/data).
+
+# -----------------------------------------------------------------------------
+# milestones — REMOVED (D2). No MVP/phase split: every consumer of this skillset
+# is built whole by /sdlc:code, so phased milestones have no downstream consumer.
+# The 1–3-sentence MVP narrative folds into `product_vision`. Legacy PRDs that
+# still carry a `milestones:` block validate unchanged (models are extra="allow",
+# so the key is retained on read, not rejected) — new writes never emit it.
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# success_metrics — how we will know it worked
+# Downstream consumption: ACR-NNN is MACHINE-GATED by test and the code packet
+#   builder; primary_kpis / definition_of_done / user_satisfaction_target:
+#   CONTEXT only.
+# -----------------------------------------------------------------------------
+success_metrics:
+  primary_kpis: null          # 2–5 measurable KPIs (list[string])
+  acceptance_criteria: null   # what makes a feature "done" (list[string]);
+                              # each item: "ACR-NNN: <criterion>". The ACR-NNN
+                              # instances are what downstream `test` resolves
+                              # its ACR→TST coverage gate against — a PRD that
+                              # emits none leaves that gate mechanism-only.
+                              # A plain string without the prefix BLOCKS from
+                              # prd_version 2.0 and warns below it (the legacy-
+                              # shape floor: prd_version is an edit counter, so
+                              # a reachable floor would turn a legacy PRD red on
+                              # its first repair — CLAUDE.md §10).
+                              # Phrase each criterion as an observable,
+                              # verifiable outcome, and NAME THE FR it accepts
+                              # by id inside the string when it accepts one
+                              # specific feature ("ACR-012: FR-003 — marking a
+                              # task done persists across a read"). The FR-NNN
+                              # token is the machine-extractable FR↔ACR link;
+                              # the validator emits a WARNING (never blocks)
+                              # for every FR no criterion names.
+  definition_of_done: null    # team-level DoD (list[string])
+  user_satisfaction_target: null  # e.g. "NPS > 30", "CSAT 4.2/5" (string|null)
+
+# -----------------------------------------------------------------------------
+# risks_assumptions — what could go wrong, what we are taking on faith
+# Downstream consumption: top_risks read by test (test-discovery, with
+#   open_questions); key_assumptions / blockers: CONTEXT only.
+# -----------------------------------------------------------------------------
+risks_assumptions:
+  top_risks: null             # ranked list of risks — list[string | RiskItem].
+  #                           # An entry is EITHER a plain string (simple form)
+  #                           # OR a structured RiskItem mapping:
+  #  - statement: "Vendor API may rate-limit us at scale"  # REQUIRED — risk in prose
+  #    disposition: mitigated # REQUIRED — mitigated | accepted_residual | open
+  #                           #   mitigated         → handled by mitigation_refs
+  #                           #   accepted_residual → deliberately accepted standing risk
+  #                           #   open              → undecided; surface at HITL (often a QUE)
+  #    mitigation_refs: ["FR-012", "NFR-004"]  # OPTIONAL — ids that EXIST at
+  #                           #   PRD-write time only: FR-/NFR-/QUE-. Non-empty by
+  #                           #   convention when disposition == mitigated. A
+  #                           #   mitigation realized by a LATER stage is simply the
+  #                           #   FR/NFR that demands it — do NOT forward-reference
+  #                           #   downstream ids (TST-/SIG-/… don't exist yet; naming
+  #                           #   one is unresolvable and duplicates what the owning
+  #                           #   stage derives). References, not a new id family; the
+  #                           #   validator format-checks the prefix (warn-level).
+  key_assumptions: null       # what we are betting is true (list[string])
+  blockers: null              # current blockers (list[string])
+  dependencies: null          # DEPRECATED (1.1) — accepted on read, never emitted.
+                              # It duplicated INT-NNN (technical) and
+                              # stakeholders.external_dependencies (organizational);
+                              # a dependency that is a RISK belongs in top_risks.
+
+# =============================================================================
+# 1.1 OPTIONAL CONTEXT BLOCKS — adopted from the AICF meta-corpus PRD schema.
+# All optional (the interview gates each now/skip/todo); a PRD that omits every
+# one of them is still complete. Interview order: after risks_assumptions,
+# before open_questions.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# glossary — the domain vocabulary every later stage must reuse verbatim
+# Downstream consumption: CONTEXT for every downstream agent — UX copy, entity
+#   and field names (data), operation names (api), code identifiers (code).
+# -----------------------------------------------------------------------------
+glossary:
+  terms: null                 # list[GlossaryTerm] — typed mappings, no ID family
+  #  - term: "Workspace"       # REQUIRED — the canonical word
+  #    definition: "…"         # REQUIRED — one or two sentences
+  #    synonyms: ["project"]   # OPTIONAL — words users say that mean the same thing
+
+# -----------------------------------------------------------------------------
+# user_stories — persona-centred narratives that tie PER to FR / WKF
+# Downstream consumption: NONE YET (new USR family) — context showing which
+#   persona each capability serves; a later `test` version may cover USR ids.
+# -----------------------------------------------------------------------------
+# ID conventions: USR-NNN, writer-managed (state.last_ids.USR). Like QUE the
+# items are typed MAPPINGS — the validator checks id format / uniqueness and a
+# non-empty story (warning in draft, error in complete) and warns when
+# owning_personas names something that is not a PER-NNN id.
+user_stories:
+  stories: null               # list[UserStoryItem]
+  #  - id: "USR-001"           # REQUIRED — stable, never renumbered
+  #    story: "As a PER-001 …, I want …, so that …"   # REQUIRED
+  #    owning_personas: ["PER-001"]   # OPTIONAL — PER-NNN refs from users_personas
+
+# -----------------------------------------------------------------------------
+# internationalization — locale posture
+# Downstream consumption: when `enabled` is true, data + api carry locale-tagged
+#   fields and ux plans text expansion / RTL; NONE when false.
+# -----------------------------------------------------------------------------
+internationalization:
+  enabled: null               # boolean — more than one language/locale?
+  default_locale: null        # BCP-47 tag, e.g. "en-US" (string|null)
+  target_locales: null        # further BCP-47 tags (list[string]|null)
+  rtl_support: null           # boolean — right-to-left scripts needed?
+
+# -----------------------------------------------------------------------------
+# competitive_landscape — who else solves this, and why we win
+# Downstream consumption: NONE YET — positioning context for humans and a seed
+#   for out_of_scope / differentiating FRs during the interview.
+# -----------------------------------------------------------------------------
+competitive_landscape:
+  competitors: null           # list[Competitor] — typed mappings
+  #  - name: "Acme Planner"    # REQUIRED
+  #    url: null               # OPTIONAL
+  #    strengths: []           # OPTIONAL (list[string])
+  #    weaknesses: []          # OPTIONAL (list[string])
+  #    pricing_notes: null     # OPTIONAL — observed pricing / packaging
+  differentiators: null       # what makes this product the better choice (list[string])
+  market_positioning: null    # "for <who>, this is the <category> that <benefit>" (string|null)
+
+# -----------------------------------------------------------------------------
+# legal_and_terms — the legal documents that must ship with the product
+# Downstream consumption: NONE YET (a compliance / deploy stage would read it);
+#   recorded so the obligation is not lost between PRD and release.
+# -----------------------------------------------------------------------------
+legal_and_terms:
+  tos_required: null              # boolean — Terms of Service
+  privacy_policy_required: null   # boolean
+  cookie_disclosure_required: null  # boolean — cookie banner / disclosure
+  eula_required: null             # boolean — installed software
+  dpa_required: null              # boolean — Data Processing Agreement (GDPR Art. 28)
+
+# -----------------------------------------------------------------------------
+# analytics_and_telemetry — product-level events (NOT infra logs / metrics —
+# those are the arch stage's observability signals)
+# Downstream consumption: NONE YET; arch may seed its observability spec from
+#   product_events in a later version.
+# -----------------------------------------------------------------------------
+analytics_and_telemetry:
+  product_events: null        # list[ProductEvent] — typed mappings
+  #  - event_name: "report_exported"        # REQUIRED — snake_case
+  #    description: "…"                     # REQUIRED
+  #    properties: ["format", "row_count"]  # OPTIONAL — event payload keys
+  #    contains_pii: false                  # OPTIONAL — boolean
+  consent_required: null      # boolean — tracking needs user opt-in / cookie consent?
+  pii_redaction_required: null  # boolean — redact PII before events are stored?
+
+# -----------------------------------------------------------------------------
+# support_model — how users get help once the product ships
+# Downstream consumption: NONE YET (deploy is planned).
+# -----------------------------------------------------------------------------
+support_model:
+  channels: null              # e.g. ["email", "community_forum", "in_app_chat"] (list[string])
+  sla_targets: null           # e.g. {first_response: "24h", resolution_p95: "5d"} (map[string,string])
+
+# -----------------------------------------------------------------------------
+# open_questions — things still being figured out. TYPED: each item is a
+# mapping carrying a stable QUE-NNN id and a lifecycle status, because
+# downstream stages gate on open questions (a QUE blocking an FR must be
+# resolved before that FR is built) and plain bullets give them nothing to
+# reference or close. `undecided_decisions` and `parking_lot` share ONE
+# continuous QUE counter (writer-managed, state.last_ids.QUE), like FR
+# across must/nice. Legacy plain-string bullets are violations (warning in
+# draft, error in complete) — the update flow retrofits them with the next
+# QUE id and `status: open`. A `todo`-gated theme also lands here as a
+# typed entry, not a bare bullet.
+# Downstream consumption: read by test (test-discovery, next to top_risks); the
+#   prd update flow gates on `status`; code lists QUE-blocked units at its
+#   plan gate (an open QUE whose `blocks` names an FR a unit implements).
+#   No downstream validator resolves QUE.
+# -----------------------------------------------------------------------------
+open_questions:
+  undecided_decisions: null   # list[OpenQuestionItem] — decisions explicitly punted
+                              # (a legacy plain-string bullet here or in
+                              # parking_lot blocks from prd_version 2.0 and
+                              # warns below it; a malformed TYPED entry blocks
+                              # at every version)
+  #  - id: "QUE-001"          # REQUIRED — stable, never renumbered
+  #    question: "Offline mode in MVP or post-MVP?"   # REQUIRED
+  #    status: open           # REQUIRED — open | resolved | deferred
+  #    resolution: null       # REQUIRED once status == resolved
+  #    blocks: ["FR-001"]     # OPTIONAL — upstream ids this question gates.
+  #                           #   Resolved at validate time against the ids
+  #                           #   this PRD emits (FR/NFR/WKF/ACR); a malformed
+  #                           #   or dangling ref is a WARNING (never blocks).
+  parking_lot: null           # list[OpenQuestionItem] — ideas to revisit later;
+                              # same shape, same shared QUE counter
+
+# -----------------------------------------------------------------------------
+# conventions — binding cross-cutting project conventions
+# Downstream consumption: artifact_ids is read by EVERY downstream skill; any
+#   other bucket is read verbatim by whichever stage it names.
+# -----------------------------------------------------------------------------
+# A free-form mapping of named convention buckets, each carrying a
+# project-specific sub-structure. Asked LAST (after open_questions) once the
+# agent has seen the whole picture and can spot patterns that downstream
+# stages must honor verbatim — naming/ID rules, schema-versioning policy,
+# how PRD fields propagate to later artifacts, code-style invariants, etc.
+#
+# Shape:
+#   conventions:
+#     <bucket-name-1>:        # any kebab-case or snake_case key the user chose
+#       <free-form sub-structure: scalars, lists, or nested mappings as needed>
+#     <bucket-name-2>:
+#       ...
+#
+# The validator only enforces that the value is a mapping (Dict[str, Any]).
+# Sub-keys, value types, and nesting are deliberately unconstrained — every
+# project defines its own conventions, and downstream agents read this block
+# verbatim. Examples below are illustrative; real projects will have
+# different keys.
+#
+# Example shapes (do NOT treat as required keys):
+#
+#   conventions:
+#     artifact_ids:
+#       binding: true
+#       description: "Canonical 3-letter cross-stage IDs ..."
+#       scope: ["Stage 02 ...", "Stage 15 ..."]
+#       id_types:
+#         FR: "Functional Requirement — ..."
+#         NFR: "Non-Functional Requirement — ..."
+#     schema_versioning:
+#       policy: "Per-artifact semver ..."
+#       migration: "Forward-migration scripts under tools/migrations/..."
+#     nfr_propagation:
+#       description: "Which NFR fields each downstream stage must read ..."
+#       map:
+#         "security_compliance.data_sensitivity": ["FR-007 (Data Model): ..."]
+#
+# Items inside `conventions` carry no ID prefix family — they are addressed
+# by their bucket name and dotted sub-path.
+conventions: null               # Optional[Dict[str, Any]] — null when no
+                                # cross-cutting conventions apply (most simple
+                                # projects); otherwise a mapping of named
+                                # buckets with project-defined sub-structure.
+
+# =============================================================================
+# MULTI-PRODUCT MODE (monorepo) — uncomment and use *instead of* the top-level
+# theme blocks above. Each entry under `products:` mirrors the single-product
+# shape (every theme above, in the same interview order).
+# =============================================================================
+#
+# products:
+#   auth:
+#     problem_opportunity: { ... }
+#     users_personas: { ... }
+#     use_cases: { ... }
+#     functional_requirements: { ... }
+#     technical_constraints: { ... }
+#     product_identity:
+#       name: "Auth Service"
+#       slug: "auth"
+#       one_liner: "..."
+#       ...
+#     non_functional_requirements: { ... }
+#     data_model: { ... }
+#     security_compliance: { ... }
+#     business_model: { ... }
+#     stakeholders: { ... }
+#     success_metrics: { ... }
+#     risks_assumptions: { ... }
+#     glossary: { ... }           # the seven 1.1 optional blocks, same shapes
+#     user_stories: { ... }       # (own USR counter per product)
+#     internationalization: { ... }
+#     competitive_landscape: { ... }
+#     legal_and_terms: { ... }
+#     analytics_and_telemetry: { ... }
+#     support_model: { ... }
+#     open_questions: { ... }
+#     conventions: { ... }        # optional per-product convention map
+#   billing:
+#     problem_opportunity: { ... }
+#     product_identity:
+#       name: "Billing"
+#       slug: "billing"
+#       ...
+#     # ...

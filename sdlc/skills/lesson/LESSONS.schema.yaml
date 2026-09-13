@@ -1,0 +1,275 @@
+# =============================================================================
+# LESSONS.schema.yaml — canonical schema for
+#   .claude/skills-state/sdlc-lessons.yaml
+# =============================================================================
+# A CROSS-SKILL QUEUE, not a per-skill state file. Like sdlc-findings.yaml this
+# is a deliberate, documented exception to the `.claude/skills-state/
+# sdlc-<skill>.state.yaml` naming convention (CLAUDE.md "State file contract"):
+# every skill appends to it and none consumes it — the consumer is the plugin
+# MAINTAINER, in the skills repo, not any skill in this project.
+#
+#   PRODUCERS  every /sdlc:* skill    appends one `runs[]` record at close and
+#                                     `lessons[]` entries when a raising
+#                                     condition fires (the closed set in
+#                                     sdlc/skills/lesson/references/
+#                                     lessons-capture.md)
+#              /sdlc:lesson           the user-invoked capture path
+#              the user's own agent   via `python .claude/sdlc/lessons.py add`
+#                                     (rule: .claude/rules/sdlc-lessons.md)
+#   CONSUMER   the skillset maintainer, who collects this file (or its
+#              `lessons.py export` report) into the skills repo, triages, and
+#              fixes the SKILL — never this project. The report reaches them
+#              either because someone mails it, or — when the project opted in
+#              at /sdlc:setup — because lessons.py delivers it on its own.
+#
+# WHY THIS FILE EXISTS: the findings queue (FINDINGS.schema.yaml) captures
+# defects in this project's docs/ artifacts. It has, on purpose, no slot for
+# "the SKILL itself is wrong" — an instruction gap, a validator that rejects a
+# legitimate artifact, a question that asks for a deprecated field, a bundled
+# script that fails on this platform. Before this queue those observations
+# lived only in a close report that scrolled away, or worse, in a silent
+# workaround that left the defect in the plugin for the next project to hit.
+#
+# ROUTING RULE (the one question): is the wrong thing in this project's docs/,
+# or in the plugin's files? docs/ -> FND (or a WRN in the owning artifact).
+# Plugin file -> LSN, and `where.file` names that file. Full doctrine:
+# sdlc/skills/lesson/references/lessons-capture.md
+#
+# ID families this artifact OWNS (writer-managed counter in `last_ids`):
+#   * LSN-NNN — one per lesson. Stable for the lesson's lifetime; never
+#               renumbered or deleted. Counter reconciliation on append: take
+#               max(last_ids.LSN, highest LSN-NNN present) and increment.
+# Ids it REFERENCES (never invents):
+#   * FND-NNN — findings whose diagnosis surfaced the lesson (related_findings)
+#
+# Runs carry NO id family: a run's key is the skill session's `session_id`
+# (uuid4) — `record-run` upserts by it, so a resumed session stays one record.
+#
+# Downstream-rejection rule: this file is private cross-skill state, not a
+# published artifact. No skill refuses to run because of its contents, and no
+# skill ever reads it to change behaviour — it is write-and-forget from the
+# project's point of view. The ONLY writer is `.claude/sdlc/lessons.py`
+# (installed by /sdlc:setup; the plugin copy at sdlc/skills/lesson/lessons.py
+# is the same file); never hand-edit.
+#
+# SANITIZATION CONTRACT: a lesson describes the SKILL, so its evidence needs
+# skill file locations, id families, and counts — never verbatim project
+# content, never absolute paths, never secrets. `lessons.py add` enforces the
+# mechanical half (where.file must be skill-relative, no docs/, evidence lines
+# capped at 200 chars); the doctrine half lives in lessons-capture.md.
+#
+# DELIVERY (opt-in, off until someone says otherwise). A project that consents
+# at /sdlc:setup has its unsent entries mailed to the maintainer at a skill
+# CLOSE — never mid-run. What travels is redacted a second time on the way out:
+# absolute paths and e-mail addresses become <path>/<email>, `container_id` is
+# dropped, `metrics` is cut to numbers and flags whose key looks like an
+# identifier (a measurement cannot carry a path or a sentence out of the
+# project the way a string can), and the project appears only as a random
+# `project_uuid` — never by directory name, and no longer by a hash of its
+# absolute path either. /sdlc:setup reads that out as a promise when it asks
+# for consent, so it is a contract, not an implementation detail. A `blocker` goes at the next close; everything else
+# waits for a batch (7 days / 10 lessons), and each entry carries `sent_at`
+# once gone so nothing is ever sent twice. The whole contract, including the
+# off-switch, is in lessons.py's "Telemetry" section.
+#
+# THE DELIVERED REPORT IS THE MAINTAINER'S ONLY COPY. Nobody triaging a
+# published plugin's lessons has the consumer's checkout to look anything up
+# in, so the report resolves everything triage needs before the size cap gets a
+# say: both project ids (`project_uuid`, minted once and stable across a move,
+# plus the legacy path-hash `project_id` so reports delivered under it still
+# reconcile to the same project), the `environment` that raised it (platform
+# and Python major.minor — several defects only appear on one OS), and the run
+# records the travelling lessons point at, which are dropped last rather than
+# first. A truncated report says how many runs it gave up rather than only that
+# something went missing.
+# =============================================================================
+
+lessons_file_version: "1"                  # REQUIRED
+last_updated: <ISO-8601 UTC>               # OPTIONAL — bumped on every write
+
+last_ids:                                  # REQUIRED — writer-managed counters
+  LSN: 3                                   #   highest LSN id issued so far
+
+runs:                                      # REQUIRED — list[Run]; may be empty
+  - session_id: <uuid4>                    # REQUIRED — the skill state file's
+                                           #   session_id; upsert key
+    skill: prd                             # REQUIRED — which /sdlc:<skill> ran
+    skill_version: "1.3"                   # OPTIONAL — the SKILL.md footer of the
+                                           #   skill that ran (record-run runs at
+                                           #   its close, inside it), else the
+                                           #   state file's
+    state_skill_version: null              # OPTIONAL — the state file's number
+                                           #   when it differs: a ledger records
+                                           #   the version that CREATED it and a
+                                           #   resumed session can skip the
+                                           #   migration - neither is what ran
+                                           #   (ledger IMP-095)
+    skill_version_at_start: null           # OPTIONAL — state.migrations[0].from:
+                                           #   the version a migrated run began
+                                           #   under (it spanned an upgrade)
+    plugin_version: "0.6.0"                # OPTIONAL — see resolution chain in
+                                           #   lessons.py --help
+    plugin_version_source: marker          # OPTIONAL — flag | manifest | marker
+    installed_version: null                # OPTIONAL — the marker's version when
+                                           #   it differs from plugin_version:
+                                           #   what /sdlc:setup last copied into
+                                           #   .claude/sdlc/ can lag the plugin
+                                           #   cache `claude plugin update` moves
+    started_at: <ISO-8601 UTC>             # OPTIONAL — from the state file
+    finished_at: <ISO-8601 UTC>            # OPTIONAL — when record-run ran
+    outcome: complete                      # REQUIRED — complete | draft
+                                           #   | aborted | failed
+    resumes: 0                             # OPTIONAL — the state file's
+                                           #   metrics.resumes when present (it
+                                           #   counts ACTUAL resumes and is
+                                           #   authoritative), else inferred:
+                                           #   +1 per re-record of the session
+    mode: null                             # OPTIONAL — system | container (the
+                                           #   sharded skills: arch/test/task)
+    container_id: null                     # OPTIONAL — when mode: container
+    metrics: {}                            # OPTIONAL — copied VERBATIM from the
+                                           #   state file's metrics block plus a
+                                           #   few derived keys (duration_s,
+                                           #   themes_completed/skipped/todo,
+                                           #   ids_minted; code: units_done,
+                                           #   heals, escalations, failed,
+                                           #   findings_raised), plus any
+                                           #   --metric key=value facts the
+                                           #   calling skill passed (setup:
+                                           #   targets_written, own_toolchain,
+                                           #   wire_exit). Keys are never
+                                           #   invented — absent stays absent.
+                                           #   Only an allowlisted, numeric
+                                           #   subset ever LEAVES the machine;
+                                           #   see lessons.py METRIC_ALLOWLIST.
+    sent_at: null                          # OPTIONAL — set once this record has
+                                           #   been delivered to the maintainer.
+                                           #   Absent means unsent, which is the
+                                           #   only thing the batcher looks at.
+                                           #   Written by lessons.py alone.
+
+lessons:                                   # REQUIRED — list[Lesson]; may be empty
+  - lsn_id: LSN-001                        # REQUIRED — ^LSN-\d{3,}$, unique
+    raised_by: sdlc-prd                    # REQUIRED — sdlc-<skill> |
+                                           #   sdlc-code-worker | user
+    raised_at: <ISO-8601 UTC>              # REQUIRED
+    session_id: <uuid4>                    # OPTIONAL — the run it surfaced in
+    skill: prd                             # REQUIRED — the skill the lesson is
+                                           #   ABOUT (may differ from the
+                                           #   raiser: /sdlc:test can raise a
+                                           #   schema_gap about arch)
+    skill_version: "1.3"                   # OPTIONAL — about the skill running
+                                           #   now ($CLAUDE_SKILL_DIR): its
+                                           #   SKILL.md footer; about another
+                                           #   skill: that skill's state file,
+                                           #   else the installed footer
+    state_skill_version: null              # OPTIONAL — the state file's number
+                                           #   when the footer won (see runs[])
+    plugin_version: "0.6.0"                # OPTIONAL — what the maintainer dates
+                                           #   the lesson from: has the named file
+                                           #   changed since? unchanged = still
+                                           #   live; changed = verify first
+    installed_version: null                # OPTIONAL — the marker's version when
+                                           #   it differs (see runs[]); a lesson
+                                           #   about an INSTALLED helper is about
+                                           #   this number, and the maintainer
+                                           #   dates from the older of the two
+
+    kind: question_quality                 # REQUIRED — one of:
+      #   instruction_gap        — SKILL.md/references do not cover a situation
+      #                            the agent actually hit
+      #   instruction_conflict   — two instructions, or an instruction and a
+      #                            bundled script, contradict each other
+      #   validator_false_reject — validator rejected an artifact the user
+      #                            confirmed legitimate
+      #   validator_false_accept — validator passed an artifact a downstream
+      #                            skill (or the user) later rejected
+      #   question_quality       — an interview question is redundant with
+      #                            upstream data, missing, asks for a
+      #                            deprecated field, or its suggested answers
+      #                            never fit
+      #   schema_gap             — a downstream skill needed a field the
+      #                            upstream output schema does not have
+      #   script_bug             — a bundled script crashed, returned a wrong
+      #                            result, or a documented command failed on
+      #                            this platform
+      #   terminal_output        — a user-facing message was unclear, wrong,
+      #                            or violated the output contract
+      #   drift                  — an embedded copy / template literal / prose
+      #                            count in the SKILL went stale
+      #   process                — a workflow/ordering/resume/budget rule
+      #                            produced a bad outcome
+      #   other                  — use sparingly; a kind nobody can act on is
+      #                            noise
+
+    severity: degraded                     # REQUIRED — blocker (run could not
+                                           #   finish correctly) | degraded
+                                           #   (finished, with rework/friction)
+                                           #   | cosmetic.
+                                           #   Severity also decides DELIVERY
+                                           #   LATENCY: a blocker is mailed at
+                                           #   the next skill close, the other
+                                           #   two ride the weekly batch. Do not
+                                           #   reach for blocker to be heard
+                                           #   sooner — it means the run could
+                                           #   not finish correctly.
+
+    where:                                 # REQUIRED — where in the PLUGIN the
+      file: prd-questions.yaml             #   defect lives. `file` is a path
+      anchor: feature-inventory            #   INSIDE the named skill's folder
+                                           #   (SKILL.md, references/x.md,
+                                           #   validate_schema.py, ...); never
+                                           #   absolute, never docs/. `anchor`
+                                           #   is a phase, check number, or
+                                           #   question id — OPTIONAL.
+
+    summary: <one line>                    # REQUIRED — what is wrong, once
+    evidence:                              # REQUIRED — list[str], 1..5 lines,
+      - "user picked Other on 4 of 5 runs" #   each <= 200 chars. Ids, counts
+      - "suggested answers assume web app" #   and skill locations — enough to
+                                           #   judge WITHOUT the project.
+
+    agent_action: asked_user               # OPTIONAL — what the agent did in
+                                           #   the moment: improvised |
+                                           #   asked_user | stopped |
+                                           #   worked_around
+    suggested_fix: <one line>              # OPTIONAL — the raiser's idea
+    generalizes: unsure                    # OPTIONAL — yes | unsure |
+                                           #   project_specific. The raiser's
+                                           #   GUESS, not authoritative —
+                                           #   triage in the skills repo
+                                           #   decides.
+    related_findings: []                   # OPTIONAL — FND-NNN ids whose
+                                           #   diagnosis surfaced this lesson
+
+    # --- recurrence -------------------------------------------------------
+    # How often this project hit the SAME defect. `add` folds a repeat into
+    # the lesson already here instead of writing a second one: two entries
+    # would reach the maintainer as two defects to reconcile by hand, and the
+    # number that decides how urgent this is — how often it bites — would read
+    # as one each. Matching is on skill + where.file + what the anchor,
+    # evidence and summary name; deliberately NOT on `kind`, which two people
+    # describing one defect routinely label differently.
+    # `--allow-duplicate` overrides when the match is wrong.
+    occurrences: 1                         # OPTIONAL — int >= 1. Absent means
+                                           #   once. Written by lessons.py.
+    first_seen_at: null                    # OPTIONAL — first report (raised_at
+                                           #   stays the original too)
+    last_seen_at: null                     # OPTIONAL — most recent report.
+                                           #   A bump also clears sent_at, so
+                                           #   the updated count travels on the
+                                           #   next batch and the maintainer's
+                                           #   merge updates it in place.
+
+    status: open                           # REQUIRED — open | collected
+                                           #   (collected = the maintainer's
+                                           #   collector has ingested it).
+                                           #   NOT the same as sent_at below:
+                                           #   `status` is the maintainer's
+                                           #   view, `sent_at` is this
+                                           #   machine's.
+    sent_at: null                          # OPTIONAL — set once this lesson has
+                                           #   been delivered. Absent means
+                                           #   unsent; a delivered lesson is
+                                           #   never sent twice. Written by
+                                           #   lessons.py alone.

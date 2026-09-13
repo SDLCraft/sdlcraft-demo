@@ -1,0 +1,751 @@
+# =============================================================================
+# ARCH__CONTAINER.schema.yaml — canonical schema for one
+#   docs/ARCH__<container>.yaml
+# =============================================================================
+# Produced by /sdlc:arch <container>. Mirrors a single container's row in
+# ARCH.yaml but adds tech, deployment, observability, ownership, failure
+# modes, security, components, and internal/external edges.
+#
+# This file is the source of truth for AI agents that need to implement,
+# test, or deploy the container. Downstream skills (test, task, deploy)
+# read it directly.
+#
+# External-container exemption: this file is NEVER authored for containers
+# with `external: true` in ARCH.yaml.containers[]. Container mode aborts on
+# external archetypes (identity-provider used externally, all data-store
+# archetypes, `external-service`). If a hand-written ARCH__<external>.yaml
+# exists, the validator skips the "REQUIRED for non-external" checks but
+# warns that the file should not exist.
+# =============================================================================
+
+metadata:                                  # REQUIRED
+  arch_container_version: "2.0"            # REQUIRED — new writes stamp 2.0.
+                                           #   2.0 (2026-09-01): configuration
+                                           #   block, work_units owns_callables,
+                                           #   contract-seam warnings (#28), and
+                                           #   the CLAUDE.md §10 version gate:
+                                           #   checks #21-#24 ERROR at >= 2.0
+                                           #   and WARN below it, so older files
+                                           #   never flip red on upgrade.
+  last_updated: <ISO-8601 UTC>             # REQUIRED — bumped on every write
+  generated_by: sdlc-arch                  # REQUIRED
+  session_id: <uuid4>                      # REQUIRED — sub-session id from state file
+  status: draft | complete                 # REQUIRED
+  changelog:                               # OPTIONAL — append-only, most-recent first.
+    # Each entry: "<arch_container_version> (<YYYY-MM-DD>): <one-line summary>".
+    # Validator type-checks Optional[List[str]] only.
+    - "1.0 (2026-05-26): Initial container deep-dive."
+  upstream_provenance:                     # OPTIONAL — one entry per upstream artifact
+    # consumed when this container was drilled, each a mapping
+    # {file, session_id, last_updated, sha256}. Lets a later /sdlc:arch <container>
+    # detect upstream drift since the last drill. Validator type-checks
+    # list-of-mappings only. See CLAUDE.md §7 "Upstream-change re-invocation".
+    - {file: docs/DATA-MODEL.yaml, session_id: <uuid4>, last_updated: <iso8601>, sha256: <16-hex>}
+
+# ---------------------------------------------------------------------------
+# Identity — must match the parent ARCH.yaml entry verbatim.
+# ---------------------------------------------------------------------------
+container_id: <kebab-case>                 # REQUIRED — matches an entry in ARCH.yaml.containers[]
+archetype: <enum>                          # REQUIRED — same enum as ARCH.yaml.containers[].archetype
+overview: <two or three sentences>         # REQUIRED — purpose & responsibilities
+
+# ---------------------------------------------------------------------------
+# tech_stack — chosen technologies. Most fields pre-filled from PRD's
+# technical_constraints; user confirms or refines.
+# ---------------------------------------------------------------------------
+tech_stack:                                # REQUIRED for non-external containers
+  language: <string>                       # REQUIRED — e.g. "TypeScript", "Python", "Go"
+  language_confidence: confirmed | inferred | assumption  # REQUIRED
+  framework: <string>                      # OPTIONAL — e.g. "FastAPI", "Next.js"
+  runtime_version: <string>                # OPTIONAL — e.g. "node 20", "python 3.12"
+  package_manager: <string>                # OPTIONAL — e.g. "pnpm", "uv", "go mod"
+  build_tool: <string>                     # OPTIONAL — e.g. "vite", "esbuild"
+  key_libraries:                           # OPTIONAL — short list, no transitive deps
+    - <string>
+
+# ---------------------------------------------------------------------------
+# configuration — the runtime configuration keys this container consumes
+# (D-arch-2). This is the SOURCE the downstream `task` skill slices into each
+# config task's `config_keys` embed: when this block is declared, the embed is
+# a drift-checked copy of it; when it is absent, task-authored config keys
+# stay authored (no drift check). The validator type-checks the shape and
+# warns (never blocks) on duplicate keys and on consumed_by entries naming no
+# component of this container.
+# ---------------------------------------------------------------------------
+configuration:                             # OPTIONAL
+  config_keys:                             # OPTIONAL — one entry per key
+    - key: DATABASE_URL                    # REQUIRED — the key name
+      purpose: "Primary store DSN."        # OPTIONAL — what it configures
+      consumed_by: [users-repository]      # OPTIONAL — component_ids reading it
+      secret: true                         # OPTIONAL (default false) — sourced
+                                           #   from a secret store, never a
+                                           #   committed default
+  notes: <string>                          # OPTIONAL — loading/precedence rules
+
+# ---------------------------------------------------------------------------
+# persistence_bindings — every DATA store this container reads or writes.
+# Pre-filled from ARCH.yaml.containers[id].persistence; the user may add
+# bindings here for additional usage (e.g. a feature-flag cache).
+# store_id references resolve against DATA-MODEL store ids ("primary" or a
+# secondary's store_id; legacy names accepted as aliases) — warning-only.
+# ---------------------------------------------------------------------------
+persistence_bindings:                      # OPTIONAL — list (empty for stateless)
+  - store_id: primary-postgres             # REQUIRED — must exist in DATA-MODEL.persistence
+    access: read | write | read_write      # REQUIRED
+    via: <library/driver/orm>              # OPTIONAL — e.g. "SQLAlchemy", "Prisma"
+    note: <short string>                   # OPTIONAL
+
+# ---------------------------------------------------------------------------
+# api_surface — which API resources this container exposes.
+# Frontend containers have empty api_surface; their consumption shows up
+# under api_consumers below.
+# ---------------------------------------------------------------------------
+api_surface:                               # OPTIONAL — list (empty for non-backends)
+  - resource_id: users                     # REQUIRED — must exist in API__<resource>.yaml
+    note: <short string>                   # OPTIONAL
+
+api_consumers:                             # OPTIONAL — list of resources this container CALLS
+  - resource_id: users                     # REQUIRED — must exist in API__<resource>.yaml
+    in_same_container: false               # OPTIONAL — true if calling self via internal contract
+
+# ---------------------------------------------------------------------------
+# ux_surface — which UX surfaces this container renders. Backend containers
+# have empty ux_surface.
+# ---------------------------------------------------------------------------
+ux_surface:                                # OPTIONAL — list (empty for non-frontends)
+  - surface_id: dashboard                  # REQUIRED — must exist in UX__<surface>.yaml
+    note: <short string>                   # OPTIONAL
+
+# ---------------------------------------------------------------------------
+# deployment — how this container is shipped and run.
+#
+# `deployment.shape` is a SPECIALIZATION of the parent container's
+# `deployment_unit` (in ARCH.yaml). The validator enforces the following
+# compatibility map:
+#
+#   ARCH.yaml deployment_unit  | acceptable deployment.shape values
+#   ---------------------------|--------------------------------------------
+#   long_running_service       | long_running_service | container
+#   scheduled_job              | scheduled_job
+#   batch_job                  | batch_job
+#   static_asset               | static_asset
+#   serverless_function        | serverless_function
+#   container                  | container | long_running_service
+#   external_managed           | managed_service
+#
+# Additionally, archetype-specific shapes are allowed regardless of parent:
+#   - desktop-frontend archetype → desktop_app
+#   - mobile-frontend archetype  → mobile_app
+#   - cli archetype              → cli_binary
+# ---------------------------------------------------------------------------
+deployment:                                # REQUIRED for non-external
+  shape:                                   # REQUIRED — one of:
+    # container | serverless_function | static_asset | managed_service |
+    # long_running_service | scheduled_job | batch_job | desktop_app |
+    # mobile_app | cli_binary
+  shape_confidence: confirmed | inferred | assumption  # REQUIRED
+  hosting: <string>                        # OPTIONAL — e.g. "AWS Fargate", "Cloud Run"
+  scaling:                                 # OPTIONAL
+    min_replicas: <int>                    # OPTIONAL
+    max_replicas: <int>                    # OPTIONAL
+    autoscale_signal: <string>             # OPTIONAL — e.g. "cpu>70", "queue_depth>100"
+  regions: [<string>, ...]                 # OPTIONAL
+  scheduling: <string>                     # OPTIONAL — for scheduled_job shapes (cron expr)
+  notes: <string>                          # OPTIONAL
+
+# ---------------------------------------------------------------------------
+# observability — logs / metrics / traces / alerts. Light per container —
+# detailed observability infra is captured in /sdlc:deploy (planned - not yet
+# implemented).
+# ---------------------------------------------------------------------------
+observability:                             # REQUIRED
+  logs: <string>                           # OPTIONAL — e.g. "stdout json", "syslog"
+  metrics: <string>                        # OPTIONAL — e.g. "prometheus", "statsd"
+  traces: <string>                         # OPTIONAL — e.g. "otel http to collector"
+  alerts:                                  # OPTIONAL
+    - condition: <string>
+      action: <string>
+
+# ---------------------------------------------------------------------------
+# ownership — team and change cadence. Pre-filled from ARCH.yaml when set.
+# ---------------------------------------------------------------------------
+ownership:                                 # OPTIONAL
+  team: <string>
+  change_cadence: <string>
+  on_call_rotation: <string>
+
+# ---------------------------------------------------------------------------
+# failure_modes — what breaks, how it manifests, mitigation. `high` per item.
+# ---------------------------------------------------------------------------
+failure_modes:                             # REQUIRED — non-empty unless trivially-stateless
+  - id: <kebab-case>
+    description: <one sentence>
+    likelihood: low | medium | high
+    impact: low | medium | high
+    mitigation: <one or two sentences>
+
+# ---------------------------------------------------------------------------
+# security_concerns — structured list of risks specific to this container.
+# Pre-filled from DATA classification + PRD security_compliance.
+#
+# Each entry has a stable id so downstream `task` and `test` agents can
+# reference it without ambiguity. The `mitigation` field is optional but
+# strongly encouraged — it's what the `test` agent uses to scaffold the
+# corresponding negative / abuse-case test.
+#
+# Backwards-compatible: a string-only entry (the v1.0 shape) is still
+# accepted by the validator and treated as `{ id: auto, threat: <string> }`.
+# ---------------------------------------------------------------------------
+security_concerns:                         # OPTIONAL — list[SecurityConcern]
+  - id: <kebab-case>                       # REQUIRED when entry is structured
+    threat: <short string>                 # REQUIRED — the risk/threat
+    mitigation: <short string>             # OPTIONAL — how we mitigate it
+    related_data_classification:           # OPTIONAL — list of "Entity.field"
+      - "User.email"                       #            references from
+                                           #            DATA-MODEL.data_classification
+
+# ---------------------------------------------------------------------------
+# components — internal decomposition. `critical` per item drill-down.
+# Component edges are kept here on each component (`edges:` list),
+# mirroring how ARCH.yaml stores container edges.
+#
+# `archetype` is an enum drawn from references/component-taxonomy.yaml.
+# `traces_*` fields ground each component in upstream artifacts; the
+# validator cross-checks them (cross-checks 11/12/13 below).
+#
+# `code_location` is the component → code-module seam: which directory(ies)
+# / module(s) this component's source lives in. It is the single most
+# load-bearing field for autonomous downstream task breakdown and codegen —
+# without it the `task` agent must INVENT each component's file placement,
+# and an invented path is the most common way a generated repo drifts from
+# its architecture. The downstream `task` skill grounds each task's
+# `target_files` in the owning component's `code_location` (validated). See
+# references/component-discovery.md → "Deriving code_location".
+# ---------------------------------------------------------------------------
+components:                                # REQUIRED — non-empty
+  - component_id: <kebab-case>             # REQUIRED — unique within this container
+    archetype:                             # REQUIRED — one of (see component-taxonomy.yaml):
+      # controller | service | repository | middleware | use_case | view |
+      # state_store | api_client | event_handler | scheduler | validator |
+      # serializer | cache_client | blob_client | background_worker |
+      # config_loader | observability_bootstrap | error_handler |
+      # schema_model | dev_tool | content_asset | other
+      #
+      # The last three are BUILD-TIME DELIVERABLE classes — components whose
+      # output ships with the build/authoring process rather than running as
+      # a runtime callable: a typed schema/domain-model layer (schema_model),
+      # repo-root tools/ validators & generators (dev_tool), and shipped
+      # content such as templates/, prompt packs, question inventories
+      # (content_asset). They exist so FR-named deliverables get a component
+      # + code_location + work_units — without one, downstream `task` can
+      # never schedule building them (see component-discovery.md → Pass 6).
+      # They are NON-plumbing: #20/#21 apply. For content_asset, work_units
+      # are AUTHORING units (name = the authoring action or asset/pack,
+      # output = the shipped path(s)) rather than code callables.
+    purpose: <one sentence>                # REQUIRED
+    responsibilities:                      # REQUIRED — non-empty
+      - <one short sentence>
+    code_location:                         # OPTIONAL but strongly encouraged — the
+      - "src/auth/"                        #   repo-relative directory(ies) and/or
+      - "src/auth/service.py"              #   illustrative file(s) where this
+                                           #   component's source lives. DIRECTORY
+                                           #   entries are the firm contract;
+                                           #   file-level entries are illustrative
+                                           #   for the executor to confirm. Keyed to
+                                           #   the project's source layout / import
+                                           #   layering (e.g. a layered backend's
+                                           #   controllers/ services/ repositories/,
+                                           #   or a CLI's config/ core/ ui/). A
+                                           #   component may span layers (list each).
+                                           #   The validator emits a non-blocking
+                                           #   WARNING for a non-trivial component
+                                           #   with traces but no code_location.
+    inputs:                                # OPTIONAL
+      - <string>
+    outputs:                               # OPTIONAL
+      - <string>
+    traces_api_resources:                  # OPTIONAL — list of API resource_ids
+      - users                              #            this component implements.
+                                           #            Validated against API__*.yaml
+                                           #            resource_ids.
+    traces_api_operations:                 # OPTIONAL — list of OpenAPI operation_id
+      - get-user                           #            strings (from API__*.yaml
+      - create-user                        #            endpoints[].operation_id).
+                                           #            Lets the `test` agent scaffold
+                                           #            endpoint-level test cases.
+                                           #            Validated against API__*.yaml.
+    traces_ux_surfaces:                    # OPTIONAL — list of UX surface_ids
+      - dashboard                          #            this component renders.
+                                           #            Validated against UX__*.yaml.
+    traces_data_entities:                  # OPTIONAL — list of DATA entity names
+      - User                               #            (PascalCase) this component
+                                           #            reads/writes. Validated against
+                                           #            DATA-MODEL.yaml.entities ONLY —
+                                           #            entities, not enums/value types
+                                           #            (enums_and_lookups.enums). To
+                                           #            reference an enum, trace the
+                                           #            entity that carries it instead.
+    implements_requirements:               # OPTIONAL — PRD requirements this component
+      - FR-001                             #            implements. Accepts FR-NNN
+      - NFR-011                            #            (features) and NFR-NNN
+                                           #            (non-functional). Validated for
+                                           #            FR-NNN/NFR-NNN format, existence
+                                           #            in PRD.yaml, AND containment: must
+                                           #            be a subset of the parent
+                                           #            container's implements_requirements.
+    traces_prd_workflows:                  # OPTIONAL — PRD core_workflows (WKF-NNN) this
+      - WKF-003                            #            component participates in.
+                                           #            Validated for WKF-NNN format +
+                                           #            existence in PRD.yaml.
+    failure_modes:                         # OPTIONAL — structured per item, same shape
+                                           #            as container-level failure_modes.
+                                           #            Backwards-compatible: a bare
+                                           #            string entry is accepted as
+                                           #            { id: auto, description: <str> }.
+      - id: <kebab-case>
+        description: <one sentence>
+        likelihood: low | medium | high
+        impact: low | medium | high
+        mitigation: <one or two sentences>
+    acceptance_criteria:                   # OPTIONAL — list of short strings telling
+      - <string>                           #            the downstream `task` / `test`
+                                           #            agents what "done" looks like
+                                           #            for this component (e.g. "all
+                                           #            owned endpoints return 2xx for
+                                           #            happy-path fixtures").
+    work_units:                            # OPTIONAL but strongly encouraged for non-
+                                           #   plumbing components — the method/function
+                                           #   CALLABLES this component exposes (C4 interface
+                                           #   level). This is the component → CODE seam: the
+                                           #   downstream `task` skill slices EXACTLY ONE
+                                           #   atomic implementation task per work_unit (its
+                                           #   target_symbol = the work_unit `name`), so a
+                                           #   component with no work_units yields no
+                                           #   implementation task. Enumerate the PUBLIC /
+                                           #   contract-bearing callables (those realizing a
+                                           #   traced contract or sitting on an internal /
+                                           #   external edge) — NOT every private helper.
+                                           #   Draft one per owned API operation (controllers),
+                                           #   per entity CRUD verb (repositories), or per
+                                           #   behaviour the responsibilities /
+                                           #   acceptance_criteria imply (services/use_cases).
+                                           #   Addressed as (component, name) — there is NO
+                                           #   id family. The validator emits a non-blocking
+                                           #   WARNING for a non-trivial component that
+                                           #   declares none (cross-check 21).
+      - name: create_task                  # REQUIRED — the callable's name (method /
+                                           #   function / Class.method), e.g. "createTask" or
+                                           #   "TasksController.createTask". UNIQUE within
+                                           #   THIS component. Becomes the downstream Task's
+                                           #   target_symbol (the atomic codegen unit).
+        summary: <one line>                # REQUIRED — what this callable does.
+        kind: callable                     # OPTIONAL — deliverable class (demo FR-013 v1.30):
+                                           #   callable (DEFAULT when omitted) — a runtime
+                                           #     method/function; the normal case.
+                                           #   module   — a source module whose DEFINITION SET
+                                           #     is the interface (e.g. a Pydantic schemas
+                                           #     file); `name` names the module deliverable.
+                                           #   content  — a shipped content file (prompt pack,
+                                           #     question inventory, template).
+                                           #   tooling  — a repo tool/validator/migration
+                                           #     script.
+                                           #   entrypoint — the composition/dispatch root of a
+                                           #     single-file or multi-run-mode deliverable (a
+                                           #     CLI/shell entrypoint): owns arg/mode parsing,
+                                           #     step-sequencing, setup/teardown and exit
+                                           #     semantics. CALLABLE-dialect, so #23 DECLARE
+                                           #     applies (inputs = argv/env, output = exit code
+                                           #     or dispatched result, raises = usage/exit
+                                           #     conditions). Emit ONE per single-file component
+                                           #     that has >1 run-mode branch, so the file's
+                                           #     top-level control flow is owned by a task.
+                                           #   The SAME 1:1 unit→task rule applies to every
+                                           #   kind (downstream `task` copies it onto the
+                                           #   task's `unit_kind`); non-callable kinds (module /
+                                           #   content / tooling) deliver a FILE, so the #23
+                                           #   DEFER-OR-DECLARE check does not apply to them.
+        # --- traces: the contract this work_unit realizes (ALL OPTIONAL) ---
+        traces_api_operation: create-task  # OPTIONAL — an operation_id from API__*.yaml
+                                           #   (controllers / api_clients). Validated ⊆ the
+                                           #   API operation set; lets `task`/`test` slice
+                                           #   endpoint-level work. The component-level
+                                           #   `traces_api_operations` stays the union.
+        implements_requirements:           # OPTIONAL — FR-NNN/NFR-NNN this work_unit realizes.
+          - FR-001                         #   MUST be ⊆ the OWNING component's
+                                           #   implements_requirements (validated).
+        touches_entities:                  # OPTIONAL — DATA-MODEL entity name(s) this
+          - Task                           #   work_unit reads/writes. Validated ⊆ the
+                                           #   entities the owning component traces.
+        satisfies_acceptance:              # OPTIONAL — the component acceptance_criterion
+          - "Creating a task returns 201 with a persisted id."  # string(s) this fulfils.
+        # --- interface contract (codegen-grade). DEFER-OR-DECLARE, ENFORCED by
+        #     cross-check #23:
+        #       DEFER   — allowed ONLY when `traces_api_operation` is set (the
+        #                 request/response schema in API__*.yaml IS the contract);
+        #                 inputs/output/raises may then be omitted.
+        #       DECLARE — every other unit (service/use_case methods, repo CRUD,
+        #                 authoring units, …) MUST declare ALL THREE of inputs /
+        #                 output / raises. Explicit empties count as declared:
+        #                 `inputs: []` (no-arg), `raises: []` (nothing beyond
+        #                 language defaults), `output: "None"` (no return). What
+        #                 #23 rejects is the field being ABSENT — i.e. nobody
+        #                 froze the interface, and the independently-generated
+        #                 atomic tasks would each re-guess it. Blocks `complete`;
+        #                 the component's work_units_waiver downgrades to a
+        #                 warning. ---
+        inputs:                            # DECLARE-case REQUIRED — parameter contract
+          - "payload: TaskCreate"          #   (named params / types / ENT refs). [] = no args.
+        output: Task                       # DECLARE-case REQUIRED — return contract
+                                           #   (a type / entity / the string "None"). A unit
+                                           #   with output "None" AND no inputs AND no raises
+                                           #   has nothing to emit — if it captures a policy
+                                           #   enforced EXTERNALLY (platform / runtime /
+                                           #   deploy), it is NOT a work_unit: model it as a
+                                           #   security_concern (+ mitigation) and/or an
+                                           #   acceptance_criterion and cover it with a test
+                                           #   (cross-check 23 warns on the empty-callable
+                                           #   shape).
+        raises:                            # DECLARE-case REQUIRED — error / exception
+          - "ValidationError -> 400"       #   contract. [] = nothing domain-specific.
+        signature: <optional>              # OPTIONAL — concrete language-specific signature,
+                                           #   filled ONLY when the signature itself is the
+                                           #   contract (public library API). Else codegen
+                                           #   renders it from inputs/output + the tech stack.
+        owns_callables:                    # OPTIONAL — additional symbols this unit's build
+          - _validate_payload              #   task owns beyond `name` (private helpers it
+                                           #   also writes). Downstream `task` copies the
+                                           #   list onto the task's `owns_symbols`. A
+                                           #   callable claimed by two units in one
+                                           #   container draws a warning (#29) — ownership
+                                           #   must be unique or two tasks collide.
+        # Downstream mapping (task-artifact v1.4 embeds): `task` copies `kind`
+        # onto the task's `unit_kind`, `summary` onto `unit_summary`, and the
+        # four FLAT fields above into a NESTED `interface_contract{inputs,
+        # output, raises, signature}` block — the nested block exists only on
+        # the Task embed, never here.
+        status: draft | confirmed          # REQUIRED — interview progress.
+    work_units_waiver: <one sentence>      # OPTIONAL — the escape hatch for the #21/#22
+                                           #   blocking gates. Set it (alongside
+                                           #   work_units: []) when a NON-TRIVIAL component
+                                           #   legitimately exposes no standalone callable —
+                                           #   realized purely by wiring (a decorator, a
+                                           #   composition root) — OR when a specific FR it
+                                           #   claims is realized by wiring rather than a
+                                           #   named callable. A non-empty waiver downgrades
+                                           #   #21 (no work_units) and #22 (FR not pushed to a
+                                           #   callable) from blocking to a reviewer-visible
+                                           #   WARNING for THIS component. Don't use it to
+                                           #   dodge decomposition — use it when a callable
+                                           #   breakdown genuinely doesn't apply.
+    status: defined | draft | confirmed    # REQUIRED — interview progress
+
+# WORK_UNITS EMISSION STYLE (normative): write each work_unit BLOCK-style — one
+# field per line under a `- name:` entry (as shown above). Do NOT use flow-style
+# one-liner mappings (`- {name: x, summary: y}`): block-style is diff-reviewable
+# and robust to line-oriented tooling. On an update flow, normalize any existing
+# flow-style entries to block-style. (Both styles parse identically — the rule is
+# about reviewability, and downstream tools MUST parse, never line-grep, to count.)
+
+# ---------------------------------------------------------------------------
+# internal_edges — edges between two components inside this container.
+# Auto-derived in Phase 6 of container mode; users confirm or edit.
+#
+# `via_*` fields are OPTIONAL but strongly recommended — they ground the
+# edge in an upstream artifact. Pre-fill during derivation whenever the
+# evidence is unambiguous.
+# ---------------------------------------------------------------------------
+internal_edges:                            # OPTIONAL — empty for very small containers
+  - from: <component_id>                   # REQUIRED — must exist in components[]
+    to: <component_id>                     # REQUIRED — must exist in components[]
+    type:                                  # REQUIRED — one of:
+      # depends_on | calls | reads | writes | publishes | subscribes_to | implements
+    via_resource_id: <api_resource_id>     # OPTIONAL — for `calls` edges into a
+                                           #            controller component
+    via_unit: <work_unit_name>             # OPTIONAL — for `calls` edges between two
+                                           #            components: the WORK_UNIT name on the
+                                           #            `to` component being invoked (resolves
+                                           #            to a work_units[].name on `to`). The
+                                           #            intra-container analogue of an API
+                                           #            operation for internal callables.
+    via_entity: <PascalCaseEntityName>     # OPTIONAL — for `reads`/`writes` against a
+                                           #            repository component
+    note: <short string>                   # OPTIONAL
+
+# ---------------------------------------------------------------------------
+# external_edges — edges from a component in THIS container to another
+# container OR to a specific component inside another container.
+# Used by downstream codegen to know which client SDK each component needs.
+# ---------------------------------------------------------------------------
+external_edges:                            # OPTIONAL
+  - from: <component_id>                   # REQUIRED — component in THIS container
+    to: <container_id>                     # REQUIRED — either "<container_id>" or
+                                           #            "<container_id>/<component_id>"
+    type: <enum>                           # REQUIRED — same enum as edges
+    via_resource_id: <api_resource_id>     # OPTIONAL — for `calls` edges, the API
+                                           #            resource being called. Validated
+                                           #            against API__*.yaml. Also mirror
+                                           #            the resource into api_consumers[]
+                                           #            (cross-check #26, warning).
+    via_operation_id: <operation_id>       # OPTIONAL — for `calls` edges, the specific
+                                           #            endpoint operation. Validated
+                                           #            against API__*.yaml endpoints.
+    via_unit: <work_unit_name>             # OPTIONAL — for `calls` edges into a SIBLING
+                                           #            container with no API between the
+                                           #            two: the work_units[].name on the
+                                           #            "<container_id>/<component_id>"
+                                           #            target component (requires that to
+                                           #            form). The cross-container analogue
+                                           #            of internal_edges' via_unit; backfill
+                                           #            passes must sweep THESE edges too,
+                                           #            not just intra-container calls. For a
+                                           #            SUBPROCESS/CLI seam, point it at the
+                                           #            callee's `entrypoint` work_unit — that
+                                           #            unit's inputs/output pin argv+mode IN ⇄
+                                           #            exit-code/stdout/stderr OUT for BOTH
+                                           #            sides (the shared bilateral contract).
+    via_channel_id: <event_channel_id>     # OPTIONAL — for `publishes`/`subscribes_to`,
+                                           #            the API.events channel_id.
+    via_entity: <PascalCaseEntityName>     # OPTIONAL — for `reads`/`writes` against an
+                                           #            external store container.
+    invocation: <mode + resolved args>     # OPTIONAL — caller-side INPUT binding: the mode
+                                           #            selector + resolved args/params THIS
+                                           #            caller invokes the callee with. The
+                                           #            callee's entrypoint unit is the shared
+                                           #            contract; this records how this caller
+                                           #            binds it (a subprocess/CLI seam should
+                                           #            pin the INPUT, not just the return).
+    note: <string>                         # OPTIONAL
+# EVERY external edge must also exist as a system-level ARCH.yaml.edges row
+# (from: this container, to: the target container, same type) — cross-check
+# #24 blocks `complete` on a container-sourced edge that never propagated up.
+# A cross-container `calls` edge with NONE of via_operation_id / via_resource_id
+# / via_unit set has an unpinned invocation seam — cross-check #27 warns and
+# codegen must guess the INPUT contract; pin via_unit (+ invocation).
+
+# ---------------------------------------------------------------------------
+# work_unit_family_contracts — OPTIONAL. An opt-in pattern for ANY project
+# whose units form uniform families (≥3 units sharing one contract shape:
+# per-stage bodies, per-clause gates, per-command handlers); the meta-corpus
+# dialect merely required it first (a CLI factory with no API layer has no
+# OPR to DEFER to). Declares one shared DEFER-OR-DECLARE contract per
+# *family*, so terse members inherit it instead of repeating
+# inputs/output/raises on each. Declaring a non-empty list opts the container
+# in: cross-check #23 then treats a family member as DECLARED even when it
+# omits its own contract. A container WITHOUT this block keeps the strict
+# per-unit DECLARE rule. A member OVERRIDES its family by declaring its own
+# inputs/output/raises. Membership is the UNION of the selectors provided.
+# Prefer a family over stamping empty contracts across members — the
+# emptiness warning (#23) flags that shape.
+# ---------------------------------------------------------------------------
+work_unit_family_contracts:                # OPTIONAL — omit when units are heterogeneous
+  - family: <family label>                 # REQUIRED — e.g. "gate-units"
+    contract: <string>                     # OPTIONAL — prose of the shared contract
+    inputs: [<string>, ...]                # OPTIONAL — shared input contract
+    output: <string>                       # OPTIONAL — shared output contract
+    raises: [<string>, ...]                # OPTIONAL — shared error contract
+    member_components: [<component_id>, ...]  # OPTIONAL — units in these components
+    member_archetypes: [<archetype>, ...]     # OPTIONAL — units in components of these archetypes
+    member_name_globs: ["handle_*", ...]      # OPTIONAL — fnmatch globs on work_unit.name
+
+# ---------------------------------------------------------------------------
+# arch_warnings — non-fatal issues for THIS container. Universal WRN-NNN
+# family: "WRN-NNN: <message>". Counter is writer-managed per sub-session
+# (state.last_ids.WRN). Validator enforces `^WRN-\d{3,}:\s+.+`.
+# ---------------------------------------------------------------------------
+# WRN item shape: legacy "WRN-NNN: <message>" string OR the typed mapping
+# {id, text, kind, status, impact, refs?, defers?, resolution?, resolved_on?}.
+# Both valid forever; full definition in the parent canonical schema and in
+# CLAUDE.md section 2.
+arch_warnings:                             # OPTIONAL — list of "WRN-NNN: ..." strings
+  - "WRN-001: TODO: address theme observability"
+
+# =============================================================================
+# Required cross-checks (run by validate_schema.py on every write)
+# =============================================================================
+# In addition to the checks in ARCH.schema.yaml:
+#
+# 10. owns_api_resources match — every resource_id in `api_surface` must
+#     appear in the parent ARCH.yaml.containers[id].owns_api_resources.
+# 11. owns_ux_surfaces match — every surface_id in `ux_surface` must
+#     appear in the parent ARCH.yaml.containers[id].owns_ux_surfaces.
+# 12. persistence match — every store_id in `persistence_bindings` must
+#     appear in the parent ARCH.yaml.containers[id].persistence.
+# 13. external_edges resolve — every external_edges[].to that references
+#     "<container_id>" or "<container_id>/<component_id>" must resolve
+#     against the on-disk ARCH.yaml / ARCH__<container>.yaml graph.
+# 14. Component trace integrity — for every component:
+#       * traces_api_resources   ⊆ resource_ids in docs/API__*.yaml
+#       * traces_api_operations  ⊆ operation_ids in docs/API__*.yaml endpoints
+#       * traces_ux_surfaces     ⊆ surface_ids in docs/UX__*.yaml
+#       * traces_data_entities   ⊆ entity names in docs/DATA-MODEL.yaml.entities
+#         (entities only — NOT enums_and_lookups.enums value types)
+#     Plus parent containment:
+#       * traces_api_resources   ⊆ parent container's owns_api_resources
+#       * traces_ux_surfaces     ⊆ parent container's owns_ux_surfaces
+#     Cross-check failures force `metadata.status: draft`.
+# 15. Edge via_* resolution — for every edge with a via_* field set:
+#       * via_resource_id  → must resolve to a resource_id in API__*.yaml
+#       * via_operation_id → (external_edges) must resolve to an API operation_id in
+#                            API__*.yaml endpoints — an external call to another
+#                            container's API surface.
+#       * via_unit         → (internal_edges) must resolve to a work_units[].name on the
+#                            edge's `to` component — so an INTERNAL (non-API) call names
+#                            the callee's method.
+#       * via_unit         → (external_edges) must resolve to a work_units[].name on the
+#                            "<container_id>/<component_id>" target component (requires
+#                            that `to` form; skipped when the target container is not
+#                            drilled yet) — a cross-container call into a sibling with
+#                            no API between them names the callee's callable too.
+#       * via_channel_id   → must resolve to API.events.channels[].channel_id
+#       * via_entity       → must resolve to a DATA-MODEL entity name
+# 16. Deployment shape compatibility — `deployment.shape` must be
+#     compatible with the parent container's `deployment_unit` per the map
+#     in the `deployment:` block above.
+# 17. External container has no ARCH__*.yaml — if the parent container
+#     has `external: true`, this file should not exist; if it does, the
+#     validator emits a warning (not a fail).
+# 18. Component PRD-trace integrity — for every component:
+#       * implements_requirements  → FR-NNN/NFR-NNN format + exists in PRD.yaml
+#         (FR resolves against functional_requirements, NFR against
+#         non_functional_requirements) AND ⊆ the parent container's
+#         implements_requirements.
+#       * traces_prd_workflows     → WKF-NNN format + exists in PRD.yaml.
+# 19. WRN-NNN format — every arch_warnings entry matches `^WRN-\d{3,}:\s+.+`.
+# 20. code_location coverage (warning - does not block) — a non-trivial component
+#     (archetype not in {config_loader, serializer, observability_bootstrap,
+#     error_handler} and carrying at least one trace) with an empty/absent
+#     code_location emits a WARNING: downstream `task`/codegen will have to
+#     infer its file placement. Does NOT block status: complete (placement can
+#     legitimately be deferred), but filling it is what makes "mostly
+#     autonomous" downstream codegen actually hold. Also (Gap-6, any archetype):
+#     a code_location entry containing an unresolved template placeholder
+#     (`.../<stack>/...`) emits a WARNING — bind the concrete MVP-variant path
+#     and model other variants as their own components/work_units (or defer via
+#     WRN); a templated path forces codegen to re-derive the binding.
+# 21. Component work_units — for every work_units[] entry on every component:
+#       * name is non-empty and UNIQUE within its owning component (work_units are
+#         addressed as (component, name) — there is NO id family). It is the stable
+#         handle the downstream `task` skill references as a Task.target_symbol.
+#       * summary is non-empty (required per work_unit).
+#       * traces_api_operation       → resolves to an operation_id in API__*.yaml.
+#       * implements_requirements     → FR-NNN/NFR-NNN format + exists in PRD.yaml
+#         AND ⊆ the OWNING component's implements_requirements.
+#       * touches_entities            → ⊆ the owning component's traces_data_entities
+#         (and a DATA-MODEL entity name). The subset law is maintained by
+#         DERIVATION, not by hand: at write time the component's
+#         traces_data_entities is completed to the union of its units'
+#         touches_entities (curated entries may EXCEED the union, never lag
+#         it — Phase 7 derive rule). A warning when the component's key is
+#         missing/empty while its units touch entities (the subset check has
+#         no base to fire against there).
+#     Cross-check failures force `metadata.status: draft`. The work_units LIST is
+#     still OPTIONAL for a trivial/plumbing component, BUT a NON-TRIVIAL component
+#     (same set as #20: non-plumbing archetype carrying implements_requirements or
+#     a traced contract) that declares NO work_units now BLOCKS `complete` —
+#     unless it records a non-empty `work_units_waiver`. This is the blocking
+#     upgrade: without it a container could be "complete" while downstream `task`
+#     silently seeds no implementation task for a third of its components. The
+#     count is taken from a real YAML PARSE (block- and flow-style entries both
+#     count) — never a line-grep, which would miss flow-style units.
+#     Also (Gap-1, warning): in an EXECUTABLE-deliverable container (archetype
+#     cli / other), a SINGLE-FILE component (one file-shaped code_location entry)
+#     with >1 work_units, NO `entrypoint`-kind unit, and no API-routed units
+#     emits a WARNING — its top-level control flow is unowned. Add one
+#     `entrypoint` unit owning arg/mode dispatch + step-sequencing + setup so
+#     downstream `task`/`code` build the composition root. A framework-routed
+#     service/controller is excluded (its web framework owns dispatch).
+# 22. Component FR → work_unit coverage — for every component that declares at
+#     least one work_unit: every FR-NNN in the component's implements_requirements
+#     must appear in at least one of that component's work_units[].implements_
+#     requirements. Containment (#21) only checks the reverse (unit FRs ⊆ component
+#     FRs), so without #22 a component could claim an FR at the seam yet realize it
+#     in NO callable — leaving `task` with no atomic task that builds the feature.
+#     Failures BLOCK `complete`; waivable per component via `work_units_waiver`
+#     (e.g. an FR realized purely by wiring). NFR-NNN are out of scope (frequently
+#     cross-cutting). The validator also prints a per-container warning roll-up of
+#     the FRs unreachable through ANY work_unit.
+# 23. Work_unit DEFER-OR-DECLARE contract — a work_unit with NO
+#     traces_api_operation (no schema-bearing traced contract) must declare ALL
+#     THREE of inputs / output / raises (explicit empties count: `inputs: []`,
+#     `raises: []`, `output: "None"`). A unit WITH traces_api_operation may
+#     defer to the API schema. A unit with a NON-CALLABLE kind (module /
+#     content / tooling) is EXEMPT — its deliverable is a file, not a callable,
+#     so the interface-contract fields don't apply. FAMILY (OPT-IN, any
+#     project with uniform unit families): if the container declares
+#     `work_unit_family_contracts`, a unit belonging to a family INHERITS that
+#     family's shared contract and may omit its own inputs/output/raises. A
+#     container without the block keeps the strict per-unit DECLARE
+#     requirement. Blocks `complete`; the component's work_units_waiver
+#     downgrades its units' gaps to warnings.
+#     This is the lint that catches an emitter which fills only the trace
+#     fields (implements_requirements/touches_entities/…) and leaves every
+#     contract field empty — downstream atomic tasks then re-guess each
+#     signature. `kind` itself is vocabulary-checked in #21. Also (Gap-2,
+#     warning): a DECLARE-dialect unit with output "None" AND no inputs AND no
+#     raises has nothing to emit — it usually captures a policy enforced
+#     EXTERNALLY; #23 WARNS to move it to a security_concern/acceptance_criterion
+#     + a test rather than a phantom codegen task.
+#     Also (SK-21, warning, per component): explicit empties are for
+#     genuinely-trivial callables — when ≥3 of a component's callable
+#     DECLARE units are ≥80% all-empty (inputs: [] + output "None" +
+#     raises: []), ONE roll-up warning fires: that shape is an emitter
+#     filling the fields, not deciding interfaces. Verify each contract or
+#     fold the family into work_unit_family_contracts. (`signature` stays
+#     deliberately optional and UNCHECKED — PLAN2-D1: codegen renders it
+#     from inputs/output + tech stack unless the signature IS the contract.)
+# 24. Container→system edge roll-up — every external_edges[] entry implies a
+#     system-level ARCH.yaml.edges row {from: this container, to: the target
+#     container, type: same}. Missing rows BLOCK `complete`: a container-sourced
+#     edge that lives only in this file silently under-reports the system
+#     topology (test/deploy read ARCH.yaml.edges). Fix by adding the system
+#     edge or re-running `/sdlc:arch -d`.
+# 25. FR-named deliverable path coverage (warning - does not block) — every
+#     concrete repo path named as inline code (backticks) in the text of a
+#     CLAIMED FR (one that appears in some container's/component's
+#     implements_requirements) must fall inside some component's code_location.
+#     Catches build-time deliverables (schema layer, tools/, templates/,
+#     shipped content) that runtime-driven component derivation misses —
+#     without an owning component, `task` can never schedule building them.
+#     Only backtick-delimited tokens WITH path shape (a trailing '/' or a file
+#     extension) are scanned; bare prose slashes and backticked non-paths
+#     (and/or, PyPI/npm, ID-lists like FR-046/047, enum listings like pass/fail)
+#     are ignored, so mark a genuine deliverable path as code (e.g. `tools/gen/`
+#     or `templates/base.html`) to have its coverage verified.
+# 26. api_consumers mirror (warning - does not block) — an external `calls` edge
+#     with via_resource_id should be mirrored in this container's
+#     api_consumers[], so the container header alone tells codegen which
+#     client SDKs it needs.
+# 27. Cross-container invocation seam (warning, non-blocking, Gap-5) — a
+#     cross-container `calls` external_edge with NONE of via_operation_id /
+#     via_resource_id / via_unit set has an unpinned INPUT contract; codegen
+#     must guess the mode selector + parameterization. Point via_unit at the
+#     callee's `entrypoint` work_unit (which pins argv/mode IN ⇄ exit-code/
+#     stdout/stderr OUT for both sides) and record the caller-side binding in
+#     the edge's `invocation`. TIGHTENED arm: an edge whose via_unit resolves
+#     to an `entrypoint` unit but that records no `invocation` also warns —
+#     the callee pins both directions, yet nothing says how THIS caller binds
+#     them.
+# 28. Contract-seam warnings (never block) — the caller/callee seam class that
+#     used to surface only at codegen:
+#       (a) a DECLARE-dialect unit's `inputs` names a type no sibling unit
+#           produces that is also not a DATA entity/enum — codegen would have
+#           to invent it (runs only when a DATA-MODEL exists to resolve
+#           against);
+#       (b) a pinned `calls` seam (via_unit) whose callee legitimately escaped
+#           the DECLARE gate (family contract or waiver) but whose `raises` is
+#           decided nowhere — the caller cannot handle its failures;
+#       (d) two components in one container whose code_location entries
+#           overlap (same path, or a file inside another component's
+#           directory) — two build tasks would collide in one location.
+# 29. owns_callables uniqueness (warning, never blocks) — a callable claimed
+#     in two units' owns_callables within one container would give two build
+#     tasks the same function; keep each symbol in exactly one unit's list.
+# 30. configuration consistency (warning, never blocks) — duplicate
+#     configuration.config_keys entries, and consumed_by names that are not
+#     components of this container.
+#
+# VERSION GATING (CLAUDE.md §10): checks #21, #22, #23 and #24 ERROR at
+# arch_container_version >= 2.0 and WARN below it — an artifact stamped
+# complete by an older skill version never flips red on upgrade. Warning-only
+# checks (#25-#30, provenance staleness) carry no gate.
+# =============================================================================

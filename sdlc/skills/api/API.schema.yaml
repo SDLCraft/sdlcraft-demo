@@ -1,0 +1,442 @@
+# =============================================================================
+# API.yaml — Canonical Schema Reference (global API contract)
+# =============================================================================
+# Documents the full structure of docs/API.yaml. NOT a runtime config — it is
+# the human-readable source of truth that `validate_schema.py` enforces.
+#
+# Two top-level shapes are supported, mirroring PRD.yaml / UX.yaml:
+#   1. SINGLE-PRODUCT (default): theme blocks live at the top level.
+#   2. MULTI-PRODUCT (monorepo): themes live under `products.<slug>.<theme>`.
+#      Triggered when the upstream PRD has `metadata.monorepo: true`.
+#
+# Conventions:
+#   - `null` (not omission) means "explicitly unanswered".
+#   - For trade-off fields, a sibling `<field>_rationale` (string) captures
+#     the *why*.
+#   - For pre-filled answers, a sibling `<field>_confidence` captures
+#     certainty: confirmed | inferred | assumption.
+#   - Enum values are lowercase snake_case strings.
+#   - Per-resource contents live in sibling files
+#     `docs/API__<resource>.yaml` (see API__RESOURCE.schema.yaml). API.yaml
+#     lists them in `resource_inventory:` and never duplicates their
+#     endpoints or schemas.
+#   - DTO-vs-entity discipline: schemas defined here (and in per-resource
+#     files) are wire DTOs. Persistent entity shapes live in
+#     `docs/DATA-MODEL.yaml`. DTOs may `$ref` DATA entities; see
+#     `references/openapi-embedding.md`.
+#
+# ID conventions (format is always "<PREFIX>-NNN" with zero-padded 3-digit
+# numbers, NNN ≥ 001):
+#
+#   Families this skill EMITS:
+#     WRN — `api_warnings[]`. Writer-managed: every entry is prefixed
+#           `"WRN-NNN: <message>"` and the counter `state.last_ids.WRN`
+#           (or `state.last_ids_by_product[<slug>].WRN` in monorepo mode)
+#           is persisted after each append.
+#     OPR — per-endpoint stable id. Lives on each endpoint as a sibling
+#           field `id` (e.g. `id: OPR-001`) in every
+#           `docs/API__<resource>.yaml.endpoints[]`. Assigned in
+#           collection order when an endpoint is confirmed during theme
+#           10's per-resource deep-dive. Counter:
+#           `state.last_ids.OPR` (or `last_ids_by_product[<slug>].OPR`).
+#           `operation_id` (kebab/snake string) is unchanged and stays
+#           the codegen-naming hook; `id` (OPR-NNN) is the cross-stage
+#           reference contract downstream test/task/arch agents use.
+#
+#   Families this skill CONSUMES from `docs/PRD.yaml` (verbatim — never
+#   renumber, never invent new items in these families):
+#     FR  — `PRD.functional_requirements.must_have_features` and
+#           `nice_to_have_features` — referenced from
+#           `resource_inventory[].traces_prd_features`, per-resource
+#           `traces_prd_features`, and `non_api_features`. Drives the
+#           feature-coverage check.
+#     WKF — `PRD.use_cases.core_workflows` — referenced from optional
+#           `resource_inventory[].traces_prd_workflows` and per-resource
+#           `traces_prd_workflows`. Use when a resource is the API entry
+#           point for a workflow even though no single FR directly
+#           anchors it.
+#
+#   Families this skill CONSUMES from `docs/UX.yaml` (verbatim):
+#     SCR — `UX.surface_inventory[].id` — referenced from
+#           `resource_inventory[].traces_ux_surfaces` and per-resource
+#           `traces_ux_surfaces`. The slug `surface_id` is NOT accepted
+#           — SCR-NNN is the stable contract. Drives surface coverage.
+#
+#   Entity references:
+#     `primary_entity` on every resource is the PascalCase DATA entity
+#     NAME (the dict key in `DATA-MODEL.yaml.entities`), NOT an
+#     `ENT-NNN` id. This is the bridge contract: DATA's dict key IS the
+#     stable identifier on the data side. `null` is allowed for
+#     cross-cutting resources (`/search`, `/health`).
+#
+#   The validator enforces:
+#     * WRN-NNN format on every `api_warnings[]` entry.
+#     * OPR-NNN format on every endpoint's `id` field.
+#     * FR-NNN format on every value in `traces_prd_features` /
+#       `non_api_features`.
+#     * SCR-NNN format on every value in `traces_ux_surfaces`.
+#     * WKF-NNN format on every value in optional `traces_prd_workflows`.
+#     Values carrying the wrong prefix are warnings in `status: draft`,
+#     errors in `status: complete`.
+#
+#   In monorepo mode, WRN and OPR counters reset per product
+#   (`state.last_ids_by_product[<slug>].<PREFIX>`). PRD/UX/DATA
+#   consumption still draws from the matching product's subtree.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# metadata — always at top level, present in both single- and multi-product mode
+# -----------------------------------------------------------------------------
+metadata:
+  api_version: "1.1"                       # schema version this file conforms to
+  last_updated: "2026-05-25T12:00:00Z"     # ISO-8601 UTC timestamp of last write
+  generated_by: sdlc-api                   # always literal string "sdlc-api"
+  session_id: "00000000-0000-0000-0000-000000000000"  # UUID of the interview session
+  monorepo: false                          # mirrors PRD.metadata.monorepo
+  status: "draft"                          # "draft" | "complete"
+                                           # writer sets to "complete" only when:
+                                           #   1) all required fields are filled,
+                                           #   2) the validator passes,
+                                           #   3) feature coverage passes
+                                           #      (every PRD FR-NNN is traced,
+                                           #      deferred via the top-level
+                                           #      `deferrals` list, or —
+                                           #      DEPRECATED, one more version
+                                           #      — bare in non_api_features),
+                                           #   4) surface coverage passes
+                                           #      (every UX surface with data
+                                           #      I/O is traced by ≥1 endpoint
+                                           #      via SCR-NNN, or deferred),
+                                           #   5) entity-link check passes
+                                           #      (every primary_entity exists
+                                           #      in DATA-MODEL).
+                                           # Coverage + entity-link checks are
+                                           # skipped when api_kind: none.
+  applicability: null                      # OPTIONAL (added 0.8.0). "applicable" (default when
+                                           # absent — every legacy artifact is applicable) or
+                                           # "not_applicable": this stage RAN and concluded there
+                                           # is nothing to model, so the artifact is deliberately
+                                           # empty and every coverage gate over it is vacuous.
+                                           # Distinct from PRD.pipeline_scope, which says the
+                                           # stage need not run AT ALL (no artifact exists).
+                                           # Downstream consumers treat not_applicable exactly
+                                           # like an absent artifact — without asking.
+  applicability_rationale: null            # one sentence; REQUIRED when applicability is
+                                           # "not_applicable" (string|null)
+  applicability_confidence: null           # confirmed | inferred | assumption (enum|null)
+  changelog: null                          # Optional[list[string]]. Append-only.
+                                           # Each entry one line, format:
+                                           #   "<version> (<YYYY-MM-DD>): <one-line summary>"
+                                           # Most-recent entry first.
+  upstream_provenance: null                # Optional[list[mapping]]. One entry per
+                                           # upstream artifact consumed, each a mapping:
+                                           #   {file, session_id, last_updated, sha256}
+                                           # sha256 = the 16-hex prefix from
+                                           # docs/INDEX.yaml.generated_from[<file>],
+                                           # else `docs_index.py --hash <file>`
+                                           # (sha256 over the utf-8 TEXT, first
+                                           # 16 hex chars). Re-runs compare this
+                                           # to detect upstream drift. The
+                                           # validator WARNS (never blocks) when
+                                           # a recorded hash no longer matches
+                                           # ("built against an older docs/X"),
+                                           # and — from api_version >= 2.0 —
+                                           # when status is complete with no
+                                           # provenance at all. Type-checked as
+                                           # list-of-mappings only. See
+                                           # CLAUDE.md §7.
+
+# api_warnings — informational notes carried into downstream agent context.
+# Each entry MUST start with a stable ID: "WRN-NNN: <message>".
+# IDs are assigned in collection order by the writer (WRN-001, WRN-002, …)
+# and are stable across re-runs. The writer-managed counter lives in
+# `state.last_ids.WRN`.
+#
+# Use for:
+#   * uncovered PRD FR-NNN features ("WRN-NNN: coverage: FR-007 has no resource trace")
+#   * uncovered UX surfaces with data I/O ("WRN-NNN: surface SCR-004 has no endpoint")
+#   * unresolved DATA entity refs ("WRN-NNN: primary_entity 'Bar' not in DATA-MODEL")
+#   * low-confidence answers
+#   * merge conflicts
+#   * deferred optional themes (now/skip/todo) recorded for downstream visibility
+#   * resources/endpoints deferred from a sweep
+# -----------------------------------------------------------------------------
+# WRN item shape (CLAUDE.md section 2)
+# -----------------------------------------------------------------------------
+# An entry is EITHER the legacy string  "WRN-NNN: <message>"  OR a typed
+# mapping. Both stay valid forever; only the typed form carries a lifecycle a
+# reader - and the generated statusboard - can act on:
+#
+#   - id: WRN-042          # REQUIRED - stable, never renumbered
+#     text: <message>      # REQUIRED - what the string used to carry
+#     kind: deferral       # REQUIRED - deferral | limitation | decision |
+#                          #   exception | scope_change | note
+#     status: open         # REQUIRED - open | resolved
+#     impact: downstream   # REQUIRED - none | local | downstream | risk.
+#                          #   The READER's consequence, never the validator's:
+#                          #   impact can not change an exit code.
+#     refs: [FR-096]       # OPTIONAL - ids this warning is about
+#     defers: [FR-096]     # OPTIONAL - kind: deferral ONLY. The structured
+#                          #   coverage channel the trace-or-defer gates read,
+#                          #   alongside the top-level `deferrals` list.
+#     resolution: null     # REQUIRED once status == resolved
+#     resolved_on: null    # OPTIONAL - YYYY-MM-DD
+#
+# A legacy string reads as {kind: note, status: open, impact: local}, so an
+# untouched artifact keeps behaving exactly as before. A malformed MAPPING
+# never fails the file - it is reported and the entry is dropped or downgraded,
+# the way a malformed `deferrals` entry defers nothing. A malformed STRING is
+# the blocking error it has always been. New writes emit the mapping at
+# <name>_version >= 2.0 (DATA-MODEL: >= 3.0); `.claude/sdlc/migrate_warnings.py`
+# converts an existing artifact.
+api_warnings: []                           # list[string] of "WRN-NNN: <msg>" items
+
+# =============================================================================
+# SINGLE-PRODUCT MODE — themes at top level, in interview order
+# (omit the entire `products:` key in this mode)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# api_kind_and_styles — the structural axis. If api_kind == "none", every
+# block below stays null and downstream coverage checks are skipped.
+# -----------------------------------------------------------------------------
+api_kind: null                  # REQUIRED — one of:
+                                #   rest | graphql | grpc | mixed | none (enum)
+api_kind_confidence: null       # confirmed | inferred | assumption (enum)
+rationale: null                 # REQUIRED when api_kind == "none" (string)
+                                # e.g. "Pure CLI tool; no network surface."
+
+transport_styles: null          # list[string] — picked from:
+                                #   rest | graphql | grpc | websocket |
+                                #   server_sent_events | webhooks_out
+                                # MUST be a non-empty list unless api_kind == "none".
+transport_styles_confidence: null
+
+# -----------------------------------------------------------------------------
+# versioning
+# -----------------------------------------------------------------------------
+versioning:
+  strategy: null                # one of: path | header | content_type | none (enum)
+  strategy_confidence: null
+  current_version: null         # string, e.g. "1.0" or "v1"
+  deprecation_policy: null      # string — how long old versions stay live, etc.
+
+# -----------------------------------------------------------------------------
+# auth — high-level auth contract. Per-endpoint overrides live in the
+# per-resource yaml under endpoints[].auth_override.
+# -----------------------------------------------------------------------------
+auth:
+  schemes: null                 # REQUIRED — list of:
+                                #   api_key | bearer_jwt | oauth2 |
+                                #   session_cookie | mtls | none (enum members)
+  schemes_confidence: null
+  roles: null                   # list[string], e.g. ["admin","editor","viewer"]
+  scopes: null                  # list[string], OAuth-style scopes if applicable
+  default_visibility: null      # one of: public | authenticated | mixed (enum)
+  default_visibility_confidence: null
+
+# -----------------------------------------------------------------------------
+# errors — error envelope + retry semantics
+# -----------------------------------------------------------------------------
+errors:
+  envelope: null                # REQUIRED — one of: rfc7807 | custom (enum)
+  envelope_confidence: null
+  localisation: null            # boolean — are error messages localised?
+  retry_semantics: null         # string — when may a client safely retry?
+  error_codes: null             # list[ErrorCode]; each:
+                                #   - code: string (e.g. "USER_NOT_FOUND")
+                                #     http_status: int
+                                #     description: string
+
+# -----------------------------------------------------------------------------
+# pagination — global default; per-endpoint overrides allowed
+# -----------------------------------------------------------------------------
+pagination:
+  strategy: null                # REQUIRED — one of: offset | cursor | none (enum)
+  strategy_confidence: null
+  default_page_size: null       # int
+  max_page_size: null           # int
+  stable_sort_field: null       # string — e.g. "created_at" (required if cursor)
+
+# -----------------------------------------------------------------------------
+# idempotency — which methods are idempotent + how clients signal idempotency
+# -----------------------------------------------------------------------------
+idempotency:
+  idempotent_methods: null      # list[string] subset of HTTP method names,
+                                # e.g. ["GET","PUT","DELETE","POST"]
+                                # (POST appears here only when paired with
+                                # an idempotency-key header.)
+  header: null                  # string — e.g. "Idempotency-Key" or null if
+                                # idempotency is method-level only.
+  cache_window: null            # string — e.g. "24h" or ISO-8601 duration
+
+# -----------------------------------------------------------------------------
+# rate_limiting
+# -----------------------------------------------------------------------------
+rate_limiting:
+  scopes: null                  # REQUIRED — list of:
+                                #   per_ip | per_user | per_key | global (enum)
+  burst: null                   # string — e.g. "10 req/sec"
+  sustained: null               # string — e.g. "1000 req/min"
+  response: null                # string — e.g. "429 + Retry-After header"
+
+# -----------------------------------------------------------------------------
+# events — async/event contract.
+# Present only when transport_styles contains websocket, server_sent_events,
+# or webhooks_out. Set to null otherwise.
+# -----------------------------------------------------------------------------
+events:
+  channels: null                # list[EventChannel]; each:
+                                #   - channel_id: kebab-case
+                                #     transport: websocket | sse | webhook | queue
+                                #     direction: server_to_client | client_to_server |
+                                #                outbound_webhook | both
+                                #     payload_schema_ref: $ref into shared_schemas
+                                #                          or a per-resource schema
+                                #     auth_ref: which auth scheme applies
+  payload_conventions: null     # string — e.g. "JSON envelope with type + data"
+  delivery_guarantees: null     # one of: at_most_once | at_least_once |
+                                #          exactly_once (enum)
+  consumer_auth: null           # string — how consumers authenticate
+
+# -----------------------------------------------------------------------------
+# external_dependencies — outbound third-party APIs this product calls.
+# Pre-filled from PRD.functional_requirements.integrations_required.
+# -----------------------------------------------------------------------------
+external_dependencies:          # list[ExternalDependency]; each:
+                                #   - name: string (e.g. "Stripe")
+                                #     auth: string (e.g. "API key in Authorization")
+                                #     rate_limit: string | null
+                                #     retry_policy: string | null
+                                #     docs_url: string | null
+  null
+
+# -----------------------------------------------------------------------------
+# sdk_and_clients — SDK generation + distribution policy (optional theme).
+# Written by the sdk_and_clients interview theme; all fields nullable.
+# -----------------------------------------------------------------------------
+sdk_and_clients:
+  generated_sdks: null          # string — e.g. "none" | "openapi-generator (auto)"
+                                #   | "custom (hand-rolled)" | "mix — auto for
+                                #   internal, custom for public"
+  client_languages: null        # list[string] — languages actually published
+                                #   (e.g. ["TypeScript", "Python"])
+  distribution: null            # string — e.g. "Public registries (npm, PyPI)" |
+                                #   "Internal artifactory only" | "GitHub Releases"
+                                #   | "Not distributed — embedded in monorepo"
+
+# -----------------------------------------------------------------------------
+# shared_schemas — OpenAPI 3.1 component schemas referenced by ≥2 resources.
+# Resource-local schemas live in the per-resource file's `schemas` block.
+# May `$ref` DATA entities (see references/openapi-embedding.md for syntax).
+# -----------------------------------------------------------------------------
+shared_schemas:                 # object — OpenAPI 3.1 schemas, keyed by name
+                                # e.g.
+                                #   Money:
+                                #     type: object
+                                #     properties:
+                                #       amount: { type: integer }
+                                #       currency: { type: string }
+                                #   Problem:    # RFC 7807
+                                #     type: object
+                                #     properties:
+                                #       type:    { type: string, format: uri }
+                                #       title:   { type: string }
+                                #       status:  { type: integer }
+                                #       detail:  { type: string }
+                                #       instance:{ type: string }
+  null
+
+# -----------------------------------------------------------------------------
+# resource_inventory — the registry of API resources.
+# Each entry POINTS to a docs/API__<resource_id>.yaml file. The full
+# endpoint + schema spec lives there (see API__RESOURCE.schema.yaml).
+# -----------------------------------------------------------------------------
+resource_inventory:             # list[ResourceInventoryItem]
+  - resource_id: null           # kebab-case unique slug (string), unique within
+                                # the product. The matching SCR-style stable id
+                                # for endpoints is OPR-NNN (lives on each endpoint).
+    base_path: null             # e.g. "/v1/users" (string)
+    status: defined             # one of: defined | draft | confirmed (enum)
+                                #   defined  = id + base_path known, no endpoints yet
+                                #   draft    = deep-dive started, not approved
+                                #   confirmed= deep-dive complete + user-approved
+    file_path: null             # always docs/API__<resource_id>.yaml (string)
+    primary_entity: null        # DATA-MODEL entity NAME (PascalCase dict key in
+                                # DATA-MODEL.yaml.entities) this resource fronts
+                                # (string|null). Null only for cross-cutting
+                                # resources (/search, /health). NOT an ENT-NNN id.
+    traces_prd_features: null   # list[string] of "FR-NNN" ids (no verbatim
+                                # PRD text). Validator enforces FR-NNN format.
+    traces_ux_surfaces: null    # list[string] of "SCR-NNN" ids (from
+                                # UX.surface_inventory[].id). Never the
+                                # editable `surface_id` slug. Drives the
+                                # surface-coverage check.
+    traces_prd_workflows: null  # Optional list[string] of "WKF-NNN" ids
+                                # (from PRD.use_cases.core_workflows). Use
+                                # when a resource is the API entry point for
+                                # a workflow even though no single FR anchors
+                                # it directly.
+    internal: null              # Optional bool. true = internal-only resource
+                                # (health, metrics, ops) — empty trace lists
+                                # are then accepted at complete and reported
+                                # as a warning. Mirror the flag in the
+                                # per-resource file (API__RESOURCE.schema.yaml).
+
+# -----------------------------------------------------------------------------
+# deferrals — the DEFER half of trace-or-defer (CLAUDE.md §6). Read FIRST by
+# the feature and surface coverage gates, at the top level and (monorepo)
+# under each products.<slug>. Alias `deferred_requirements` is accepted.
+# Each entry needs BOTH an id and a reason — an entry with no reason defers
+# nothing (an unauditable deferral is not a deferral). Feature deferrals name
+# FR-NNN ids; surface deferrals name SCR-NNN ids.
+# -----------------------------------------------------------------------------
+deferrals: null                 # list[{id, reason}], e.g.
+                                #   - id: FR-012
+                                #     reason: "Nightly cleanup job — no endpoint; realized in ARCH as a scheduled worker."
+                                #   - id: SCR-004
+                                #     reason: "Reads a static export file; no endpoint serves it."
+
+# -----------------------------------------------------------------------------
+# non_api_features — DEPRECATED fallback for the feature-coverage gate.
+# A bare FR-NNN here still passes the gate for ONE more version, but records
+# no reason, so the validator reports every id that relies on it. New writes
+# put the id in `deferrals` as {id, reason} instead.
+# -----------------------------------------------------------------------------
+non_api_features: null          # list[string] of FR-NNN IDs, e.g.
+                                #   - FR-007  # theme switcher — UI only
+                                #   - FR-012  # nightly cleanup job
+
+# =============================================================================
+# MULTI-PRODUCT MODE (monorepo) — uncomment and use *instead of* the top-level
+# blocks above. Each entry under `products:` mirrors the single-product shape.
+# Per-resource files are named docs/API__<product-slug>__<resource-slug>.yaml
+# to avoid collisions across products.
+# =============================================================================
+#
+# products:
+#   billing:
+#     api_kind: rest
+#     transport_styles: [rest, webhooks_out]
+#     versioning:
+#       strategy: path
+#       current_version: "v1"
+#     auth:
+#       schemes: [bearer_jwt]
+#       default_visibility: authenticated
+#     errors:
+#       envelope: rfc7807
+#     pagination:
+#       strategy: cursor
+#     rate_limiting:
+#       scopes: [per_user]
+#     resource_inventory:
+#       - resource_id: invoices
+#         base_path: /v1/invoices
+#         status: confirmed
+#         file_path: docs/API__billing__invoices.yaml
+#         primary_entity: Invoice
+#         traces_prd_features: ["FR-001", "FR-002"]
+#         traces_ux_surfaces: ["SCR-004", "SCR-005"]
+#   notifications:
+#     # ...

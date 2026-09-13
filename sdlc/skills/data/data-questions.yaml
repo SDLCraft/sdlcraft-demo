@@ -1,0 +1,1123 @@
+# =============================================================================
+# data-questions.yaml — Question inventory for the sdlc-data skill
+# =============================================================================
+# This file is a *guide*, not a rigid script. The skill batches questions by
+# theme (2–4 per batch), skips questions already answered by pre-fill, and
+# promotes optional themes to required when conditional rules fire.
+#
+# Field reference for each entry:
+#   theme              — grouping label; matches a top-level key in DATA-MODEL.yaml
+#   id                 — unique slug, kebab-case
+#   schema_path        — dotted path where the answer is written in DATA-MODEL.yaml.
+#                        For the `entities` theme, use the `entity.<field>` prefix —
+#                        the agent rewrites it at runtime per entity, e.g.
+#                        `entity.fields` → `entities.User.fields` while drilling User.
+#   question           — the prompt shown to the user
+#   hint               — why this matters for downstream agents (kept short)
+#   suggested_answers  — plausible options shown as a numbered list (empty list ⇒ free-text only)
+#   free_text_allowed  — if true, a final "Other / type your own" option appears
+#   required           — true ⇒ must be answered (or explicitly nulled with a
+#                        warning) before the skill can complete
+#   required_if        — optional expression; when it evaluates true against
+#                        already-answered fields, the question is promoted to
+#                        required even if `required: false`.
+#                        Reading: PROMOTION (canonical activation-vs-promotion
+#                        definition: ../prd/references/interview-mechanics.md).
+#   capture_rationale  — if true, after the choice, ask one follow-up:
+#                        "In one sentence — why?". Stored at <schema_path>_rationale.
+#   confidence_field   — if true, a sibling <schema_path>_confidence is written.
+#   importance         — one of `med | high | critical`. Controls how the agent
+#                        runs the interview for this question. See `references/
+#                        interview-mechanics.md`:
+#                          * med      — single AskUserQuestion batch entry,
+#                                       inferred suggestion at position 1.
+#                          * high     — own mini-section: draft → approve / iterate
+#                                       (max 3 rounds).
+#                          * critical — full per-item state machine. Only the
+#                                       `entities` theme uses `critical`.
+#
+# Theme order below is the canonical interview order. Required themes are
+# asked first; optional themes get a now/skip/todo gate. Within a theme,
+# `high`/`critical` questions are NOT batched with others — they run as their
+# own mini-section.
+# =============================================================================
+
+# Each theme carries `applies_to_paradigms` — the list of storage paradigms for
+# which the theme runs. `[all]` ⇒ universal (every paradigm). A theme whose list
+# omits the selected paradigm is SKIPPED automatically (not even offered as a
+# now/skip/todo gate). This is the coarse routing switch that replaces SQL-only
+# assumptions. The paradigm-SPECIFIC analogue themes (edges, graph_config,
+# vector_config, key_value_design, identity_conventions, composition,
+# cross_references, serialization_conventions) are NOT listed here — they live
+# in references/paradigms/<paradigm>.md and are loaded only when that paradigm
+# is selected. See SKILL.md Phase 4 (paradigm selection) + Phase 6 (routing).
+themes:
+  - id: persistence
+    title: "Persistence"
+    required: true
+    applies_to_paradigms: [all]
+    description: >
+      The storage paradigm (chosen first, with an agent recommendation) plus
+      the concrete primary store and any secondary stores.
+
+  - id: id_strategy
+    title: "ID Strategy"
+    required: true
+    applies_to_paradigms: [relational, document]
+    description: >
+      How are primary keys generated, and which entities use natural keys?
+      Relational/document only — file_native derives identity from path
+      (identity_conventions), key_value/graph/vector from their own key design.
+
+  - id: entities
+    title: "Entities"
+    required: true
+    synthesis: true
+    applies_to_paradigms: [all]
+    description: >
+      The core domain model: each entity, its fields, and traceability back to
+      PRD features, PRD workflows, and UX surfaces. The per-field attribute
+      shape is PARADIGM-DEPENDENT (relational: type/nullable/unique/primary_key;
+      file_native: pydantic_type + description; graph: node properties; vector:
+      payload fields + embedding source) — see references/paradigms/<p>.md for
+      the field shape to use. Critical importance — per-entity drill-down.
+      Because synthesis: true, the agent MUST run the dynamic scope-completeness
+      sweep (drawing on ALL upstream ID families: ENT, FR, WKF, JTB, ENT-name
+      implications, and UX surfaces) before closing the list. See
+      references/entity-discovery.md "Scope-completeness sweep".
+
+  - id: relationships
+    title: "Relationships"
+    required: true
+    applies_to_paradigms: [relational, document]
+    description: >
+      Edges between entities — cardinality, cascade rules, join tables.
+      Relational/document only. graph uses the first-class `edges` block
+      (references/paradigms/graph.md); file_native uses composition +
+      cross_references (references/paradigms/file-native.md).
+
+  - id: enums_and_lookups
+    title: "Enums & Lookups"
+    required: true
+    applies_to_paradigms: [all]
+    description: "First-class enums and entities that act as static lookup tables."
+
+  - id: indexes_and_queries
+    title: "Indexes & Query Patterns"
+    required: true
+    applies_to_paradigms: [relational, document]
+    description: >
+      Expected access patterns and the indexes that serve them. Relational/
+      document only. graph→traversal_patterns, vector→vector_config,
+      key_value→key_value_design cover the analogue per paradigm.
+
+  - id: integrity_and_constraints
+    title: "Integrity & Constraints"
+    required: true
+    applies_to_paradigms: [relational]
+    description: >
+      Referential default, unique constraints, check constraints. Relational
+      only — other paradigms enforce invariants in application code.
+
+  - id: data_classification
+    title: "Data Classification"
+    required: true
+    applies_to_paradigms: [all]
+    description: "PII / regulated / encrypted-at-rest / localized field tagging."
+
+  - id: audit_and_lifecycle
+    title: "Audit & Lifecycle"
+    required: false
+    applies_to_paradigms: [all]
+    description: >
+      Audit columns (created_at/updated_at are universal), soft delete
+      (relational/document), archival.
+
+  - id: versioning_and_history
+    title: "Versioning & History"
+    required: false
+    applies_to_paradigms: [all]
+    description: "Row/record versioning, event sourcing, temporal history."
+
+  - id: scale_and_retention
+    title: "Scale & Retention"
+    required: false
+    applies_to_paradigms: [relational, document, key_value]
+    description: >
+      Partitioning, sharding, retention policies. Promoted to required when
+      PRD.data_model.data_volume_estimate ∈ {terabytes, petabytes}.
+
+  - id: migrations_and_evolution
+    title: "Migrations & Evolution"
+    required: false
+    applies_to_paradigms: [relational, document]
+    description: >
+      Migration tool, zero-downtime strategy, rollback policy. (file_native
+      uses metadata.schema_version + forward-migration scripts — covered in
+      references/paradigms/file-native.md.)
+
+  - id: transactions_and_consistency
+    title: "Transactions & Consistency"
+    required: false
+    applies_to_paradigms: [relational]
+    description: "Default isolation level and explicit transaction boundaries."
+
+  - id: caching_layer
+    title: "Caching Layer"
+    required: false
+    applies_to_paradigms: [all]
+    description: "What's cached, where, with what invalidation."
+
+  - id: search_and_analytics
+    title: "Search & Analytics"
+    required: false
+    applies_to_paradigms: [all]
+    description: "Full-text engine, analytics warehouse, change-data-capture."
+
+  - id: seed_and_fixtures
+    title: "Seed & Fixtures"
+    required: false
+    applies_to_paradigms: [all]
+    description: "Seed-data strategy and dev fixture paths."
+
+  - id: external_data_sources
+    title: "External Data Sources"
+    required: false
+    applies_to_paradigms: [all]
+    description: "Outside data feeds (third-party APIs) and their sync model."
+
+questions:
+
+  # ---------------------------------------------------------------------------
+  # Persistence
+  # ---------------------------------------------------------------------------
+  - theme: persistence
+    id: paradigm
+    schema_path: persistence.paradigm
+    question: "Which storage paradigm should back this product?"
+    hint: >
+      THE foundational decision — it selects which themes run and which entity
+      shape applies. Asked in Phase 4 (structural). The agent MUST first derive
+      a recommendation from PRD signals (data_volume_estimate, relationship
+      density in key_entities, embedding/semantic-search needs, query shape,
+      simplicity/footprint, single-user vs multi-tenant) and present it at
+      position 1 with a one-line rationale. See references/paradigms/<each>.md
+      "When to recommend" for the heuristics. The user confirms or overrides.
+      `none` declares a STATELESS project (nothing persisted anywhere - a pure
+      filter/converter): entities may stay empty, no store is asked for, and
+      the interview collapses to this theme; recommend it whenever the PRD
+      shows no saved state.
+    suggested_answers:
+      - "relational"
+      - "file_native"
+      - "document"
+      - "key_value"
+      - "graph"
+      - "vector"
+      - "none"
+    free_text_allowed: false
+    required: true
+    capture_rationale: true
+    confidence_field: true
+    importance: critical
+
+  - theme: persistence
+    id: topology
+    schema_path: persistence.topology
+    question: "Where/how does the primary store run?"
+    hint: >
+      The axis ORTHOGONAL to paradigm (the family). The same family spans
+      several topologies — a relational family may run embedded (SQLite),
+      self-hosted (Postgres server), managed (RDS), or serverless (Aurora
+      Serverless). Asked in Phase 4 right after the paradigm. Derive a
+      recommendation from PRD signals: single-user/CLI/desktop + bounded volume
+      + no concurrent writers ⇒ local_embedded; multi-tenant SaaS / server
+      runtime ⇒ networked_server or cloud_managed; spiky/low-ops ⇒ serverless;
+      cache/ephemeral-only ⇒ in_memory. Present the recommendation at position 1
+      with a one-line rationale; the user confirms or overrides. Optional — skip
+      only when genuinely undecided (record a WRN-NNN). Concrete provider (RDS
+      vs Cloud SQL vs self-managed) is finalized later at the deploy stage.
+    suggested_answers:
+      - "local_embedded"
+      - "networked_server"
+      - "cloud_managed"
+      - "serverless"
+      - "in_memory"
+      - "other"
+    free_text_allowed: false
+    required: false
+    capture_rationale: true
+    confidence_field: true
+    importance: high
+
+  - theme: persistence
+    id: primary_store
+    schema_path: persistence.primary_store
+    question: "Primary durable data store?"
+    hint: "Anchors every downstream schema, migration, and infra decision. Constrain suggestions to the chosen paradigm (e.g. neo4j for graph, qdrant for vector, filesystem for file_native)."
+    suggested_answers:
+      # relational
+      - "postgres"
+      - "mysql"
+      - "sqlite"
+      - "sqlserver"
+      - "oracle"
+      # document / key_value
+      - "mongodb"
+      - "firestore"
+      - "dynamodb"
+      - "redis"
+      # graph
+      - "neo4j"
+      - "arangodb"
+      # vector
+      - "qdrant"
+      - "pinecone"
+      - "weaviate"
+      - "pgvector"
+      # file_native
+      - "filesystem"
+      - "other"
+    free_text_allowed: true
+    required: true
+    capture_rationale: true
+    confidence_field: true
+    importance: high
+
+  - theme: persistence
+    id: polyglot
+    schema_path: persistence.polyglot
+    question: "Are there any secondary stores (cache, search, blob, queue, analytics) in addition to the primary?"
+    hint: "Triggers the secondary_stores follow-up. Pre-filled true when PRD storage_preferences lists more than one technology."
+    suggested_answers:
+      - "true"
+      - "false"
+    free_text_allowed: false
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: persistence
+    id: secondary_stores
+    schema_path: persistence.secondary_stores
+    question: "Which secondary stores, and what role does each play? (kind: role; e.g. 'redis: cache')"
+    hint: >
+      Each secondary store implies sync/invalidation work for downstream agents —
+      surface them now. A secondary may be a DIFFERENT paradigm than the primary:
+      use a family kind (relational | document | key_value | graph | vector) when
+      the engine is TBD (e.g. RAG: 'vector: search'), naming the engine in
+      rationale. A second authoritative store is role 'source_of_truth' (rare,
+      flag rationale) — never 'primary'; the main store lives in primary_store.
+      Mint a stable kebab-case `store_id` per entry (e.g. 'redis-cache' —
+      unique; 'primary' is reserved, required from data_model_version 3.0):
+      ARCH data-store containers (`realizes_store`) and entities.stored_in
+      reference it, so treat it as an id, not a label.
+    suggested_answers:
+      - "redis: cache"
+      - "elasticsearch: search"
+      - "vector: search"
+      - "kafka: queue"
+      - "none"
+    free_text_allowed: true
+    required: false
+    required_if: "polyglot == true"
+    capture_rationale: false
+    confidence_field: true
+    importance: high
+
+  - theme: persistence
+    id: file_blob_store
+    schema_path: persistence.file_blob_store
+    question: "File / blob storage?"
+    hint: "Drives upload paths, signed-URL flows, and lifecycle rules."
+    suggested_answers:
+      - "none"
+      - "s3"
+      - "gcs"
+      - "azure_blob"
+      - "minio"
+      - "local_fs"
+      - "other"
+    free_text_allowed: true
+    required: false
+    capture_rationale: true
+    confidence_field: false
+    importance: med
+
+  - theme: persistence
+    id: file_blob_store_bucket
+    schema_path: persistence.file_blob_store_bucket
+    question: "Bucket / container / mount path for the blob store? (e.g. 'acme-uploads', 'gs://acme-prod', '/var/uploads')"
+    hint: "Codegen needs this to wire up signed-URL helpers and lifecycle policies. Use a placeholder if the bucket is provisioned per environment."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    required_if: "file_blob_store != 'none'"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # ID Strategy
+  # ---------------------------------------------------------------------------
+  - theme: id_strategy
+    id: scheme
+    schema_path: id_strategy.scheme
+    question: "Primary-key generation scheme?"
+    hint: "UUID v7 / ULID give time-orderable keys; serial ints are simple but leak volume; natural keys eliminate surrogates."
+    suggested_answers:
+      - "uuid_v7"
+      - "uuid_v4"
+      - "ulid"
+      - "nanoid"
+      - "serial_int"
+      - "bigserial"
+      - "natural_key"
+      - "mixed"
+    free_text_allowed: false
+    required: true
+    capture_rationale: true
+    confidence_field: true
+    importance: med
+
+  - theme: id_strategy
+    id: natural_keys
+    schema_path: id_strategy.natural_keys
+    question: "Which entities use a natural (composite) key instead of a surrogate? (entity + fields + why; or 'none')"
+    hint: "Natural keys are valid when the domain has a stable unique identifier (e.g. ISO country code). Most apps don't need any."
+    suggested_answers:
+      - "none"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Entities — the only `critical`-importance theme. Per-entity drill-down via
+  # the `entity.<field>` schema_path prefix. The agent rewrites the prefix per
+  # entity at runtime (e.g. `entity.fields` → `entities.User.fields` while
+  # drilling User). See references/interview-mechanics.md for the state machine.
+  # ---------------------------------------------------------------------------
+  - theme: entities
+    id: entity-description
+    schema_path: entity.description
+    question: "One-sentence description of this entity. What does it represent in the domain?"
+    hint: "Forces a clear noun-definition before fields are listed — prevents accidental data blobs."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  - theme: entities
+    id: entity-fields
+    schema_path: entity.fields
+    question: "Fields for this entity. For each field: 'name: type [nullable] [unique] [primary_key] [default=...] [references=Entity.field [on_delete=...]] [check=...] [comment=...]'. Include the id field explicitly."
+    hint: "Each field becomes a column in codegen + a DTO property downstream. Field types must come from the schema enum: uuid, string, text, int, bigint, decimal, float, bool, date, time, timestamp, timestamptz, json, jsonb, enum, binary, blob, array, other. The per-field batch flow in references/interview-mechanics.md elicits these attributes 2-4 fields at a time via AskUserQuestion; this single-question form is a fallback for free-text batches."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  - theme: entities
+    id: entity-one-of
+    schema_path: entity.one_of
+    question: "Is this entity a UNION - an instance is exactly one of several concrete variant entities, told apart by one discriminator field? If so, name the variants and the discriminator."
+    hint: "A union parent declares `one_of: [VariantA, VariantB]` + `discriminator: <field>` and may omit `fields`/`primary_key` (the variants carry them). Each named variant must exist as its own entity and carry the discriminator field - the validator checks both (blocking from data_model_version 3.0). Not a mixin (`composes`) and not containment (`composition`). code renders a tagged union; test seeds one case per variant. Before this slot existed a union could only be flattened or smuggled in as a private extension (ledger IMP-080)."
+    suggested_answers:
+      - "No - a concrete entity with its own fields"
+      - "Yes - variants: <A, B, ...>; discriminator: <field>"
+    free_text_allowed: true
+    free_text_expected: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  - theme: entities
+    id: entity-primary-key
+    schema_path: entity.primary_key
+    question: "Primary key — single field name, or list of fields for a composite key?"
+    hint: "Composite PKs imply a natural-key entity; if so, mention it under id_strategy.natural_keys."
+    suggested_answers:
+      - "id"
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  - theme: entities
+    id: entity-traces-features
+    schema_path: entity.traces_prd_features
+    question: "Which PRD FR-NNN features does this entity realize? (e.g. FR-001, FR-003)"
+    hint: "Pure ID list — no verbatim PRD text. Drives the feature-coverage cross-check at validation time. Every PRD must-have feature must be traced by ≥1 entity (or land in a WRN-NNN data_warnings deferral). The validator enforces FR-NNN format on every entry."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  - theme: entities
+    id: entity-traces-surfaces
+    schema_path: entity.traces_ux_surfaces
+    question: "Which UX surfaces read or write this entity? (SCR-NNN ids from UX.surface_inventory[].id)"
+    hint: "Pure ID list of SCR-NNN — never the editable `surface_id` slug. SCR-NNN is the stable contract; slugs may be renamed. Lets downstream `api` map endpoints back to entities. Empty list is OK for purely-backend entities (e.g. AuditLog). The validator enforces SCR-NNN format on every entry."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  - theme: entities
+    id: entity-traces-workflows
+    schema_path: entity.traces_prd_workflows
+    question: "Which PRD core workflows does this entity participate in? (WKF-NNN ids from PRD.use_cases.core_workflows; optional)"
+    hint: "Optional. Use when an entity is implied by a workflow even though no FR-NNN names it directly. Catches the case where, e.g., a 'switch branch' workflow implies a BranchSession entity that isn't named in any FR. The validator enforces WKF-NNN format on every entry."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  - theme: entities
+    id: entity-invariants
+    schema_path: entity.invariants
+    question: "Any always-true rules (invariants) for this entity? (e.g. 'end_date >= start_date'; or 'none')"
+    hint: >
+      Plain-language statements that must hold for every valid row. task copies
+      them verbatim into entity_slice embeds, code renders model validators /
+      DB CHECKs from them, and test seeds invariant-violation cases — a rule
+      that lives only in prose reaches none of them. Skip freely when the
+      fields already say it (types and nullability are not invariants).
+    suggested_answers:
+      - "none"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: entities
+    id: entity-stored-in
+    schema_path: entity.stored_in
+    question: "Which store(s) hold this entity? ('primary', or declared secondary store ids; default: primary)"
+    hint: >
+      Only asked when secondary stores exist. Values are 'primary' or a
+      persistence.secondary_stores[].store_id; the validator warns on ids no
+      store declares. Leave absent for the default (primary only) — list it
+      only when the entity (also) lives in a secondary store, e.g. a search
+      index or cache.
+    suggested_answers:
+      - "primary"
+    free_text_allowed: true
+    required: false
+    required_if: "persistence.polyglot == true"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Relationships
+  # ---------------------------------------------------------------------------
+  - theme: relationships
+    id: relationships-list
+    schema_path: relationships
+    question: "List the cross-entity relationships. Format: 'from_entity.from_field → to_entity.to_field, cardinality (1:1|1:N|N:M), on_delete, comment'."
+    hint: "Every relationship's from_entity and to_entity must exist in `entities`. N:M relationships need a join_table that is itself an entity. The validator enforces both."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  # ---------------------------------------------------------------------------
+  # Enums & Lookups
+  # ---------------------------------------------------------------------------
+  - theme: enums_and_lookups
+    id: enums
+    schema_path: enums_and_lookups.enums
+    question: "Closed enum types? Format: 'EnumName: [value1, value2, ...]' (or 'none')."
+    hint: "Enums are cheap to add up-front; expensive to retrofit. Examples: OrderStatus, UserRole."
+    suggested_answers:
+      - "none"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: enums_and_lookups
+    id: lookup_tables
+    schema_path: enums_and_lookups.lookup_tables
+    question: "Which entities are static lookup tables (closed set of rows seeded at deploy)? (e.g. Country, Currency; or 'none')"
+    hint: "Lets codegen treat them specially — typically read-only, often cached."
+    suggested_answers:
+      - "none"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Indexes & Query Patterns
+  # ---------------------------------------------------------------------------
+  - theme: indexes_and_queries
+    id: access_patterns
+    schema_path: indexes_and_queries.access_patterns
+    question: "Top 3–7 read/write access patterns. Format: 'description | entity | fields | read|write | qps | latency_ms'."
+    hint: "Pre-fill from UX list/table components and form submissions. Each pattern becomes a candidate index."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: indexes_and_queries
+    id: expected_indexes
+    schema_path: indexes_and_queries.expected_indexes
+    question: "Expected indexes — one per access pattern that needs one. Format: 'entity.field(s), unique, type (btree|hash|gin|gist|fulltext|composite)'."
+    hint: "Indexes carry write-cost and disk-cost; only add ones that serve a named access pattern."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Integrity & Constraints
+  # ---------------------------------------------------------------------------
+  - theme: integrity_and_constraints
+    id: default_on_delete
+    schema_path: integrity_and_constraints.default_on_delete
+    question: "Default ON DELETE for foreign keys that don't override?"
+    hint: "Cascade is dangerous by default; restrict surfaces data-integrity issues at delete time."
+    suggested_answers:
+      - "restrict"
+      - "cascade"
+      - "set_null"
+      - "no_action"
+    free_text_allowed: false
+    required: true
+    capture_rationale: true
+    confidence_field: false
+    importance: med
+
+  - theme: integrity_and_constraints
+    id: unique_constraints
+    schema_path: integrity_and_constraints.unique_constraints
+    question: "Composite uniqueness constraints across entities? (entity, [field, field, ...]; or 'none')"
+    hint: "Per-field unique=true belongs on the field; this is for multi-column uniqueness (e.g. (org_id, slug))."
+    suggested_answers:
+      - "none"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: integrity_and_constraints
+    id: check_constraints
+    schema_path: integrity_and_constraints.check_constraints
+    question: "Check constraints (column-level invariants)? (entity, expression; or 'none')"
+    hint: "Examples: 'amount > 0', 'status IN (..., enum-list)'. Worth surfacing now because they shape migrations."
+    suggested_answers:
+      - "none"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Data Classification
+  # ---------------------------------------------------------------------------
+  - theme: data_classification
+    id: pii_fields
+    schema_path: data_classification.pii_fields
+    question: "Which fields are personally identifying information (PII)? (List as 'Entity.field'; or 'none')"
+    hint: "Drives DTO masking, log redaction, and GDPR DSAR exports. Pre-filled when PRD.regulatory_requirements includes gdpr/ccpa."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: true
+    importance: high
+
+  - theme: data_classification
+    id: regulated_fields
+    schema_path: data_classification.regulated_fields
+    question: "Which fields hold regulated data (PHI, PCI, etc.)? (List as 'Entity.field'; or 'none')"
+    hint: "Different from PII — regulated data has compliance-specific handling (encryption, audit, segregation)."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    required_if: "PRD.security_compliance.data_sensitivity in ['restricted', 'regulated', 'phi', 'pci']"
+    capture_rationale: false
+    confidence_field: true
+    importance: high
+
+  - theme: data_classification
+    id: localized_fields
+    schema_path: data_classification.localized_fields
+    question: "Which user-visible text fields are stored once per locale? (List as 'Entity.field'; or 'none')"
+    hint: "Asked when the PRD enables internationalization (PRD 1.1). api serves these in the Accept-Language locale and code stores one value per locale — a field left off this list ships as a single fixed string."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    required_if: "PRD.internationalization.enabled == true"
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: data_classification
+    id: encrypted_at_rest
+    schema_path: data_classification.encrypted_at_rest
+    question: "Which fields require column-level encryption at rest (beyond disk encryption)? (List as 'Entity.field'; or 'none')"
+    hint: "Column-encryption matters when the same DB hosts mixed sensitivity — disk encryption alone is insufficient."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    required_if: "PRD.security_compliance.encryption_at_rest == true"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: data_classification
+    id: encryption_kms_ref
+    schema_path: data_classification.encryption_kms_ref
+    question: "KMS key reference (alias or ARN) used for column encryption? (Or 'none')"
+    hint: "Codegen needs this to wire up envelope-encryption helpers."
+    suggested_answers:
+      - "none"
+    free_text_allowed: true
+    required: false
+    required_if: "encrypted_at_rest != []"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: data_classification
+    id: retention_policy_default
+    schema_path: data_classification.retention_policy_default
+    question: "Default retention policy for entities without a specific one? (e.g. 'Indefinite', '7 years', '30 days post-deletion')"
+    hint: "Establishes the baseline; per-entity policies live under scale_and_retention.retention_policies."
+    suggested_answers:
+      - "Indefinite"
+      - "30 days post-deletion"
+      - "1 year"
+      - "7 years"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Audit & Lifecycle (optional)
+  # ---------------------------------------------------------------------------
+  - theme: audit_and_lifecycle
+    id: audit_columns
+    schema_path: audit_and_lifecycle.audit_columns
+    question: "Which audit columns appear on most entities? (Pick all that apply)"
+    hint: "Codegen will add these consistently. Per-entity opt-out is possible but rare."
+    suggested_answers:
+      - "created_at"
+      - "updated_at"
+      - "created_by"
+      - "updated_by"
+      - "deleted_at"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: audit_and_lifecycle
+    id: soft_delete
+    schema_path: audit_and_lifecycle.soft_delete
+    question: "Use soft delete (deleted_at column) instead of hard DELETE?"
+    hint: "Soft delete preserves data for audit/undo but every read query must filter it out."
+    suggested_answers:
+      - "true"
+      - "false"
+    free_text_allowed: false
+    required: false
+    capture_rationale: true
+    confidence_field: false
+    importance: med
+
+  - theme: audit_and_lifecycle
+    id: archive_strategy
+    schema_path: audit_and_lifecycle.archive_strategy
+    question: "Archive strategy for old / deleted rows? (Optional — one sentence)"
+    hint: "E.g. 'Move to cold object storage after 90 days deleted_at'."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Versioning & History (optional)
+  # ---------------------------------------------------------------------------
+  - theme: versioning_and_history
+    id: record_versioning
+    schema_path: versioning_and_history.record_versioning
+    question: "Record-versioning strategy?"
+    hint: "Event sourcing is a heavy architectural commitment — only pick it if every state change is a domain event."
+    suggested_answers:
+      - "none"
+      - "row_version"
+      - "temporal_table"
+      - "event_sourcing"
+    free_text_allowed: false
+    required: false
+    capture_rationale: true
+    confidence_field: false
+    importance: med
+
+  - theme: versioning_and_history
+    id: history_retention
+    schema_path: versioning_and_history.history_retention
+    question: "How long is record history retained? (e.g. '90 days', '2 years', 'forever')"
+    hint: "Drives storage cost and compliance reporting."
+    suggested_answers:
+      - "90 days"
+      - "1 year"
+      - "2 years"
+      - "7 years"
+      - "forever"
+    free_text_allowed: true
+    required: false
+    required_if: "record_versioning != 'none'"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Scale & Retention (optional, conditionally required)
+  # ---------------------------------------------------------------------------
+  - theme: scale_and_retention
+    id: partitioning_key
+    schema_path: scale_and_retention.partitioning_key
+    question: "Partitioning key — which column do large tables partition on? (e.g. 'created_at'; or 'none')"
+    hint: "Without partitioning, TB-scale tables become impossible to back up or migrate."
+    suggested_answers:
+      - "created_at"
+      - "tenant_id"
+      - "none"
+    free_text_allowed: true
+    required: false
+    required_if: "PRD.data_model.data_volume_estimate in ['terabytes', 'petabytes']"
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: scale_and_retention
+    id: partitioning_strategy
+    schema_path: scale_and_retention.partitioning_strategy
+    question: "Partitioning strategy?"
+    hint: "Range for time-series, list for tenant/category, hash for even distribution."
+    suggested_answers:
+      - "range"
+      - "list"
+      - "hash"
+      - "none"
+    free_text_allowed: false
+    required: false
+    required_if: "partitioning_key != 'none'"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: scale_and_retention
+    id: sharding_key
+    schema_path: scale_and_retention.sharding_key
+    question: "Sharding key for horizontal scale? (e.g. 'tenant_id'; or 'none')"
+    hint: "Single-shard is the default; only shard when a single instance can't hold the working set."
+    suggested_answers:
+      - "none"
+      - "tenant_id"
+      - "user_id"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: scale_and_retention
+    id: retention_policies
+    schema_path: scale_and_retention.retention_policies
+    question: "Per-entity retention policies? Format: 'entity | ttl | policy (hard_delete|archive|anonymize)' (or 'none')."
+    hint: "Override the data_classification default for specific high-volume entities (AuditLog, EventLog, etc.)."
+    suggested_answers:
+      - "none"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Migrations & Evolution (optional)
+  # ---------------------------------------------------------------------------
+  - theme: migrations_and_evolution
+    id: tool
+    schema_path: migrations_and_evolution.tool
+    question: "Migration tool?"
+    hint: "Pre-fill from existing repo signals (alembic.ini, prisma/, flyway.conf)."
+    suggested_answers:
+      - "alembic"
+      - "flyway"
+      - "liquibase"
+      - "prisma_migrate"
+      - "drizzle_kit"
+      - "sqlx"
+      - "knex"
+      - "django_migrate"
+      - "activerecord"
+      - "other"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: migrations_and_evolution
+    id: zero_downtime_strategy
+    schema_path: migrations_and_evolution.zero_downtime_strategy
+    question: "Zero-downtime migration strategy? (e.g. 'expand-contract: add column nullable → backfill → enforce NOT NULL')"
+    hint: "Important for any prod service with uptime SLAs."
+    suggested_answers:
+      - "Expand-contract (add nullable → backfill → enforce)"
+      - "Blue-green deployment"
+      - "Maintenance window OK"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: migrations_and_evolution
+    id: rollback_policy
+    schema_path: migrations_and_evolution.rollback_policy
+    question: "Rollback policy for migrations? (e.g. 'Every migration must have a tested down() — verified in CI.')"
+    hint: "Skip if you've never needed to roll back."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Transactions & Consistency (optional)
+  # ---------------------------------------------------------------------------
+  - theme: transactions_and_consistency
+    id: default_isolation
+    schema_path: transactions_and_consistency.default_isolation
+    question: "Default transaction isolation level?"
+    hint: "Read-committed is the Postgres default; repeatable-read protects against most anomalies but reduces concurrency."
+    suggested_answers:
+      - "read_committed"
+      - "repeatable_read"
+      - "serializable"
+      - "snapshot"
+    free_text_allowed: false
+    required: false
+    capture_rationale: true
+    confidence_field: false
+    importance: med
+
+  - theme: transactions_and_consistency
+    id: transaction_boundaries
+    schema_path: transactions_and_consistency.transaction_boundaries
+    question: "Explicit multi-entity transaction boundaries worth documenting? (e.g. 'Order placement spans Order + LineItem + InventoryReservation'; or 'none')"
+    hint: "Anchors downstream agents when they design services and saga compensation."
+    suggested_answers:
+      - "none"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Caching Layer (optional)
+  # ---------------------------------------------------------------------------
+  - theme: caching_layer
+    id: layer
+    schema_path: caching_layer.layer
+    question: "Caching layer?"
+    hint: "Pre-fill from persistence.secondary_stores if a redis/memcached store is present."
+    suggested_answers:
+      - "none"
+      - "in_process"
+      - "redis"
+      - "memcached"
+      - "other"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: caching_layer
+    id: cached_entities
+    schema_path: caching_layer.cached_entities
+    question: "Which entities are cached, with what TTL and invalidation strategy? Format: 'entity | ttl | invalidation'."
+    hint: "Cache invalidation is the hardest part — name it explicitly per entity."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    required_if: "layer != 'none'"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Search & Analytics (optional)
+  # ---------------------------------------------------------------------------
+  - theme: search_and_analytics
+    id: fulltext_engine
+    schema_path: search_and_analytics.fulltext_engine
+    question: "Full-text search engine?"
+    hint: "Postgres FTS scales to ~millions of rows; Elastic/OpenSearch handle larger and richer queries."
+    suggested_answers:
+      - "none"
+      - "postgres_fts"
+      - "elasticsearch"
+      - "opensearch"
+      - "meilisearch"
+      - "typesense"
+    free_text_allowed: false
+    required: false
+    capture_rationale: true
+    confidence_field: true
+    importance: med
+
+  - theme: search_and_analytics
+    id: indexed_entities
+    schema_path: search_and_analytics.indexed_entities
+    question: "Which entities are full-text indexed, on which fields? Format: 'entity: [field, field]'."
+    hint: "Only ask if fulltext_engine != none."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    required_if: "fulltext_engine != 'none'"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: search_and_analytics
+    id: analytics_target
+    schema_path: search_and_analytics.analytics_target
+    question: "Analytics warehouse target?"
+    hint: "Downstream `arch` will design the data-pipeline component if non-none."
+    suggested_answers:
+      - "none"
+      - "bigquery"
+      - "snowflake"
+      - "redshift"
+      - "duckdb"
+      - "other"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: search_and_analytics
+    id: cdc_strategy
+    schema_path: search_and_analytics.cdc_strategy
+    question: "Change-data-capture strategy?"
+    hint: "Outbox pattern is the safest cross-store CDC; Debezium is the standard tool for log-based CDC."
+    suggested_answers:
+      - "none"
+      - "debezium"
+      - "outbox"
+      - "trigger"
+      - "other"
+    free_text_allowed: true
+    required: false
+    required_if: "analytics_target != 'none'"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # Seed & Fixtures (optional)
+  # ---------------------------------------------------------------------------
+  - theme: seed_and_fixtures
+    id: seed_strategy
+    schema_path: seed_and_fixtures.seed_strategy
+    question: "Seed-data strategy for fresh deploys? (One sentence)"
+    hint: "Idempotent SQL is most portable; framework-specific seeders (Prisma, Rails) are also common."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: seed_and_fixtures
+    id: dev_fixtures_path
+    schema_path: seed_and_fixtures.dev_fixtures_path
+    question: "Where do dev/test fixtures live in the repo? (e.g. 'fixtures/dev/'; or 'none')"
+    hint: "Lets downstream codegen wire up fixture loaders without re-asking."
+    suggested_answers:
+      - "fixtures/"
+      - "tests/fixtures/"
+      - "seeds/"
+      - "none"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: seed_and_fixtures
+    id: seed_data
+    schema_path: seed_and_fixtures.seed_data
+    question: "Concrete rows for lookup/reference tables? (Draft the rows per lookup entity; user approves or edits.)"
+    hint: >
+      The agent DRAFTS the rows from enums_and_lookups.lookup_tables + the
+      enums (e.g. Role: admin/member; Plan: free/pro with prices) rather than
+      asking the user to type them. Concrete rows are what stop codegen and
+      test fixtures from inventing reference values. Reference data only —
+      never bulk sample data. Skip when there are no lookup tables.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  # ---------------------------------------------------------------------------
+  # External Data Sources (optional, pre-filled from PRD.integrations_required)
+  # ---------------------------------------------------------------------------
+  - theme: external_data_sources
+    id: sources_list
+    schema_path: external_data_sources
+    question: "External data sources and their sync model? Format: 'name | sync_model (pull|push|webhook|stream) | maps_to_entity | conflict_resolution | refresh_interval'."
+    hint: "Each pre-filled from PRD.functional_requirements.integrations_required. Mapping to an entity is required when the source writes data we persist. refresh_interval examples: 'real-time (webhook)', 'hourly poll', 'daily cron at 02:00 UTC'."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: high

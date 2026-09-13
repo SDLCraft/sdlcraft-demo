@@ -1,0 +1,397 @@
+# =============================================================================
+# ARCH.schema.yaml — canonical human-readable schema for docs/ARCH.yaml
+# =============================================================================
+# This is the system-level architecture artifact. Per-container deep-dive
+# lives in sibling docs/ARCH__<container>.yaml files (see
+# ARCH__CONTAINER.schema.yaml).
+#
+# Field-by-field semantics, required vs optional, enum values, and the four
+# cross-checks are all enforced by validate_schema.py (Pydantic v2). This
+# file is the source of truth for *humans and AI agents reading the spec*;
+# validate_schema.py is the source of truth for *machines validating the
+# output*. Keep them in lockstep.
+#
+# Conventions:
+#   * Required fields are marked `# REQUIRED`.
+#   * Optional fields are marked `# OPTIONAL`.
+#   * Enum values are listed inline.
+#   * `<field>_confidence: confirmed | inferred | assumption` siblings are
+#     written next to every non-trivial scalar to help downstream agents
+#     weigh how seriously to trust the value.
+# =============================================================================
+
+metadata:                                  # REQUIRED
+  arch_version: "2.0"                      # REQUIRED — schema version string.
+                                           # New writes stamp 2.0. Checks #21-#24,
+                                           # the INT coverage gate and the
+                                           # component-containment gate ERROR at
+                                           # >= 2.0 and WARN below it
+                                           # (CLAUDE.md §10 version gating).
+  last_updated: <ISO-8601 UTC>             # REQUIRED — bumped on every write
+  generated_by: sdlc-arch                  # REQUIRED — always this literal
+  session_id: <uuid4>                      # REQUIRED — links to state file
+  status: draft | complete                 # REQUIRED — see §metadata.status in CLAUDE.md
+  changelog:                               # OPTIONAL — append-only, most-recent first.
+    # Each entry: "<arch_version> (<YYYY-MM-DD>): <one-line summary>".
+    # The validator type-checks Optional[List[str]] only — it does NOT
+    # enforce per-entry format (manual edits are expected here).
+    - "1.1 (2026-05-26): Manual review pass. <one-line summary>."
+    - "1.0 (2026-05-26): Initial spec produced by sdlc-arch."
+  upstream_provenance:                     # OPTIONAL — one entry per upstream artifact
+    # consumed by the system interview, each a mapping
+    # {file, session_id, last_updated, sha256}. sha256 = the 16-hex prefix from
+    # docs/INDEX.yaml.generated_from[<file>]. Re-runs compare this to detect
+    # upstream drift. Validator type-checks list-of-mappings only.
+    # See CLAUDE.md §7 "Upstream-change re-invocation".
+    - {file: docs/PRD.yaml, session_id: <uuid4>, last_updated: <iso8601>, sha256: <16-hex>}
+    - {file: docs/DATA-MODEL.yaml, session_id: <uuid4>, last_updated: <iso8601>, sha256: <16-hex>}
+
+# ---------------------------------------------------------------------------
+# architecture_pattern — the system's top-level architectural style.
+# Drives the agent's expectations for everything downstream (test, task,
+# deploy). Confirm with the user before any container interview.
+# ---------------------------------------------------------------------------
+architecture_pattern:                      # REQUIRED
+  pattern:                                 # REQUIRED — one of:
+    # monolith | modular_monolith | microservices | event_driven |
+    # hexagonal | serverless | plugin | pipeline | other
+  pattern_confidence: confirmed | inferred | assumption  # REQUIRED
+  rationale: <one to three sentences>      # REQUIRED — why this pattern fits
+  tradeoff_notes: <short string>           # OPTIONAL — what we accept in exchange
+  ai_builder_notes: <short string>         # OPTIONAL — pattern-specific hints for
+                                           #            AI-built code (e.g. "few
+                                           #            moving parts; prefer
+                                           #            typed interfaces between
+                                           #            components")
+
+# ---------------------------------------------------------------------------
+# identity_and_auth — system-wide identity strategy. Per-container auth
+# specifics live in the container's own ARCH__<container>.yaml.
+# ---------------------------------------------------------------------------
+identity_and_auth:                         # REQUIRED
+  identity_provider:                       # REQUIRED — one of:
+    # internal | external_oidc | external_saml | external_proprietary | none
+  identity_provider_confidence: confirmed | inferred | assumption  # REQUIRED
+  token_strategy:                          # REQUIRED — one of:
+    # jwt | session | api_key | mtls | opaque_token | none
+  token_strategy_confidence: confirmed | inferred | assumption    # REQUIRED
+  identity_container:                      # OPTIONAL — if identity_provider == internal,
+                                           #            which container_id hosts it
+  rationale: <one or two sentences>        # OPTIONAL
+
+# ---------------------------------------------------------------------------
+# containers — the canonical list of independently runnable/deployable units.
+# Each entry corresponds to (at most) one ARCH__<container>.yaml file.
+#
+# `container_id` is kebab-case; it doubles as the slug in
+# docs/ARCH__<container>.yaml. It MUST be unique within this file.
+#
+# `owns_*` fields trace this container back to upstream artifacts and feed
+# the four coverage checks in Phase 7.
+# ---------------------------------------------------------------------------
+containers:                                # REQUIRED — non-empty
+  - container_id: <kebab-case>             # REQUIRED — e.g. "backend-api"
+    archetype:                             # REQUIRED — one of (see container-taxonomy.yaml):
+      # backend-api | web-frontend | mobile-frontend | desktop-frontend |
+      # cli | worker | scheduler | stream-processor | gateway |
+      # bff | edge-function | static-site | identity-provider |
+      # primary-database | secondary-database | cache | blob-store |
+      # search-index | message-bus | etl-pipeline | ml-inference |
+      # external-service | other
+    purpose: <one or two sentences>        # REQUIRED
+    owns_api_resources:                    # REQUIRED — list of API resource_ids
+      - users                              #            (from API__<resource>.yaml). Empty
+      - projects                           #            list is allowed (e.g. for stores).
+    owns_ux_surfaces:                      # REQUIRED — list of UX surface_ids
+      - dashboard                          #            (from UX__<surface>.yaml). Empty
+                                           #            for backend-only containers.
+    persistence:                           # REQUIRED — list of DATA store ids; empty
+      - primary-postgres                   #            for non-stateful containers.
+    implements_requirements:               # OPTIONAL but strongly recommended — the
+      - FR-001                             #            PRD requirements this container
+      - FR-014                             #            delivers. Accepts BOTH FR-NNN
+      - NFR-011                            #            (must-have/nice-to-have features)
+                                           #            and NFR-NNN (non-functional
+                                           #            requirements a container is the
+                                           #            home of — a timeout cap, an
+                                           #            input-containment boundary).
+                                           #            Each entry is validated for
+                                           #            FR-NNN/NFR-NNN format + existence
+                                           #            in PRD.yaml (FR resolves against
+                                           #            functional_requirements, NFR
+                                           #            against non_functional_requirements).
+                                           #            Only the FR-NNN entries drive the
+                                           #            feature-coverage check (every PRD
+                                           #            must-have FR-NNN must appear here
+                                           #            on some container, or in
+                                           #            non_container_features). This is
+                                           #            the ONLY place operational
+                                           #            containers (scheduler/worker) with
+                                           #            no API resource record which
+                                           #            requirement they exist for.
+    traces_prd_workflows:                  # OPTIONAL — PRD core_workflows (WKF-NNN) this
+      - WKF-003                            #            container participates in. Validated
+                                           #            for WKF-NNN format + existence.
+    realizes_integrations:                 # OPTIONAL — PRD integrations_required (INT-NNN)
+      - INT-001                            #            this container is the seam for
+                                           #            (typically the external provider
+                                           #            container itself, or the backend
+                                           #            that owns the client). Validated for
+                                           #            INT-NNN format + existence in
+                                           #            PRD.yaml. Coverage: every PRD INT id
+                                           #            must appear here on some container,
+                                           #            in some component's int_refs, or in
+                                           #            `deferrals` — trace-or-defer, ERROR
+                                           #            at arch_version >= 2.0, WARNING below.
+    realizes_store:                        # OPTIONAL — for data-store containers: the DATA
+                                           #            store id this container realizes
+                                           #            ("primary" for the primary store,
+                                           #            else a secondary's store_id).
+                                           #            Resolved against
+                                           #            DATA-MODEL.persistence store ids
+                                           #            (warning-only).
+    external_contract:                     # OPTIONAL — external: true containers realizing
+      protocol: <string>                   #            an INT-NNN should pin the provider
+      auth_scheme: <string>                #            contract so the build stage does not
+      credential_config_keys: [<string>]   #            guess it. All fields optional;
+      client_library: <string>             #            type-checked only. Pairs with the
+      failure_semantics: <string>          #            API skill's typed integration
+      rate_limits: <string>                #            contract.
+      sandbox_available: true|false
+    deployment_unit:                       # REQUIRED — one of:
+      # long_running_service | scheduled_job | batch_job | static_asset |
+      # serverless_function | container | external_managed
+    ownership:                             # OPTIONAL
+      team: <string>                       # OPTIONAL
+      change_cadence: <string>             # OPTIONAL — e.g. "weekly", "monthly"
+    external: false                        # OPTIONAL — true means this container is a
+                                           #            third-party service we depend on,
+                                           #            not something we build. When true,
+                                           #            this container MUST NOT have an
+                                           #            ARCH__<id>.yaml sibling (container
+                                           #            mode aborts on external containers).
+    status: defined | draft | confirmed    # REQUIRED — interview progress per container
+    file_path:                             # OPTIONAL — set by container mode on completion;
+                                           #            e.g. "docs/ARCH__backend-api.yaml".
+                                           #            Validator cross-checks that the
+                                           #            referenced file exists on disk
+                                           #            AND that every sibling
+                                           #            ARCH__*.yaml is referenced by some
+                                           #            container's file_path.
+    acceptance_criteria:                   # OPTIONAL — list of short strings telling the
+      - <string>                           #            downstream `task` and `test` agents
+                                           #            what "done" looks like for this
+                                           #            container (e.g. "passes the
+                                           #            integration test suite for all
+                                           #            owned API resources"). Container
+                                           #            mode's `per_container_deepdive`
+                                           #            can populate this.
+    notes: <string>                        # OPTIONAL
+
+# ---------------------------------------------------------------------------
+# edges — typed, directional dependency graph BETWEEN containers.
+# Internal-to-container edges live in ARCH__<container>.yaml.
+#
+# Auto-derived from API + DATA + UX in Phase 6 and via -d mode; users
+# confirm or edit, they do not enumerate from scratch.
+#
+# An EMPTY list `[]` is valid (single-container CLIs with no persistence
+# and no external integrations legitimately have no edges). The validator
+# only requires the `edges:` key to be PRESENT (not null); an empty list
+# does not block `status: complete`.
+#
+# The `via_*` fields are OPTIONAL but strongly recommended — they let the
+# downstream `test` and `task` agents ground each edge in a specific
+# upstream artifact rather than re-deriving from scratch. Pre-fill them
+# during edge derivation whenever the evidence is unambiguous.
+# ---------------------------------------------------------------------------
+edges:                                     # REQUIRED key (may be `[]`)
+  - from: <container_id>                   # REQUIRED — must exist in containers[]
+    to: <container_id>                     # REQUIRED — must exist in containers[]
+    type:                                  # REQUIRED — one of:
+      # depends_on | calls | reads | writes | publishes | subscribes_to | implements
+    via_resource_id: <api_resource_id>     # OPTIONAL — for `calls` edges, the
+                                           #            API resource being called.
+                                           #            Validated against API__*.yaml
+                                           #            resource_ids when set.
+    via_channel_id: <event_channel_id>     # OPTIONAL — for `publishes` / `subscribes_to`
+                                           #            edges, the API.events channel_id.
+                                           #            Validated against API.yaml
+                                           #            events.channels[].channel_id when set.
+    via_entity: <PascalCaseEntityName>     # OPTIONAL — for `reads` / `writes` edges, the
+                                           #            primary DATA entity being accessed.
+                                           #            Validated against DATA-MODEL.yaml
+                                           #            entities when set.
+    invocation: <mode + resolved args>     # OPTIONAL — caller-side INPUT binding for a
+                                           #            process/subprocess `calls` seam: the
+                                           #            mode selector + resolved args/params
+                                           #            this caller invokes the callee with.
+                                           #            The callee's entrypoint work_unit (in
+                                           #            its ARCH__<container>.yaml) is the
+                                           #            shared contract; this records the
+                                           #            caller-side binding so a subprocess
+                                           #            seam pins the INPUT, not just the
+                                           #            (exit_code, stdout, stderr) return.
+    note: <short string>                   # OPTIONAL — evidence or rationale
+                                           #            (e.g. "API users → backend-api;
+                                           #            backend-api writes primary-postgres")
+
+# ---------------------------------------------------------------------------
+# non_container_features — FR-NNN features deliberately NOT owned by any
+# buildable container (delivered by a third-party/external service). LEGACY,
+# reason-less escape for the PRD feature-coverage check — still honoured for
+# one more schema version, but the validator reports every id that relies on
+# it alone. Prefer a `deferrals` entry with a reason (below).
+# ---------------------------------------------------------------------------
+non_container_features:                    # OPTIONAL — list of FR-NNN ids
+  - FR-022                                 #            (e.g. delivered by external IdP)
+
+# ---------------------------------------------------------------------------
+# deferrals — structural trace-or-defer channel (CLAUDE.md §6). The DEFER half
+# of EVERY coverage gate this validator runs: PRD FR feature coverage, PRD INT
+# integration coverage, API-resource coverage, UX-surface coverage, and
+# DATA-store coverage. The validator reads this FIRST; an entry with no id or
+# no reason defers nothing (reported as a warning). Alias accepted:
+# `deferred_requirements`.
+# ---------------------------------------------------------------------------
+deferrals:                                 # OPTIONAL — list of {id, reason}
+  - id: INT-002                            # a PRD FR/INT id, API resource_id,
+    reason: "Payments are post-MVP."       #   UX surface_id, or DATA store id
+  - id: FR-031
+    reason: "Delivered by the external IdP, not a buildable container."
+
+# ---------------------------------------------------------------------------
+# output_locations — paths the RUNNING system WRITES (an output root), as
+# opposed to source it ships. A requirement that names a path under one of
+# these describes what the system produces (a packaged bundle under `dist/`,
+# generated sidecars under `assets/`, a scaffolded app under an output root),
+# not a build-time deliverable some component must own — so cross-check 25
+# leaves such paths alone instead of reporting them as unbuildable. Declare a
+# root once; every path beneath it is covered. Entries may also be bare path
+# strings. (Surfaced on a generator project whose PRD names the files the
+# generated app receives — four FRs read as deliverables of the generator.)
+# ---------------------------------------------------------------------------
+output_locations:                          # OPTIONAL — list of {path, written_by?, note?}
+  - path: "assets/"                        # REQUIRED — a root, relative to what the
+                                           #            system writes; trailing `/`
+                                           #            recommended
+    written_by: aicf-cli                   # OPTIONAL — the container that writes it
+    note: "Generation briefs written into the scaffolded app."  # OPTIONAL
+
+# ---------------------------------------------------------------------------
+# arch_warnings — non-fatal issues surfaced during interview or validation.
+# Populated by the AGENT at write time, never by the validator (the validator
+# only reads and format-checks this list): uncovered/deferred items, `todo`
+# theme gates, low-confidence notes — and, per the Phase 7 rule in SKILL.md,
+# every validator WARNING the user chooses not to fix now, grouped into one
+# WRN-NNN entry per warning class so the decision survives the session.
+#
+# Every entry uses the universal WRN-NNN family: "WRN-NNN: <message>" with a
+# zero-padded 3-digit number. The counter is writer-managed (state.last_ids.WRN
+# per sub-session — see SKILL.md). The validator enforces the format
+# `^WRN-\d{3,}:\s+.+` on every entry; malformed entries block status: complete.
+# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# WRN item shape (CLAUDE.md section 2)
+# -----------------------------------------------------------------------------
+# An entry is EITHER the legacy string  "WRN-NNN: <message>"  OR a typed
+# mapping. Both stay valid forever; only the typed form carries a lifecycle a
+# reader - and the generated statusboard - can act on:
+#
+#   - id: WRN-042          # REQUIRED - stable, never renumbered
+#     text: <message>      # REQUIRED - what the string used to carry
+#     kind: deferral       # REQUIRED - deferral | limitation | decision |
+#                          #   exception | scope_change | note
+#     status: open         # REQUIRED - open | resolved
+#     impact: downstream   # REQUIRED - none | local | downstream | risk.
+#                          #   The READER's consequence, never the validator's:
+#                          #   impact can not change an exit code.
+#     refs: [FR-096]       # OPTIONAL - ids this warning is about
+#     defers: [FR-096]     # OPTIONAL - kind: deferral ONLY. The structured
+#                          #   coverage channel the trace-or-defer gates read,
+#                          #   alongside the top-level `deferrals` list.
+#     resolution: null     # REQUIRED once status == resolved
+#     resolved_on: null    # OPTIONAL - YYYY-MM-DD
+#
+# A legacy string reads as {kind: note, status: open, impact: local}, so an
+# untouched artifact keeps behaving exactly as before. A malformed MAPPING
+# never fails the file - it is reported and the entry is dropped or downgraded,
+# the way a malformed `deferrals` entry defers nothing. A malformed STRING is
+# the blocking error it has always been. New writes emit the mapping at
+# <name>_version >= 2.0 (DATA-MODEL: >= 3.0); `.claude/sdlc/migrate_warnings.py`
+# converts an existing artifact.
+arch_warnings:                             # OPTIONAL — list of "WRN-NNN: ..." strings
+  - "WRN-001: Uncovered API resource: payments"
+  - "WRN-002: TODO: address theme cross_container_edges"
+
+# =============================================================================
+# Required cross-checks (validate_schema.py)
+# =============================================================================
+# 1. API-resource coverage — every resource in API__*.yaml appears in some
+#    container's owns_api_resources.
+# 2. UX-surface coverage — every data-bearing surface in UX__*.yaml appears
+#    in some container's owns_ux_surfaces.
+#    "Data-bearing" surfaces (downstream agents must own the data flow): one
+#    of {screen, page, tab, modal, dialog, drawer, panel, cli_command,
+#    flow_step, other}. Excluded as non-data-bearing: {empty_state, toast,
+#    overlay}.
+# 3. DATA-store coverage — every store in DATA-MODEL.persistence appears
+#    in some container's persistence.
+# 4. PRD feature coverage — every PRD must_have_features FR-NNN appears in
+#    some container's implements_requirements OR in non_container_features.
+#    Skipped when PRD.yaml is absent. Blocks status: complete.
+# 5. Edge endpoint integrity — every edges[].from and edges[].to is a valid
+#    container_id.
+# 6. Edge via_resource_id (when set) resolves to an API__*.yaml resource_id.
+# 7. Edge via_channel_id (when set) resolves to API.yaml events.channels[].channel_id.
+# 8. Edge via_entity (when set) resolves to a DATA-MODEL.yaml entity name.
+# 9. file_path integrity — every containers[].file_path that is set points
+#    to a file that exists on disk; every sibling docs/ARCH__*.yaml is
+#    referenced by some container's file_path.
+# 10. ID-prefix formats — WRN-NNN on every arch_warnings entry; FR-NNN on
+#     every implements_requirements entry and on non_container_features;
+#     WKF-NNN on every traces_prd_workflows entry. Malformed ids block
+#     status: complete.
+# 11. PRD trace existence — every implements_requirements (FR-NNN) and
+#     traces_prd_workflows (WKF-NNN) resolves to an id declared in PRD.yaml.
+#     Skipped when PRD.yaml declares no such family.
+# 12. Upstream metadata.status warning — if any of PRD/UX/DATA/API has
+#     metadata.status != "complete", emit a warning (not a fail); a downstream
+#     agent reading ARCH should know it was built on a partial chain.
+# 13. Container→system edge roll-up (cross-check #24; blocks complete at
+#     version >= 2.0, warns below — CLAUDE.md §10) — every external_edges[]
+#     entry in any drilled ARCH__<container>.yaml must have a corresponding
+#     row in `edges:` above ({from: that container, to: its target container,
+#     type: same}). The system edge table is the roll-up of the per-container
+#     edge tables — a container-sourced edge that never propagated up
+#     under-reports the topology to test/deploy.
+# 14. INT coverage (trace-or-defer; ERROR at arch_version >= 2.0, WARNING
+#     below) — every PRD integrations_required INT-NNN appears in some
+#     container's realizes_integrations, some component's int_refs, or
+#     `deferrals`. Format + existence of INT refs always block when present.
+#     An external container realizing an INT without an external_contract
+#     draws a warning.
+# 15. Deferrals channel — coverage gates (FR / INT / API / UX / store) read
+#     the top-level `deferrals` list first; malformed entries defer nothing
+#     and are reported; ids escaping only via the reason-less
+#     non_container_features list are reported (one more version).
+# 16. Store-id resolution (warning-only, B8) — realizes_store, container
+#     persistence entries, and container-file persistence_bindings resolve
+#     against DATA-MODEL store ids ("primary" + secondary store_id, legacy
+#     names accepted as aliases). Skipped when DATA-MODEL is absent or its
+#     persistence paradigm is "none" (the summary line says so). Also
+#     warning-only: a DATA entity traced by no component in any container
+#     (reported only when every buildable container is drilled).
+# 17. Provenance staleness (warning-only, CLAUDE.md §7) — each recorded
+#     metadata.upstream_provenance sha256 is compared to the upstream's
+#     current hash (docs/INDEX.yaml, else recomputed); a mismatch warns that
+#     the artifact was built against an older upstream. A complete artifact
+#     at version >= 2.0 with no provenance at all also warns.
+#
+# Container-vs-system consistency (see ARCH__CONTAINER.schema.yaml for the
+# remaining checks — owns/api/ux/persistence containment, component traces,
+# component implements_requirements ⊆ parent container's, deployment
+# compatibility, work_unit contract lint #23, deliverable-path coverage #25
+# (keys on backticked paths in FR text; bare prose slashes are ignored),
+# api_consumers mirror #26, and the external-container file warning).
+# =============================================================================

@@ -1,0 +1,99 @@
+# =============================================================================
+# DESIGN__tokens.yaml — DTCG design-token set (per token-based UI)
+# =============================================================================
+# Written next to docs/DESIGN.yaml in the consumer project, ONLY when
+# token_based_ui ∈ functional_structure. Holds the CONCRETE token values a
+# downstream coding agent compiles into CSS variables / tailwind.config /
+# theme files. In monorepo mode the file is docs/DESIGN__<slug>__tokens.yaml.
+#
+# This is the value-add over UX's component_library.theming_tokens: UX records
+# the *decision* to use tokens and maybe a couple of placeholder colours;
+# DESIGN__tokens.yaml records the *full, concrete* set, ready to ship.
+# PRECEDENCE: once this file exists it is the CANONICAL token home — UX's
+# theming_tokens block is a hint only, any conflict resolves in THIS file's
+# favour, and downstream consumers (task/code) read tokens from here, never
+# from UX. (The same precedence note lives in UX.schema.yaml.)
+#
+# -----------------------------------------------------------------------------
+# DTCG shape
+# -----------------------------------------------------------------------------
+# Token GROUPS (color, typography, …) follow the W3C Design Tokens Community
+# Group (DTCG) format. A leaf token is a mapping with at least `$value` and
+# `$type`; groups nest freely. Example:
+#
+#   color:
+#     primary:
+#       "500": { $value: "#2563eb", $type: color }
+#       "600": { $value: "#1d4ed8", $type: color }
+#     semantic:
+#       danger: { $value: "{color.red.500}", $type: color }   # alias by ref
+#
+# The validator type-checks each group as a free-form mapping (dict[str, Any]) —
+# it does NOT enforce the internal DTCG shape, so authored sets, imported
+# presets, and partial drafts all validate. Keep the DTCG shape anyway: it is
+# what makes the set portable and deterministically compilable.
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# metadata — always at top level
+# -----------------------------------------------------------------------------
+metadata:
+  design_tokens_version: "1.0"              # schema version this file conforms to
+  last_updated: "2026-06-22T12:00:00Z"      # ISO-8601 UTC timestamp of last write
+  generated_by: sdlc-design
+  session_id: "00000000-0000-0000-0000-000000000000"
+  status: "draft"                           # "draft" | "complete"
+                                            # "complete" only when token_source,
+                                            # theme_modes, color, typography, and
+                                            # spacing are all filled.
+  changelog: null                           # Optional[list[string]]. Append-only.
+
+# -----------------------------------------------------------------------------
+# provenance of the token set
+# -----------------------------------------------------------------------------
+token_source: null              # REQUIRED — one of:
+                                #   dtcg_authored      | hand-authored here
+                                #   import_shadcn      | seeded from a shadcn registry theme
+                                #   import_tokens_studio | seeded from a Tokens Studio export
+                                #   import_tailwind    | seeded from a tailwind.config
+                                #   import_other       | seeded from another named source
+imported_from: null             # string|null — the preset name / URL when
+                                # token_source is an import_* value. Never invent;
+                                # fetch via web_fetch only if the user supplies it.
+component_library: null         # string|null — the binding library, inherited
+                                # from UX.component_library.name (e.g. "shadcn/ui").
+                                # Tokens must be expressible in this library's theme.
+
+# -----------------------------------------------------------------------------
+# theme_modes — the modes the token set must cover. Each mode is a variant the
+# color (and sometimes elevation/motion) groups resolve under.
+# -----------------------------------------------------------------------------
+theme_modes: null               # REQUIRED — list[string], e.g.
+                                #   ["light"] | ["light","dark"] |
+                                #   ["light","dark","high_contrast"]
+
+# -----------------------------------------------------------------------------
+# token groups — DTCG-shaped mappings. color/typography/spacing are REQUIRED for
+# status: complete; radius/elevation/motion are recommended but optional.
+# -----------------------------------------------------------------------------
+color: null                     # REQUIRED — DTCG color group. Ramps + semantic
+                                # aliases. When theme_modes has >1 mode, encode
+                                # per-mode values (e.g. a `$extensions` modes map,
+                                # or sibling light/dark groups) — the downstream
+                                # agent reads whichever convention you pick.
+typography: null                # REQUIRED — DTCG group: font families, type
+                                # scale, weights, line-heights, letter-spacing.
+spacing: null                   # REQUIRED — DTCG group: the spacing scale
+                                # (e.g. a 4px or 8px base ramp).
+radius: null                    # DTCG group: border-radius scale (any|null)
+elevation: null                 # DTCG group: shadow / elevation tokens (any|null)
+motion: null                    # DTCG group: durations + easings (any|null).
+                                # Should agree with aesthetic_direction.motion_character.
+
+# -----------------------------------------------------------------------------
+# contrast_notes — how the palette satisfies the accessibility target inherited
+# from UX.accessibility.wcag_target / PRD NFRs. Free-form, optional but strongly
+# recommended whenever an accessibility NFR exists.
+# -----------------------------------------------------------------------------
+contrast_notes: null            # string|null, e.g. "text/bg pairs meet WCAG AA
+                                # 4.5:1; danger-on-surface verified at 4.8:1"

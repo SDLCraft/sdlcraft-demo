@@ -1,0 +1,787 @@
+# =============================================================================
+# api-questions.yaml — Question inventory for the sdlc-api skill
+# =============================================================================
+# Same shape as sdlc-ux's ux-questions.yaml. Two top-level keys: `themes`
+# (canonical interview order) and `questions` (each carrying a schema_path
+# that points into API.yaml OR into a per-resource yaml under the special
+# prefix `resource.<...>`).
+#
+# Field reference (same semantics as ux-questions.yaml):
+#   theme              — grouping label; matches a top-level key in API.yaml
+#                        (or the synthesis themes `resource_inventory` and
+#                        `per_resource_deepdive`).
+#   id                 — unique slug, kebab-case.
+#   schema_path        — dotted path to the target field.
+#                        For API.yaml fields:      "versioning.strategy" or
+#                                                  "auth.schemes"
+#                        For per-resource fields:  "resource.<field>" — the
+#                                                  agent rewrites the prefix
+#                                                  to "<API__resource.yaml>.
+#                                                  <field>" for each resource
+#                                                  in theme 10.
+#   question           — prompt shown to the user.
+#   hint               — why this matters for downstream coding agents (short).
+#   suggested_answers  — 3–5 plausible options shown as a numbered list.
+#   free_text_allowed  — if true, "Other / type your own" appears.
+#   required           — true => must be answered (or explicitly nulled with
+#                        a warning) before status: complete.
+#   required_if        — optional expression evaluated at the start of each
+#                        new theme batch against already-answered fields.
+#                        Reading: PROMOTION (canonical activation-vs-promotion
+#                        definition: ../prd/references/interview-mechanics.md).
+#   capture_rationale  — if true, follow with one "Why?" question.
+#   confidence_field   — if true, a sibling <field>_confidence is written.
+#   importance         — med | high | critical (see prd's importance-flows.md
+#                        for tier mechanics; same semantics here).
+#
+# Theme order is the canonical interview order. Required themes run
+# unconditionally; optional themes get a now/skip/todo gate.
+#
+# When api_kind == "none", the agent skips themes 2–11 entirely and writes
+# a minimal API.yaml. See SKILL.md Phase 4 for the early-skip path.
+# =============================================================================
+
+themes:
+  - id: api_kind_and_styles
+    title: "API Kind & Transport Styles"
+    required: true
+    description: >
+      Whether the product has a network API at all, and which transport
+      style(s) it speaks (rest, graphql, grpc, websocket, sse,
+      webhooks_out). Asked in Phase 4 as a structural question.
+
+  - id: versioning
+    title: "Versioning"
+    required: true
+    description: "Versioning strategy, current version, deprecation policy."
+
+  - id: auth
+    title: "Authentication & Authorization"
+    required: true
+    description: >
+      Auth schemes, role/scope model, default visibility rule (public vs.
+      authenticated). Pre-filled from PRD.security_compliance.auth_model.
+
+  - id: errors
+    title: "Errors"
+    required: true
+    description: >
+      Error envelope (RFC 7807 vs. custom), localisation, retry semantics,
+      named error codes.
+
+  - id: pagination
+    title: "Pagination"
+    required: true
+    description: >
+      Strategy (offset | cursor | none), default + max page size, stable
+      sort field (required for cursor pagination).
+
+  - id: idempotency
+    title: "Idempotency"
+    required: true
+    description: >
+      Which methods are idempotent by default; idempotency-key header
+      convention; cache window.
+
+  - id: rate_limiting
+    title: "Rate Limiting"
+    required: true
+    description: "Scopes (per-ip / per-user / per-key / global), burst + sustained limits, response shape."
+
+  - id: resource_inventory
+    title: "Resource Inventory"
+    required: true
+    synthesis: true
+    description: >
+      The full list of API resources. Synthesized from DATA-MODEL entities
+      + UX surface interactions + PRD FR-NNN features; per-item drill-down
+      confirms each resource's id, base_path, primary_entity, and traces
+      back to PRD features + UX surfaces.
+
+  - id: events_async
+    title: "Events & Async"
+    required: false
+    required_if: "any(s in transport_styles for s in ['websocket','server_sent_events','webhooks_out'])"
+    description: >
+      Event channels, payload conventions, delivery guarantees, consumer
+      auth. Conditionally required when transport_styles includes any
+      async style.
+
+  - id: per_resource_deepdive
+    title: "Per-Resource Deep-Dive"
+    required: true
+    synthesis: true
+    description: >
+      For every resource from theme 8: endpoints (method + path + summary
+      + request DTO + response DTO + status codes + auth + idempotent
+      flag), DTO schemas (each marked as projection of which DATA
+      entity). Each resource is its own critical mini-section.
+
+  - id: external_dependencies
+    title: "External Dependencies"
+    required: false
+    description: >
+      Outbound third-party APIs the product calls (Stripe, Twilio,
+      GitHub, etc.) with auth, rate limits, retry policy. Pre-filled
+      from PRD.functional_requirements.integrations_required.
+
+  - id: sdk_and_clients
+    title: "SDKs & Clients"
+    required: false
+    description: >
+      Generated SDKs (none / openapi-generator / custom), client
+      languages, distribution channel.
+
+questions:
+
+  # ---------------------------------------------------------------------------
+  # api_kind_and_styles — structural, asked in Phase 4
+  # ---------------------------------------------------------------------------
+  - theme: api_kind_and_styles
+    id: api_kind
+    schema_path: api_kind
+    question: "Does this product expose a network API? If yes, what kind?"
+    hint: "If 'none', every other theme is skipped and a minimal API.yaml is written."
+    suggested_answers:
+      - "rest"
+      - "graphql"
+      - "grpc"
+      - "mixed"
+      - "none"
+    free_text_allowed: false
+    required: true
+    capture_rationale: true
+    confidence_field: true
+    importance: high
+
+  - theme: api_kind_and_styles
+    id: rationale_for_none
+    schema_path: rationale
+    question: "Why does this product have no API? (One sentence — written to API.yaml.rationale.)"
+    hint: "Required when api_kind == 'none'. Helps downstream skills understand the shape of the product."
+    suggested_answers:
+      - "Pure CLI tool — local execution only."
+      - "Local desktop app with no network surface."
+      - "Library / SDK — public surface is the imported module, not HTTP."
+      - "Internal script / batch job — no clients."
+    free_text_allowed: true
+    required: false
+    required_if: "api_kind == 'none'"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: api_kind_and_styles
+    id: transport_styles
+    schema_path: transport_styles
+    question: "Which transport styles are in scope? (Pick all that apply.)"
+    hint: "rest is default for web/mobile CRUD; add websocket/sse for real-time; webhooks_out for outbound notifications."
+    suggested_answers:
+      - "rest"
+      - "graphql"
+      - "grpc"
+      - "websocket"
+      - "server_sent_events"
+      - "webhooks_out"
+    free_text_allowed: false
+    required: true
+    required_if: "api_kind != 'none'"
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # versioning
+  # ---------------------------------------------------------------------------
+  - theme: versioning
+    id: strategy
+    schema_path: versioning.strategy
+    question: "API versioning strategy?"
+    hint: "path = /v1/users; header = Accept: application/vnd.api+v2; content_type similar. none = no versioning ever."
+    suggested_answers:
+      - "path"
+      - "header"
+      - "content_type"
+      - "none"
+    free_text_allowed: false
+    required: true
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: versioning
+    id: current_version
+    schema_path: versioning.current_version
+    question: "Current API version label?"
+    hint: "e.g. '1.0' or 'v1'. Pre-fills from PRD.metadata.prd_version where reasonable."
+    suggested_answers:
+      - "v1"
+      - "1.0"
+      - "2024-01-01"
+      - "0.1"
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: versioning
+    id: deprecation_policy
+    schema_path: versioning.deprecation_policy
+    question: "How long do old API versions stay live after a new one ships?"
+    hint: "Affects client migration urgency and how many parallel versions live code must support."
+    suggested_answers:
+      - "Forever — never deprecate"
+      - "12 months notice + Deprecation/Sunset headers"
+      - "6 months notice + Deprecation/Sunset headers"
+      - "No formal policy — break as needed (pre-1.0)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # auth
+  # ---------------------------------------------------------------------------
+  - theme: auth
+    id: schemes
+    schema_path: auth.schemes
+    question: "Authentication scheme(s)? (Pick all that apply.)"
+    hint: "Pre-filled from PRD.security_compliance.auth_model. Multiple schemes are valid (e.g. user JWT + service mTLS)."
+    suggested_answers:
+      - "api_key"
+      - "bearer_jwt"
+      - "oauth2"
+      - "session_cookie"
+      - "mtls"
+      - "none"
+    free_text_allowed: false
+    required: true
+    capture_rationale: true
+    confidence_field: true
+    importance: high
+
+  - theme: auth
+    id: roles
+    schema_path: auth.roles
+    question: "Authorization roles? (Distinct user types with different permissions.)"
+    hint: "Pre-filled from PRD.users_personas. Use [] for a single role-less audience."
+    suggested_answers:
+      - "admin, editor, viewer"
+      - "owner, member, guest"
+      - "user (only one role)"
+      - "service_account, user"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: auth
+    id: scopes
+    schema_path: auth.scopes
+    question: "OAuth-style scopes? (Granular permissions — typically only for OAuth2 or fine-grained API key auth.)"
+    hint: "e.g. ['read:tasks','write:tasks','admin:users']. Skip if auth is role-based only."
+    suggested_answers:
+      - "Read/write per resource (e.g. read:users, write:users)"
+      - "Admin/user split only (admin:*, read:*)"
+      - "None — role-based only"
+      - "Custom scope list (type in text field)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: auth
+    id: default_visibility
+    schema_path: auth.default_visibility
+    question: "Default endpoint visibility — public, authenticated, or mixed?"
+    hint: "Most product APIs are 'authenticated' by default with a few public endpoints (login, signup, health)."
+    suggested_answers:
+      - "authenticated"
+      - "public"
+      - "mixed"
+    free_text_allowed: false
+    required: true
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # errors
+  # ---------------------------------------------------------------------------
+  - theme: errors
+    id: envelope
+    schema_path: errors.envelope
+    question: "Error response envelope?"
+    hint: "RFC 7807 (problem+json) is the modern default and works well for AI-generated client code; custom requires more bookkeeping downstream."
+    suggested_answers:
+      - "rfc7807"
+      - "custom"
+    free_text_allowed: false
+    required: true
+    capture_rationale: true
+    confidence_field: true
+    importance: high
+
+  - theme: errors
+    id: localisation
+    schema_path: errors.localisation
+    question: "Are error messages localised (i18n)?"
+    hint: "If yes, downstream clients must respect Accept-Language; if no, every message is English. Pre-filled ✓ found from PRD.internationalization.enabled (PRD 1.1) when present."
+    suggested_answers:
+      - "false"
+      - "true"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: errors
+    id: retry_semantics
+    schema_path: errors.retry_semantics
+    question: "When may a client safely retry? (Drives auto-retry logic in generated SDKs.)"
+    hint: "Be explicit so client code can implement exponential backoff cleanly."
+    suggested_answers:
+      - "5xx + 429 only (idempotent methods); never retry 4xx (except 429)"
+      - "5xx + 429 + 408; respect Retry-After; cap at 5 attempts"
+      - "Never retry — client decides"
+      - "Custom (describe in text field)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: errors
+    id: error_codes
+    schema_path: errors.error_codes
+    question: "Named error codes? (Stable string codes a client can switch on, e.g. USER_NOT_FOUND.)"
+    hint: "Free-form; agent collects [{ code, http_status, description }] items. Optional but very useful for SDKs."
+    suggested_answers:
+      - "USER_NOT_FOUND (404), VALIDATION_ERROR (422), RATE_LIMITED (429)"
+      - "Just HTTP status codes — no named codes"
+      - "Per-resource error codes (will detail per resource)"
+      - "Defer — agent picks reasonable defaults during deep-dive"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # pagination
+  # ---------------------------------------------------------------------------
+  - theme: pagination
+    id: strategy
+    schema_path: pagination.strategy
+    question: "Pagination strategy?"
+    hint: "cursor is safer at scale (stable across inserts) but harder to bookmark; offset is simpler but skews when the dataset changes mid-page."
+    suggested_answers:
+      - "cursor"
+      - "offset"
+      - "none"
+    free_text_allowed: false
+    required: true
+    capture_rationale: true
+    confidence_field: true
+    importance: high
+
+  - theme: pagination
+    id: default_page_size
+    schema_path: pagination.default_page_size
+    question: "Default page size (when client passes none)?"
+    hint: "20–50 is common for list endpoints; 100 if responses are small."
+    suggested_answers:
+      - "20"
+      - "25"
+      - "50"
+      - "100"
+    free_text_allowed: true
+    required: false
+    required_if: "pagination.strategy != 'none'"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: pagination
+    id: max_page_size
+    schema_path: pagination.max_page_size
+    question: "Maximum page size?"
+    hint: "Hard cap clients can't exceed. Higher caps shift load to the server."
+    suggested_answers:
+      - "100"
+      - "250"
+      - "500"
+      - "1000"
+    free_text_allowed: true
+    required: false
+    required_if: "pagination.strategy != 'none'"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: pagination
+    id: stable_sort_field
+    schema_path: pagination.stable_sort_field
+    question: "Stable sort field for cursor pagination?"
+    hint: "Must be unique + monotonic per row (e.g. (created_at, id) compound). Required for cursor strategy."
+    suggested_answers:
+      - "created_at, id"
+      - "id (monotonic)"
+      - "updated_at, id"
+      - "Custom (describe)"
+    free_text_allowed: true
+    required: false
+    required_if: "pagination.strategy == 'cursor'"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # idempotency
+  # ---------------------------------------------------------------------------
+  - theme: idempotency
+    id: idempotent_methods
+    schema_path: idempotency.idempotent_methods
+    question: "Which methods are idempotent by default?"
+    hint: "GET/PUT/DELETE are RFC-idempotent; POST is only idempotent when paired with an Idempotency-Key header."
+    suggested_answers:
+      - "GET, PUT, DELETE (RFC defaults)"
+      - "GET, PUT, DELETE, POST (with Idempotency-Key)"
+      - "GET only"
+      - "Custom (describe)"
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: true
+    importance: high
+
+  - theme: idempotency
+    id: header
+    schema_path: idempotency.header
+    question: "Idempotency-key header name?"
+    hint: "Stripe-style 'Idempotency-Key' is the de-facto standard. Skip if POSTs are never idempotent."
+    suggested_answers:
+      - "Idempotency-Key"
+      - "X-Idempotency-Key"
+      - "Request-Id"
+      - "None — POSTs not idempotent"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: idempotency
+    id: cache_window
+    schema_path: idempotency.cache_window
+    question: "How long does the server remember idempotency keys?"
+    hint: "Longer = more dedup safety but more storage. 24h is Stripe's default."
+    suggested_answers:
+      - "24h"
+      - "1h"
+      - "7d"
+      - "Forever (until explicit cleanup)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # rate_limiting
+  # ---------------------------------------------------------------------------
+  - theme: rate_limiting
+    id: scopes
+    schema_path: rate_limiting.scopes
+    question: "Rate-limit scope(s)? (Pick all that apply.)"
+    hint: "per_user is the safest default for authenticated APIs; per_ip catches abuse before auth; per_key for partner/B2B APIs."
+    suggested_answers:
+      - "per_user"
+      - "per_ip"
+      - "per_key"
+      - "global"
+    free_text_allowed: false
+    required: true
+    capture_rationale: false
+    confidence_field: true
+    importance: high
+
+  - theme: rate_limiting
+    id: burst
+    schema_path: rate_limiting.burst
+    question: "Burst (short-window) limit?"
+    hint: "Short-term cap to absorb traffic spikes. e.g. '10 req/sec'."
+    suggested_answers:
+      - "10 req/sec"
+      - "20 req/sec"
+      - "100 req/sec"
+      - "No burst limit"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: rate_limiting
+    id: sustained
+    schema_path: rate_limiting.sustained
+    question: "Sustained (long-window) limit?"
+    hint: "Long-term cap. e.g. '1000 req/min' or '50000 req/day'."
+    suggested_answers:
+      - "1000 req/min"
+      - "100 req/min"
+      - "10000 req/hour"
+      - "Custom (describe)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: rate_limiting
+    id: response
+    schema_path: rate_limiting.response
+    question: "Rate-limit response shape?"
+    hint: "Standard is 429 + Retry-After header. Surface X-RateLimit-* headers if clients should display remaining quota."
+    suggested_answers:
+      - "429 + Retry-After header"
+      - "429 + Retry-After + X-RateLimit-{Limit,Remaining,Reset}"
+      - "429 + rfc7807 problem body"
+      - "Custom (describe)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # resource_inventory — critical theme; the agent drives a per-item state
+  # machine (see references/resource-discovery.md). The single question below
+  # is the entry point; the rest of the flow is in the reference file.
+  # ---------------------------------------------------------------------------
+  - theme: resource_inventory
+    id: resources
+    schema_path: resource_inventory
+    question: "Confirm or revise the resource inventory drawn from DATA entities + PRD features (FR-NNN) + PRD workflows (WKF-NNN) + UX surfaces (SCR-NNN)."
+    hint: "Each PRD FR-NNN must end up traced OR deferred via the top-level `deferrals: [{id, reason}]` list; each UX SCR-NNN with data I/O must be served by ≥1 endpoint or deferred the same way (coverage checks at validation). A bare id in non_api_features still passes for one more version but is reported — new writes always record {id, reason}. Because this theme is `synthesis: true`, after the per-resource confirmation loop closes the agent runs a dynamic scope-completeness sweep against ALL upstream ID families before the inventory can close. See references/resource-discovery.md."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  # ---------------------------------------------------------------------------
+  # events_async — required_if transport_styles includes async style
+  # ---------------------------------------------------------------------------
+  - theme: events_async
+    id: channels
+    schema_path: events.channels
+    question: "Event channels? (Each channel: id, transport, direction, payload.)"
+    hint: "One entry per event topic. transport ∈ websocket | sse | webhook | queue."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    required_if: "any(s in transport_styles for s in ['websocket','server_sent_events','webhooks_out'])"
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: events_async
+    id: payload_conventions
+    schema_path: events.payload_conventions
+    question: "Payload conventions for all event messages?"
+    hint: "Most teams use a JSON envelope like { type, id, timestamp, data: {...} }."
+    suggested_answers:
+      - "JSON envelope: { type, id, timestamp, data }"
+      - "CloudEvents 1.0 spec"
+      - "Plain payload (no envelope)"
+      - "Custom (describe)"
+    free_text_allowed: true
+    required: false
+    required_if: "any(s in transport_styles for s in ['websocket','server_sent_events','webhooks_out'])"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: events_async
+    id: delivery_guarantees
+    schema_path: events.delivery_guarantees
+    question: "Delivery guarantee?"
+    hint: "at_least_once is most common (consumer must dedupe by event id). exactly_once is hard — only pick if your infra supports it."
+    suggested_answers:
+      - "at_least_once"
+      - "at_most_once"
+      - "exactly_once"
+    free_text_allowed: false
+    required: false
+    required_if: "any(s in transport_styles for s in ['websocket','server_sent_events','webhooks_out'])"
+    capture_rationale: false
+    confidence_field: true
+    importance: med
+
+  - theme: events_async
+    id: consumer_auth
+    schema_path: events.consumer_auth
+    question: "How do event consumers authenticate?"
+    hint: "Webhooks typically use HMAC signature; WebSocket/SSE use the same bearer token as REST."
+    suggested_answers:
+      - "HMAC signature header (e.g. X-Signature)"
+      - "Same bearer JWT as REST"
+      - "Per-channel webhook secret"
+      - "None — public event stream"
+    free_text_allowed: true
+    required: false
+    required_if: "any(s in transport_styles for s in ['websocket','server_sent_events','webhooks_out'])"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # per_resource_deepdive — runs once per resource from theme 8.
+  # All questions below carry schema_path prefixed `resource.` — the agent
+  # rewrites the prefix at runtime per resource. See
+  # references/resource-discovery.md for the critical state machine.
+  # ---------------------------------------------------------------------------
+  - theme: per_resource_deepdive
+    id: endpoints
+    schema_path: resource.endpoints
+    question: "Endpoints for this resource? (Each: id (OPR-NNN) + operation_id + method + path + summary + request/response schema refs + auth.)"
+    hint: "Each endpoint becomes one OpenAPI 3.1 operation AND carries a stable OPR-NNN id (cross-stage reference contract for downstream test/task/arch). The OPR-NNN id is assigned by the writer in collection order; the user does not type it. `operation_id` is the codegen-naming hook (kebab/snake string). Start from canonical CRUD verbs (list/get/create/update/delete)."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  - theme: per_resource_deepdive
+    id: schemas
+    schema_path: resource.schemas
+    question: "DTO schemas owned by this resource? (Wire shapes, NOT persistent entities.)"
+    hint: "Each schema: name + projects_from (DATA entity) + properties. Omit persistence-only fields (password_hash, internal flags)."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: per_resource_deepdive
+    id: primary_entity
+    schema_path: resource.primary_entity
+    question: "Primary DATA entity this resource fronts?"
+    hint: "Must match an entity name in docs/DATA-MODEL.yaml. Use null only for cross-cutting resources like /search."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: per_resource_deepdive
+    id: traces_prd_features
+    schema_path: resource.traces_prd_features
+    question: "Which PRD features (FR-NNN ids) does this resource implement?"
+    hint: "Pure FR-NNN id list — no verbatim PRD text. Drives the feature-coverage check. Every PRD FR-NNN must end up traced here OR deferred via API.yaml's top-level `deferrals: [{id, reason}]` (a bare id in non_api_features still passes for one more version but is reported). The validator enforces FR-NNN format on every entry."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  - theme: per_resource_deepdive
+    id: traces_ux_surfaces
+    schema_path: resource.traces_ux_surfaces
+    question: "Which UX surfaces does this resource serve? (SCR-NNN ids from UX.surface_inventory[].id)"
+    hint: "Pure SCR-NNN id list — never the editable `surface_id` slug. SCR-NNN is the stable contract; slugs may be renamed. Drives the surface-coverage check. The validator enforces SCR-NNN format on every entry."
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: critical
+
+  - theme: per_resource_deepdive
+    id: traces_prd_workflows
+    schema_path: resource.traces_prd_workflows
+    question: "Which PRD core workflows does this resource participate in? (WKF-NNN ids from PRD.use_cases.core_workflows; optional)"
+    hint: "Optional. Use when a resource is the API entry point for a workflow even though no single FR-NNN directly names it. The validator enforces WKF-NNN format on every entry."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  # ---------------------------------------------------------------------------
+  # external_dependencies — optional
+  # ---------------------------------------------------------------------------
+  - theme: external_dependencies
+    id: dependencies
+    schema_path: external_dependencies
+    question: "Outbound third-party APIs this product calls? (Each: name, auth, rate limit, retry policy, docs URL.)"
+    hint: "Pre-filled from PRD.functional_requirements.integrations_required."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  # ---------------------------------------------------------------------------
+  # sdk_and_clients — optional
+  # ---------------------------------------------------------------------------
+  - theme: sdk_and_clients
+    id: generated_sdks
+    schema_path: sdk_and_clients.generated_sdks
+    question: "Generated SDKs from the OpenAPI spec?"
+    hint: "openapi-generator is the easy default; custom SDKs cost engineering time but read more naturally."
+    suggested_answers:
+      - "none"
+      - "openapi-generator (auto)"
+      - "custom (hand-rolled)"
+      - "mix — auto for internal, custom for public"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: sdk_and_clients
+    id: client_languages
+    schema_path: sdk_and_clients.client_languages
+    question: "Client SDK languages?"
+    hint: "Pick the ones you'll actually publish — each adds CI + release surface."
+    suggested_answers:
+      - "TypeScript / JavaScript"
+      - "Python"
+      - "Go"
+      - "TypeScript + Python (most common pair)"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: sdk_and_clients
+    id: distribution
+    schema_path: sdk_and_clients.distribution
+    question: "Distribution channel?"
+    hint: "Public package registries (npm, PyPI) for SaaS APIs; internal artifactories for private."
+    suggested_answers:
+      - "Public registries (npm, PyPI, …)"
+      - "Internal artifactory only"
+      - "GitHub Releases (tarballs)"
+      - "Not distributed — embedded in monorepo"
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med

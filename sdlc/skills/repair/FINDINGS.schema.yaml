@@ -1,0 +1,273 @@
+# =============================================================================
+# FINDINGS.schema.yaml — canonical schema for
+#   .claude/skills-state/sdlc-findings.yaml        (findings_file_version 2)
+# =============================================================================
+# A CROSS-SKILL QUEUE, not a per-skill state file. This is a deliberate,
+# documented exception to the `.claude/skills-state/sdlc-<skill>.state.yaml`
+# naming convention (CLAUDE.md "State file contract"): the producers and the
+# consumer are different skills, so the file belongs to none of them.
+#
+#   PRODUCERS  ANY sdlc stage that NOTICES a defect in this project's docs/
+#              records it here and moves on — through
+#              `python "${CLAUDE_SKILL_DIR}/../repair/findings.py" add ...`
+#              (skills) or `python .claude/sdlc/findings.py add ...` (ambient
+#              sessions, installed by /sdlc:setup; see the installed rule
+#              .claude/rules/sdlc-findings.md). Nothing appends by hand.
+#                /sdlc:code    spec defects that become visible during codegen
+#                /sdlc:ux ... /sdlc:task
+#                              an upstream artifact the user says is wrong, two
+#                              upstreams that contradict each other, a
+#                              schema-REQUIRED upstream field that is null in a
+#                              `complete` artifact (upstream_incomplete)
+#                /sdlc:repair  its own doctor sweep (doctor.py --emit-findings)
+#                user          `/sdlc:repair --flag "<reason>"`
+#              A producer NEVER resolves a finding and NEVER edits the artifact
+#              it suspects (CLAUDE.md section 13: capture, don't fix).
+#   CONSUMER   /sdlc:repair triages, localizes, fixes at the source stage, and
+#                           writes the `resolution` block.
+#
+# WHY THIS FILE EXISTS: the stage that discovers a spec defect is almost never
+# the stage that can fix it, and before this queue the observation lived only
+# in a close report that scrolled away — or in a WRN inside a DOWNSTREAM
+# artifact, where the owner of the defect never looks. The queue makes every
+# such observation durable, reviewable, and routable to the stage that owns
+# the fix, whoever noticed it.
+#
+# ID families this artifact OWNS (writer-managed counter in `last_ids`):
+#   * FND-NNN — one per finding. Stable for the finding's lifetime; a resolved
+#               finding keeps its id (audit trail), it is never renumbered or
+#               deleted. Counter reconciliation on append: take
+#               max(last_ids.FND, highest FND-NNN present) and increment.
+# Ids it REFERENCES (never invents):
+#   * qualified task ids ("TASKS/TSK-NNN", "<container_id>/TSK-NNN")
+#   * artifact paths under docs/
+#   * upstream ids (FR-NNN, TST-NNN, ...) inside summary / evidence text
+#
+# VERSIONING (CLAUDE.md section 10): checks marked "v2" below are ERRORS when
+# findings_file_version >= 2 and WARNINGS on older files. findings.py starts a
+# new queue at "2"; an existing "1" file is never re-stamped by a writer.
+#
+# Downstream-rejection rule: this file is private cross-skill state, not a
+# published artifact. Nothing outside the sdlc plugin reads it, and no skill
+# refuses to run because of its contents — open findings are surfaced at a
+# gate (every consumer skill's Phase 2 lists them), never used as a hard block.
+# =============================================================================
+
+findings_file_version: "2"                 # REQUIRED — string; "1" files still validate
+last_updated: <ISO-8601 UTC>               # OPTIONAL — stamped on every write
+
+last_ids:                                  # REQUIRED — writer-managed counters
+  FND: 7                                   #   highest FND id issued so far
+
+findings:                                  # REQUIRED — list[Finding]; may be empty
+  - fnd_id: FND-003                        # REQUIRED — ^FND-\d{3,}$, unique in the file
+    raised_by: sdlc-code                   # REQUIRED — ^(sdlc-[a-z0-9-]+|user)$ :
+                                           #   the stage that NOTICED it (sdlc-arch,
+                                           #   sdlc-code, sdlc-repair, ...) or `user`
+                                           #   for /sdlc:repair --flag
+    raised_at: <ISO-8601 UTC>              # REQUIRED
+    detected_by: <check or phase name>     # OPTIONAL — e.g. "arch/validate_schema",
+                                           #   "crosscheck_artifacts", "heal-escalation",
+                                           #   "ux/phase-2", "user/--flag". The dedupe
+                                           #   key is (detected_by, summary): the same
+                                           #   check reporting the same text twice is
+                                           #   one finding, not two.
+    session_id: <raiser's session id>      # OPTIONAL — read from the RAISER's state
+                                           #   file by findings.py when present
+
+    # ---- where it became visible (NOT where it must be fixed) --------------
+    surfaced_at:                           # OPTIONAL
+      qualified_task: aicf-cli/TSK-118     #   the codegen task that hit it, if any
+      file: docs/ARCH__aicf-cli.yaml       #   the file the check names, if any
+      symbol: <work_unit / TST / entity>   #   the smallest thing implicated
+      field_path: components[0].work_units[3].output   # OPTIONAL — dotted / indexed
+                                           #   path inside `file`, when one field is it
+
+    kind:                                  # REQUIRED — one of (any stage may raise any):
+      # ---- the contract or the spec does not determine the behaviour --------
+      #   contract_underdetermined  — a contract (work_unit, operation, entity
+      #                               slice) does not determine the behaviour its
+      #                               consumers' descriptions/acceptance demand
+      #   contract_contradiction    — two upstream statements about one thing
+      #                               conflict (ARCH vs API, PRD vs UX, ...)
+      #   test_contradicts_contract — a test cannot be realized against the
+      #                               contract it exercises
+      #   impossible_acceptance     — an acceptance / ACR text is not satisfiable
+      #                               as written
+      #   unrealizable_item         — an item a downstream artifact must realize
+      #                               (surface, operation, work_unit, task) cannot
+      #                               be built from what upstream gives it
+      # ---- something a downstream artifact needs is not defined upstream ----
+      #   missing_requirement       — behaviour is demanded with no FR/NFR behind it
+      #   missing_operation         — a call site with no API operation
+      #   missing_entity            — persisted state with no DATA-MODEL entity
+      #   missing_dependency_edge   — a prerequisite (symbol, task, container edge)
+      #                               was never declared
+      #   upstream_incomplete       — a schema-REQUIRED section/field is null or
+      #                               empty in an upstream stamped `complete`
+      #                               (a FACT the pre-fill map exposes, not a
+      #                               judgement; raised automatically at close)
+      # ---- copies and claims that no longer match their source --------------
+      #   drifted_embed             — a task embed disagrees with its upstream source
+      #   stale_downstream_claim    — a downstream artifact claims something about
+      #                               an upstream item that is no longer true (ARCH
+      #                               owns a surface UX still calls `proposed`; a
+      #                               task built while its test is deferred)
+      #   wrong_path                — absolute path / `..` / a target that cannot exist
+      # ---- raised by the doctor sweep ---------------------------------------
+      #   validator_error           — a skill validator returned non-zero
+      #   crosscheck_broken_ref     — a cross-artifact reference does not resolve
+      #   dangling_reference        — docs_index --check found a dangling id
+      # ---- fallback ---------------------------------------------------------
+      #   other                     — use sparingly; a kind nobody can act on is noise
+      # NOT a kind: "behind_upstream" / staleness. An artifact built against an
+      # older upstream is a known state, reported by doctor.py --provenance and
+      # reviewed by the owning skill's delta-review — never a spec defect.
+
+    summary: <one line>                    # REQUIRED — what is wrong, stated once
+    evidence:                              # REQUIRED — list[str], 1..5 lines, each
+      - "exit 1: TST-006 red after 3 attempts"   #   <= 300 chars: the failing
+      - "interface_contract.output: null"        #   assertion, the contract excerpt,
+      - "acceptance: 'returns the merged view'"  #   the captured exit code — enough
+                                                 #   for a reader to judge it WITHOUT
+                                                 #   re-running. A plain string is
+                                                 #   rejected (06_string_evidence.yaml).
+
+    # ---- the raiser's GUESS at the source ----------------------------------
+    # NOT authoritative. Localization is /sdlc:repair's job and routinely lands
+    # a stage earlier than the artifact that looked wrong from the raising site.
+    # Per CLAUDE.md section 9 an embedded copy is NEVER the source — the artifact
+    # it was copied from is. Leave it null when the defect spans two artifacts
+    # and you have no basis to pick one.
+    suspected_stage: arch                  # OPTIONAL — prd|ux|design|data|api|arch|test|task|
+                                           #   code|brief. `brief` is not a pipeline stage: it is
+                                           #   a hand-written doc the pipeline consumes (PRD
+                                           #   conventions.upstream_briefs). See located_stage.
+                                           #   (legacy 'data-model' / 'test-strategy'
+                                           #   read as data / test, with a warning)
+    suspected_source: docs/ARCH__aicf-cli.yaml   # OPTIONAL — path
+
+    related: [FND-001]                     # OPTIONAL — findings this one is connected
+                                           #   to (same symbol, same episode); warns
+                                           #   when an id is not in this file
+    recurrence_of: FND-001                 # OPTIONAL — stamped by findings.py when a
+                                           #   resolved|wontfix finding already named
+                                           #   the same surfaced_at.qualified_task or
+                                           #   .symbol with the same kind. v2: must
+                                           #   name a finding in this file.
+    recurrence: 1                          # OPTIONAL — how many times it came back
+                                           #   (the earlier finding's count + 1).
+                                           #   "repaired before as FND-NNN" makes
+                                           #   re-invoke the safer mode — it never
+                                           #   refuses surgical.
+
+    status: open                           # REQUIRED — open | triaged | resolved
+                                           #   | wontfix | deferred | duplicate
+      #   open      — recorded, not yet looked at
+      #   triaged   — localized; the fix is in progress or awaits the user's
+      #               re-invocations. May carry a resolution block ONLY when
+      #               resolution.mode is re-invoke (partial progress recorded:
+      #               artifacts_touched so far + the downstream_rerun still owed)
+      #   resolved  — fixed and verified at every hop (see propagation)
+      #   wontfix   — closed without a fix: mis-raised, the skill not the doc
+      #               (a lesson, cross-linked), or an ACCEPTED DEVIANCE — put
+      #               `expected_count: N` in the summary and doctor.py reports
+      #               that check as "accepted (N, unchanged)" until the count moves
+      #   deferred  — real, but parked on purpose: requires resolution.mode none
+      #               + resolution.reason. On a TASKS artifact the matching task
+      #               goes in the top-level `deferrals` list (CLAUDE.md section
+      #               6), never a WRN prose note
+      #   duplicate — same defect as duplicate_of
+    duplicate_of: null                     # OPTIONAL — FND-NNN, required when
+                                           #   status == duplicate
+
+    resolution: null                       # REQUIRED key; null while open.
+      # When set (status resolved | wontfix | deferred, or triaged + re-invoke):
+      #   by: sdlc-repair                  # who resolved it
+      #   at: <ISO-8601 UTC>
+      #   located_stage: arch              # where the defect ACTUALLY lived.
+      #                                    #   NEVER `code` (v2: error) — generated
+      #                                    #   code is an output; a walk that ends
+      #                                    #   there was mis-raised -> wontfix.
+      #                                    #   `brief` when the walk ends OUTSIDE the
+      #                                    #   pipeline, at an upstream brief written by
+      #                                    #   no skill: the artifact that consumed it is
+      #                                    #   then right about a source that was wrong.
+      #                                    #   Briefs carry no metadata.<name>_version, so
+      #                                    #   the surgical version bump (bump_artifact.py)
+      #                                    #   does not apply — edit the brief, then
+      #                                    #   propagate into the artifacts that read it,
+      #                                    #   and list every one in artifacts_touched.
+      #   mode: surgical | additive | re-invoke | none    # how it was fixed.
+      #                                    #   additive = the set of downstream items
+      #                                    #   grew and repair authored the new items
+      #                                    #   itself (criterion: repair SKILL.md
+      #                                    #   Phase 4); downstream_rerun is then []
+      #                                    #   and at least one hop is `downstream`
+      #   reason: <one line>               # wontfix / deferred: why (REQUIRED for
+      #                                    #   deferred)
+      #   artifacts_touched:               # every file edited, in edit order.
+      #     - docs/ARCH__aicf-cli.yaml     #   v2: every entry starts with docs/
+      #     - docs/TEST-STRATEGY__aicf-cli.yaml
+      #   downstream_rerun:                # skills the user must re-invoke, in
+      #     - "/sdlc:test aicf-cli --reconcile"   # pipeline order (test BEFORE task
+      #     - "/sdlc:task aicf-cli --reconcile"   # when work_units were minted).
+      #                                    #   v2: REQUIRED non-empty when mode is
+      #                                    #   re-invoke. Name the container on the
+      #                                    #   sharded skills (arch/test/task): a
+      #                                    #   bare `--reconcile` maps to the system
+      #                                    #   file only.
+      #   handoff:                         # OPTIONAL, re-invoke only — what the walk
+      #     - artifact: docs/TEST-STRATEGY__aicf-cli.yaml   # concluded, per item, for
+      #       key: aicf-cli/emit/render    #   the re-invocation it owes. `artifact`
+      #       note: "render gained a       #   is a file an owed command rewrites;
+      #         --json branch; it needs a  #   `key` the item as `docs_index.py
+      #         unit TST covering FR-014"  #   --drift` prints it (null = the whole
+      #                                    #   file). The stage's --reconcile reads it
+      #                                    #   through `findings.py list --owed-by`
+      #                                    #   and offers the note as that item's
+      #                                    #   position-1 proposal — a candidate the
+      #                                    #   user confirms, never a silent write.
+      #                                    #   The reason for the change, carried on
+      #                                    #   disk to a fresh session. Checked as
+      #                                    #   WARNINGS only (shape, a non-re-invoke
+      #                                    #   mode, a file nothing owes).
+      #       basis: measured              #   REQUIRED per note (warns when absent):
+      #                                    #   measured = read from the artifacts the
+      #                                    #   note names (a siting the caller's own
+      #                                    #   declared order confirms); inferred = an
+      #                                    #   analogy or a guess the reconcile run
+      #                                    #   verifies against the cited artifact
+      #                                    #   BEFORE it writes. One register per note,
+      #                                    #   so a cold session can tell which is
+      #                                    #   which (ledger IMP-082, aicf LSN-064).
+      #   stale_tasks: ["aicf-cli/TSK-118"]    # tasks whose fingerprint changed —
+      #                                    #   /sdlc:code offers these for regeneration
+      #                                    #   (from topo_order.py: stale + --affected)
+      #   fields_changed:                  # OPTIONAL — dotted paths edited at the source
+      #     - components[0].work_units[3].output
+      #   symbols_changed:                 # OPTIONAL — qualified symbols whose content
+      #     - aicf-cli/items-controller/createItem   # changed (what --refs was run on)
+      #   propagation:                     # OPTIONAL — one hop per place the fix had
+      #     - hop: source                  #   to land: source | embed | downstream | code
+      #                                    #   source     = the artifact whose content was wrong
+      #                                    #   embed      = a write-time copy re-sliced from it
+      #                                    #   downstream = another artifact the fix propagated
+      #                                    #                into (a TST acceptance, an entity
+      #                                    #                trace, a UX shard) - neither source
+      #                                    #                nor embed; before this value existed
+      #                                    #                such hops flattened to `source`
+      #                                    #   code       = generated source the build re-made
+      #       target: docs/ARCH__aicf-cli.yaml
+      #       verified_at: <ISO-8601 UTC>  #   when it was confirmed on disk
+      #       how: "arch/validate_schema exit 0"
+      #     - hop: embed
+      #       target: docs/TASKS__aicf-cli.json#TSK-118.interface_contract
+      #       verified_at: <ISO-8601 UTC>
+      #       how: "reslice_embeds.py --check exit 0"
+      #                                    #   v2: status resolved requires EVERY
+      #                                    #   listed hop to carry verified_at; an
+      #                                    #   absent list is allowed (the FND-016 ->
+      #                                    #   023 -> 034 rule: a fix that stopped one
+      #                                    #   hop short is still triaged)
+      #   summary: <one line>              # what changed and why
