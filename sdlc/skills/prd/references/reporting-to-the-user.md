@@ -167,6 +167,17 @@ When you must show many, show the grouped line and offer the detail:
 > "37 work units have no test. Want the list, or should I open `/sdlc:test
 > aicf-cli` and work through them?"
 
+The cap is for a **verdict a person skims** — a grouped finding whose remedy
+is a command that handles the whole class, or a re-run that shows the next
+ones. It is never for an **operand**: a list whose members a later step must
+act on one by one and cannot obtain any other way — the item delta
+`docs_index.py --drift` prints for a reconcile, the residue the user picks the
+new items from, the candidates an ambiguous symbol must be qualified against.
+Those print whole, however long; the reconcile form says "verbatim" and means
+it. Two ids hidden behind a `(+2 more)` once needed edits nobody made (ledger
+IMP-097). The scripts' shared `join_ids(ids, limit)` helper takes
+`len(ids)` at such a site.
+
 ## Bad and good, from the real corpus
 
 **Before**

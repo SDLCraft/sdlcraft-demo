@@ -7,6 +7,13 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.9 (2026-09-15) — Phase 7 stamps provenance through `docs_index.py --stamp` over every file read, `UX__<surface>.yaml` shards included, instead of a hand-written sha-only snapshot for PRD and UX
+
+Ledger IMP-102 (aicf LSN-083, the arch lesson's sibling sweep): the write bullet asked for a
+hand-written `{file, session_id, last_updated, sha256}` snapshot - a sha-only stamp with no
+items map, so every `--drift` on DESIGN.yaml fell back to git or the residue, and the UX__
+shards this skill reads were never recorded. Same fix as arch 1.17.
+
 ## 1.8 (2026-09-11) — `/sdlc:design --reconcile`: the upstream-change review alone, no interview; a finding waiting on this run is context, not an input-adequacy question
 
 New `Invocation dispatch` section (the skill took no arguments before).

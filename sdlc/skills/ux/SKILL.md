@@ -496,14 +496,15 @@ Writer responsibilities for the new ID conventions:
   disk), prepend one entry describing the material change, format
   `"<version> (<YYYY-MM-DD>): <one-line summary>"`. Append-only — never
   rewrite existing entries.
-- `metadata.upstream_provenance`: (re)write the snapshot of every upstream
-  artifact consumed this run — for ux, one entry for `docs/PRD.yaml`
-  (`{file, session_id, last_updated, sha256}`; `sha256` from
-  `docs/INDEX.yaml.generated_from`, or `docs_index.py --hash docs/PRD.yaml`,
-  else the text-level hash
-  `sha256(read_text(encoding='utf-8').encode()).hexdigest()[:16]` — never raw
-  bytes). Replace-on-write (not append-only), so it always reflects the
-  latest write. See CLAUDE.md §7.
+- `metadata.upstream_provenance`: stamped by the helper after the write —
+  `python .claude/sdlc/docs_index.py --stamp docs/UX.yaml --upstream
+  docs/PRD.yaml` (the plugin's copy, `"${CLAUDE_SKILL_DIR}/../setup/docs_index.py"
+  --docs-dir docs`, when the project has none; `--reconcile` step 7 already
+  does this). It writes `{file, session_id, last_updated, sha256, items}`; the
+  `items` map is what lets the next `--drift` name the delta item by item, and
+  a hand-written `{file, sha256}` entry is a sha-only stamp `--stale` warns
+  about (ledger IMP-102). Replace-on-write, so it always reflects the latest
+  write. See CLAUDE.md §7.
 
 Then run:
 
@@ -793,4 +794,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.14"
+skill_version: "1.15"

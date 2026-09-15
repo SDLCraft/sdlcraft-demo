@@ -7,6 +7,21 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.12 (2026-09-15) — Surgical step 5 stamps only a pair the Phase 2 snapshot showed fresh; a pre-existing stale pair is named on the close card and routed to its own reconcile, never stamped; `findings.py list --id` reads a finding a reconcile's delta cites
+
+Ledger IMP-099 (aicf LSN-080): a stamp claims that every delta between the recorded upstream
+and the current one was reviewed, and a repair reviews one finding's change. Step 5 (IMP-088)
+said to stamp every hand-reconciled artifact and Phase 5 called a leftover `--stale` row a
+missed stamp, so a pair that already owed an unreviewed reconcile was either forged or
+mislabelled. Phase 2's `doctor.py --provenance --json` is now named the pre-run stale
+snapshot; step 5 stamps only pairs absent from it and names a listed pair on the close card
+with its owed reconcile in `Next:`; step 7 and the Phase 5 line read such a row as that
+reconcile. `forward-propagation.md` states the principle once ("What a stamp claims").
+Ledger IMP-101 (aicf LSN-082): `findings.py list --id FND-NNN` (repeatable) - what a
+`--reconcile` run reads when an upstream changelog line cites a finding
+(`_smoke/findings_selftest.py`). Regression for IMP-099: eval case 14
+(`fixtures/case14_prestale_pair`).
+
 ## 1.11 (2026-09-12) — `doctor.py --artifact` runs one validator with the accepted-deviance registry applied; handoff notes carry `basis` (measured | inferred); the surgical sequence stamps hand-reconciled artifacts upstream-first BEFORE the re-slice and sweeps the corpus for a retired token
 
 Ledger IMP-081 (aicf LSN-062 + LSN-063): the IMP-052 accepted-deviance clause

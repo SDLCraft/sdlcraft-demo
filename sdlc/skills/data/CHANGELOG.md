@@ -7,6 +7,14 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.12 (2026-09-15) — Phase 7 stamps provenance through `docs_index.py --stamp` over every file read, `UX__<surface>.yaml` shards included, instead of a hand-written sha-only entry for the two canonicals
+
+Ledger IMP-102 (aicf LSN-083, the arch lesson's sibling sweep): the write paragraph told the
+agent to hand-write `{file, session_id, last_updated, sha256}` for `PRD.yaml` and `UX.yaml`
+- a sha-only stamp with no items map, so every `--drift` on DATA-MODEL fell back to git or the
+residue, and the UX__ shards this skill reads were never recorded. Same fix as arch 1.17;
+`--stale` now warns about the sha-only entries a project still carries.
+
 ## 1.11 (2026-09-12) — DATA-MODEL entities gain `one_of` + `discriminator` (a discriminated union): a union parent is exempt from `fields`/`primary_key`, every variant must exist and carry the discriminator (blocking from 3.0), and one interview question makes it reachable
 
 Ledger IMP-080 (aicf LSN-061): `fields` was required on every entity in every

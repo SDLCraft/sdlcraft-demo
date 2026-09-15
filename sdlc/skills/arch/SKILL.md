@@ -779,13 +779,31 @@ Write or merge the active mode's output yaml:
   not by hand (see `references/merge-validate.md` → "Derive component
   traces from unit touches").
 
-When writing, (re)write the active output's `metadata.upstream_provenance`:
-one entry per upstream artifact consumed this run (`docs/PRD.yaml`,
-`docs/UX.yaml`, `docs/DATA-MODEL.yaml`, and `docs/API.yaml` when present), each
-`{file, session_id, last_updated, sha256}` (`sha256` from
-`docs/INDEX.yaml.generated_from`, else the `docs_index.py --hash` text-level hash (sha256 of the file read as UTF-8 text, first 16 hex — never raw bytes)). Replace-on-write
-(not append-only). System mode writes it on `ARCH.yaml`; container mode on the
-`ARCH__<container>.yaml` it just authored. See CLAUDE.md §7.
+After the file is on disk, stamp its `metadata.upstream_provenance` with the
+helper — one `--upstream` per **file read this run, shards included**:
+
+```bash
+python .claude/sdlc/docs_index.py --stamp docs/ARCH__<container>.yaml \
+    --upstream docs/PRD.yaml --upstream docs/DATA-MODEL.yaml \
+    --upstream docs/UX.yaml --upstream docs/UX__<surface>.yaml … \
+    --upstream docs/API.yaml --upstream docs/API__<resource>.yaml …
+```
+
+(system mode: `--stamp docs/ARCH.yaml --upstream docs/PRD.yaml …`, naming
+every shard the system pass read). Container mode names each
+`UX__<surface>.yaml` in the container's `owns_ux_surfaces` and each
+`API__<resource>.yaml` in its `owns_api_resources`. Provenance is
+file-granular — `--drift` and `--stale` compare the files an artifact
+*records* — so a shard edit that leaves `UX.yaml` byte-identical is invisible
+unless the shard itself is recorded (aicf LSN-083: five moved surface shards
+went unreported on a container reconcile; the validator now warns on an owned
+shard the stamp omits). The helper writes `{file, session_id, last_updated,
+sha256, items}`, and the `items` map is what lets the next `--drift` name the
+delta item by item instead of recovering it from git or falling back to the
+residue — a hand-written `{file, sha256}` entry is a sha-only stamp `--stale`
+warns about. Replace-on-write. Helper absent → the plugin's copy,
+`python "${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs --stamp …`;
+it writes only the artifact it is given. See CLAUDE.md §7.
 
 Then run:
 
@@ -1352,4 +1370,4 @@ The architecture interview can be long. Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.16"
+skill_version: "1.17"

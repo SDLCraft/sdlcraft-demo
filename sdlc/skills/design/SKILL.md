@@ -432,8 +432,15 @@ Writer responsibilities:
   (trace-or-defer, CLAUDE.md §6).
 - `metadata.changelog`: in update mode, prepend one
   `"<version> (<YYYY-MM-DD>): <summary>"` line (append-only).
-- `metadata.upstream_provenance`: (re)write a snapshot for `docs/PRD.yaml` and
-  `docs/UX.yaml` (`{file, session_id, last_updated, sha256}`).
+- `metadata.upstream_provenance`: stamped by the helper after the write —
+  `python .claude/sdlc/docs_index.py --stamp docs/DESIGN.yaml --upstream
+  docs/PRD.yaml --upstream docs/UX.yaml --upstream docs/UX__<surface>.yaml …`,
+  one `--upstream` per file read this run, shards included (the plugin's
+  copy, `"${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs`, when
+  the project has none). The `items` map it records is what lets the next
+  `--drift` name the delta item by item; a hand-written `{file, sha256}` entry
+  is a sha-only stamp `--stale` warns about, and a shard read but not recorded
+  is invisible to every drift check (ledger IMP-102). See CLAUDE.md §7.
 
 Then run:
 ```bash
@@ -657,4 +664,4 @@ Design is a creative interview — keep it concrete and energetic:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.8"
+skill_version: "1.9"

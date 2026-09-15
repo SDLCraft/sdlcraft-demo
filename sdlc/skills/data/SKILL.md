@@ -637,11 +637,24 @@ deletion confirmation), type discipline when writing nested entity blocks,
 and the exit-code recovery flow → see `references/merge-validate.md`.
 
 When writing the file: inline YAML comments on top-level keys, updated
-`metadata.last_updated` and `metadata.session_id`, and a (re)written
-`metadata.upstream_provenance` snapshot — one entry per upstream consumed
-(`docs/PRD.yaml`, `docs/UX.yaml`), each `{file, session_id, last_updated,
-sha256}` (`sha256` from `docs/INDEX.yaml.generated_from`, else
-the `docs_index.py --hash` text-level hash (sha256 of the file read as UTF-8 text, first 16 hex — never raw bytes)). Replace-on-write, not append-only. See CLAUDE.md §7.
+`metadata.last_updated` and `metadata.session_id`. Then stamp
+`metadata.upstream_provenance` with the helper — one `--upstream` per file
+read this run, `UX__<surface>.yaml` shards included:
+
+```bash
+python .claude/sdlc/docs_index.py --stamp docs/DATA-MODEL.yaml \
+    --upstream docs/PRD.yaml --upstream docs/UX.yaml --upstream docs/UX__<surface>.yaml …
+```
+
+It writes `{file, session_id, last_updated, sha256, items}` per upstream; the
+`items` map is what lets the next `--drift` name the delta item by item. A
+hand-written `{file, sha256}` entry is a sha-only stamp: `--drift` can only
+recover its old side from git or fall back to the residue, and `--stale` warns
+about it. Provenance is file-granular, so a shard read but not recorded is
+invisible to every drift check (ledger IMP-102). Helper absent → the plugin's
+copy, `python "${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs
+--stamp …` (it writes only the artifact it is given). Replace-on-write. See
+CLAUDE.md §7.
 
 Set `metadata.status`:
 
@@ -929,4 +942,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.11"
+skill_version: "1.12"

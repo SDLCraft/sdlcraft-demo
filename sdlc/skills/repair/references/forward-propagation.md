@@ -131,6 +131,26 @@ Nothing in this sequence is a hand edit to a task JSON.
    on artifacts the run had just reconciled, then a delta review over
    nothing). A shard that consumed a hand-reconciled upstream the re-slice
    does not touch gets its own `--stamp` after step 6.
+
+   **What a stamp claims.** `upstream_provenance` records "this artifact was
+   reviewed against upstream@hash" — every delta between the recorded hash
+   and the current one, not only the one this run made. A repair reviews one
+   finding's change, so it may stamp a pair only when that change IS the
+   whole delta: the pair was fresh before the run's first write. Phase 2's
+   `doctor.py --provenance --json` (`.claude/skills-state/sdlc-repair.doctor.json`,
+   key `provenance.stale`) is that pre-run snapshot. A pair it lists already
+   owed an older, unreviewed delta to `/sdlc:<skill> … --reconcile`: stamping
+   it now forges that review, and leaving it is not a missed stamp. Leave the
+   row, name the pair on the close card (`Attention: pre-existing: docs/X vs
+   docs/Y, owed to /sdlc:task <cid> --reconcile`) and route the reconcile in
+   `Next:`. The reconcile skills stamp freely because they review the whole
+   `--drift` delta; that is the difference (ledger IMP-099, aicf LSN-080: a
+   `ci_integration` fix landed in a TASKS.json that already owed a
+   TEST-STRATEGY reconcile — following the step would have forged it,
+   skipping it drew the "missed stamp" label). The re-slice of step 6 refreshes
+   a shard's stamp the same way, so for such a pair it takes `--hold-stamp
+   docs/<upstream>`: the embed moves (a mechanical copy is not a review), the
+   stamp stays, the owed reconcile still sees the whole delta.
 6. **Re-slice every embed copied from the changed symbol — LAST.** One call,
    never a hand edit (demo edition, no `${CLAUDE_SKILL_DIR}/../task/SKILL.md`:
    skip this step and step 8 and say so — SKILL.md Phase 4). Last, because the
@@ -295,7 +315,9 @@ python "${CLAUDE_SKILL_DIR}/../task/crosscheck_artifacts.py" --docs-dir docs
 python .claude/sdlc/docs_index.py                 # regenerate the index - the PROJECT's copy only;
                                                   # absent -> skip and say so, never the plugin's copy (SKILL.md Phase 5)
 python .claude/sdlc/docs_index.py --check         # dangling-reference gate
-python .claude/sdlc/docs_index.py --stale         # must list nothing this run reconciled - a row here is a missed stamp (step 5)
+python .claude/sdlc/docs_index.py --stale         # must list nothing this run reconciled - a row here is a missed stamp (step 5),
+                                                  # unless the Phase 2 snapshot already held it: a pre-existing pair, owed to
+                                                  # its own --reconcile - named on the close card, never stamped
 ```
 
 The `test` and `task` lines run only where those skills ship (demo edition:

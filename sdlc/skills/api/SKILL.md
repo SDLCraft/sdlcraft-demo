@@ -496,13 +496,26 @@ Write or merge `docs/API.yaml` and write every
 `docs/API__<resource>.yaml` in one consistent batch (so that the
 resource inventory and the per-resource files always agree).
 
-When writing, (re)write `metadata.upstream_provenance`: one entry per upstream
-artifact consumed this run (`docs/PRD.yaml`, `docs/UX.yaml`,
-`docs/DATA-MODEL.yaml`), each `{file, session_id, last_updated, sha256}` with
-`sha256` from `docs/INDEX.yaml.generated_from[<file>]`, else
-`python .claude/sdlc/docs_index.py --hash <file>`, else sha256 over the
-file's utf-8 text (first 16 hex — the same value `--hash` prints).
-Replace-on-write (not append-only). See CLAUDE.md §7.
+After the batch is on disk, stamp `metadata.upstream_provenance` with the
+helper — one `--upstream` per file read this run, `UX__<surface>.yaml` shards
+included (and each `docs/API__<resource>.yaml` this run wrote, the same way,
+against the files its resource reads):
+
+```bash
+python .claude/sdlc/docs_index.py --stamp docs/API.yaml \
+    --upstream docs/PRD.yaml --upstream docs/UX.yaml --upstream docs/UX__<surface>.yaml … \
+    --upstream docs/DATA-MODEL.yaml
+```
+
+It writes `{file, session_id, last_updated, sha256, items}` per upstream; the
+`items` map is what lets the next `--drift` name the delta item by item. A
+hand-written `{file, sha256}` entry is a sha-only stamp: `--drift` can only
+recover its old side from git or fall back to the residue, and `--stale` warns
+about it. Provenance is file-granular, so a shard read but not recorded is
+invisible to every drift check (ledger IMP-102). Helper absent → the plugin's
+copy, `python "${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs
+--stamp …` (it writes only the artifact it is given). Replace-on-write. See
+CLAUDE.md §7.
 
 Deferrals the user explicitly chose (a PRD FR that needs no endpoint, a UX
 screen no endpoint serves) are written to the top-level
@@ -822,4 +835,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.9"
+skill_version: "1.10"

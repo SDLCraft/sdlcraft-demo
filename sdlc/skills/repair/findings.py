@@ -675,6 +675,9 @@ def cmd_list(args) -> int:
     if args.owed_by:
         return _print_owed(data, args.owed_by, args.as_json)
     rows = _filter(data.get("findings") or [], args)
+    wanted = {str(i).strip().upper() for i in (getattr(args, "ids", None) or [])}
+    if wanted:
+        rows = [r for r in rows if str(r.get("fnd_id") or "").upper() in wanted]
     if args.as_json:
         print(json.dumps(rows, indent=2, ensure_ascii=False, default=str))
         return 0
@@ -853,6 +856,11 @@ def main(argv=None) -> int:
                    help="Only the open re-invoke findings that still owe this docs/ file, with the "
                         "handoff notes repair left for it - what a --reconcile run reads. "
                         "Ignores the other filters.")
+    p.add_argument("--id", action="append", default=None, metavar="FND-NNN", dest="ids",
+                   help="Only these finding ids (repeatable) - what a --reconcile run reads when "
+                        "an upstream changelog line the delta quotes cites a finding: a resolved "
+                        "finding's resolution is that item's decision, offered first (IMP-101). "
+                        "Combines with the other filters.")
     p.add_argument("--json", action="store_true", dest="as_json")
     _add_global_opts(p, sub=True)
     p.set_defaults(func=cmd_list)

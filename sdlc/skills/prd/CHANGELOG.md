@@ -7,6 +7,16 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.13 (2026-09-15) — `reporting-to-the-user.md`: a capped sample is for a verdict a person skims; an operand list a later step consumes is printed whole
+
+Ledger IMP-097 (aicf LSN-078): the canonical reporting block every script copies caps
+grouped ids at 12 "because a line nobody finishes reading has told the user nothing", and
+nothing said when that cap is wrong. It is wrong for an operand - the item delta
+`docs_index.py --drift` prints for a reconcile, the residue the user picks from, the
+candidates an ambiguous symbol is qualified against - and two ids hidden behind a
+`(+2 more)` needed edits nobody made. The "Volume" section now states the distinction;
+`setup` 1.14 applies it.
+
 ## 1.12 (2026-09-11) — `reporting-to-the-user.md` rule 6 covers the demo (free) edition: a successor that does not ship in this build is named, never printed as a command, with the full edition's `homepage` as the pointer
 
 The never-route rule now checks `${CLAUDE_SKILL_DIR}/../<name>/SKILL.md` - the

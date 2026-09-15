@@ -1662,9 +1662,11 @@ def _build_edges(
                 if target != container:
                     add_edge(target, container)
             elif candidates:
+                # every candidate: the agent picks one of them, so a sample would hide
+                # the right choice (IMP-097)
                 ambiguous.append(
                     f"'{value}' (in {key}) at {filename}:{lineno} names {len(candidates)} work units "
-                    f"({join_ids(candidates, 4)}) - qualify it as <container>/<component>/<unit>"
+                    f"({join_ids(candidates, len(candidates))}) - qualify it as <container>/<component>/<unit>"
                 )
             else:
                 dangling_warnings.append(Reference(value, filename, lineno, container, False, key))
@@ -2751,15 +2753,41 @@ def _stale_rows(docs_dir: Path) -> "tuple[list[dict], list[str]]":
     return rows, unstamped
 
 
+def _sha_only_pairs(docs_dir: Path) -> "list[tuple[str, str]]":
+    """(artifact, upstream) for every provenance entry that records a sha256
+    but no ``items`` map - a stamp written by hand, not by ``--stamp``. A
+    ``--drift`` on such a pair can only recover the old side from git or fall
+    back to the residue; the map recorded at the next ``--stamp`` makes the
+    delta exact (ledger IMP-102: five consumer skills hand-wrote sha-only
+    stamps for as long as the helper existed)."""
+    pairs: list[tuple[str, str]] = []
+    for path in sorted(list(docs_dir.glob("*.yaml")) + list(docs_dir.glob("*.json"))):
+        name = path.name
+        if not (_is_canonical(name) or _is_shard(name)):
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for e in _parse_provenance(lines, name.endswith(".json")):
+            up = Path(str(e.get("file") or "")).name
+            if up and e.get("sha256") and not isinstance(e.get("items"), dict) \
+                    and (docs_dir / up).is_file():
+                pairs.append((name, up))
+    return pairs
+
+
 def stale_report(docs_dir: Path, as_json: bool = False) -> int:
     """``--stale``: every artifact whose recorded upstreams moved, in the order
     to reconcile them. What a `--reconcile` run prints its ``Next:`` from, so
     the chain after a repair routes itself. Returns the exit code."""
     rows, unstamped = _stale_rows(docs_dir)
+    sha_only = _sha_only_pairs(docs_dir)
     if as_json:
         print(json.dumps({
             "stale": rows,
             "unstamped": [f"docs/{n}" for n in unstamped],
+            "sha_only": [f"docs/{a} -> docs/{u}" for a, u in sha_only],
             "next": rows[0]["command"] if rows else None,
         }, indent=2))
         return 1 if rows else 0
@@ -2769,6 +2797,16 @@ def stale_report(docs_dir: Path, as_json: bool = False) -> int:
             f"{len(unstamped)} artifact(s) record no upstream_provenance, so whether they are "
             f"stale cannot be told - the next run of the skill that owns each records one",
             [f"docs/{n}" for n in unstamped],
+        ))
+    if sha_only:
+        warnings.append((
+            f"{len(sha_only)} provenance entr(y/ies) are sha-only stamps (no items map), so a "
+            f"--drift on them can only recover the old upstream from git or fall back to the "
+            f"residue. The next write of each artifact by the skill that owns it records the "
+            f"map (its Phase 7 stamps through --stamp since 0.9.13); to have it sooner, "
+            f"`docs_index.py --stamp docs/<artifact> --upstream docs/<upstream>` (one "
+            f"--upstream per file read)",
+            [f"docs/{a} -> docs/{u}" for a, u in sha_only],
         ))
     if not rows:
         print("[OK] every artifact that records its upstreams is built against their current state.")
@@ -2871,20 +2909,25 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
     for bucket, keys in (("added", added_keys), ("removed", removed_keys), ("modified", modified_keys)):
         for k in sorted(keys, key=_id_sort_key):
             by_fam.setdefault(_item_family(k, index), {}).setdefault(bucket, []).append(k)
+    # These lists are the DELTA a --reconcile run takes verbatim, so they are
+    # printed whole. A capped sample is for a verdict a person skims, where the
+    # remedy handles the class or a re-run shows the rest; an operand a later
+    # step consumes item by item is never capped (reporting-to-the-user.md,
+    # ledger IMP-097: two hidden ids under "(+2 more)" needed edits).
     for family in sorted(by_fam):
         bits = []
         buckets = by_fam[family]
         if buckets.get("added"):
             ks = buckets["added"]
-            bits.append(f"{len(ks)} added upstream since this file was written ({join_ids(ks, 8)})")
+            bits.append(f"{len(ks)} added upstream since this file was written ({join_ids(ks, len(ks))})")
         if buckets.get("removed"):
             ks = buckets["removed"]
             stale = [k for k in ks if k in referenced or k.rsplit('/', 1)[-1] in referenced]
             note = f", {len(stale)} of them referenced here" if stale else ""
-            bits.append(f"{len(ks)} removed upstream ({join_ids(ks, 8)}){note}")
+            bits.append(f"{len(ks)} removed upstream ({join_ids(ks, len(ks))}){note}")
         if buckets.get("modified"):
             ks = buckets["modified"]
-            bits.append(f"{len(ks)} changed in body ({join_ids(ks, 8)})")
+            bits.append(f"{len(ks)} changed in body ({join_ids(ks, len(ks))})")
         out.append(f"{family}: " + "; ".join(bits))
     if not (added_keys or removed_keys or modified_keys):
         out.append(
@@ -3031,9 +3074,11 @@ def drift_report(docs_dir: Path, artifact: str) -> int:
                 bits = []
                 if added and len(shared) * 2 >= len(defs):
                     # This artifact covers most of the family: the rest is new or dropped.
+                    # The user picks the new ones out of this residue, so it is printed
+                    # whole - an operand, not a sample (IMP-097).
                     bits.append(
                         f"{len(added)} defined upstream that this file neither references nor defers "
-                        f"({join_ids(added, 8)}) - new since it was written, or never covered: "
+                        f"({join_ids(added, len(added))}) - new since it was written, or never covered: "
                         f"no item snapshot was recorded, so the two cannot be told apart"
                     )
                 elif added:
@@ -3043,7 +3088,7 @@ def drift_report(docs_dir: Path, artifact: str) -> int:
                         f"(a subset by design - the {len(added)} others are not listed)"
                     )
                 if removed:
-                    bits.append(f"{len(removed)} referenced here but no longer defined ({join_ids(removed, 8)})")
+                    bits.append(f"{len(removed)} referenced here but no longer defined ({join_ids(removed, len(removed))})")
                 if deferred_here:
                     bits.append(f"{len(deferred_here)} deferred here, not counted")
                 details.append(f"{family}: " + "; ".join(bits))

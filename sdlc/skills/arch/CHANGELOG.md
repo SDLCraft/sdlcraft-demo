@@ -7,6 +7,19 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.17 (2026-09-15) — Phase 7 stamps every file read through `docs_index.py --stamp`, owned UX__/API__ shards included, and the validator warns on an owned shard the stamp omits
+
+Ledger IMP-102 (aicf LSN-083): Phase 7 enumerated four canonical files for a hand-written
+`{file, session_id, last_updated, sha256}` snapshot, so a container built from
+`UX__<surface>.yaml` / `API__<resource>.yaml` shards recorded neither and a shard edit that
+left `UX.yaml` byte-identical was invisible to `--drift`, `--stale` and `<container>
+--reconcile` - five moved surface shards went unreported on one reconcile. Phase 7 now uses
+the helper with one `--upstream` per file read (shards from `owns_ux_surfaces` /
+`owns_api_resources`), which also records the items map a hand-written entry never had.
+`check_shard_provenance` (warn-level, no floor) names a complete container shard that owns a
+surface or resource whose shard file its provenance omits, with the stamp that records it.
+Regression: `_smoke/provenance_selftest.py` on fixture `39_shard_provenance`.
+
 ## 1.16 (2026-09-12) — Phase 2 honours an accepted upstream deviance (the IMP-052 clause, consulted through `doctor.py --artifact`) instead of stopping on any non-zero upstream validator
 
 Ledger IMP-081 (aicf LSN-062, a blocker): `arch` never received the clause

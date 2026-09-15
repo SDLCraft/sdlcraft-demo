@@ -306,6 +306,28 @@ chooses one of:
   prompt has ≤3 options; where a prompt is already at `AskUserQuestion`'s
   4-option limit, fold it into the free-text guidance instead.
 
+**A delegation is not an assignment.** An upstream item can hand a decision
+to THIS artifact instead of contradicting or assigning it — "the exact flow
+is left to UX", "reserved until DATA-MODEL describes it", "the API decides
+the shape". Such an item does not say the element should exist; it says this
+artifact decides whether it should. Route it exactly like an *added* item:
+the skill's discovery step first (the "Per-skill specifics" table below —
+consumers via `docs_index.py --refs` or a grep over `docs/`, the predecessor
+version of this file, what job the element would do). A candidate counts only
+when something consumes it — an FR, a WKF, an entity or another item of this
+artifact refers to it — or this artifact can state the job it would do; a
+name alone ("a flow", "a discriminator") is not a candidate. Position 1 is the
+candidate discovery names, or, when it names none, **the delegation is void
+— record a finding** (`finding_notes`, drained in Phase 8) so repair retires
+the delegating sentence, and author nothing. `defer` stays. "The upstream is
+wrong" is not offered for a delegation: the upstream is not wrong, it
+deferred, and that option beside define/remove is incoherent. (aicf LSN-081:
+a PRD sentence reserved `EdgeDef.discriminator` "until DATA-MODEL describes
+it"; the card offered define / leave / upstream-wrong, the necessity check
+found a symmetry copy with no consumer, and the right outcome was to remove
+it, not to describe it — ledger IMP-100.) Record the choice as
+`delegation_void` in the state slot.
+
 Persist each decision to the state file so an EXIT-then-resume does not
 re-prompt already-resolved items. Honour the standard caps and the
 anti-padding rule — surface only real deltas, never manufacture them.
@@ -377,6 +399,22 @@ The steps, in order:
    cites before offering it, and say on the card what you verified. A note with
    `key: null` frames the whole file. This is how the reasoning of the repair
    session reaches a fresh one: on disk, not in a transcript.
+   **A finding the delta cites is a decision, not a question.** Besides the
+   owed rows, collect every `FND-NNN` that the `--drift` report's `why` lines
+   (the upstream's changelog since the stamp — a stamp with neither a version
+   nor a date quotes none: read the upstream's `metadata.changelog` top
+   entries yourself) and the changed items' text cite, and read them: `python
+   "${CLAUDE_SKILL_DIR}/../repair/findings.py" list --id FND-NNN`
+   (repeatable; the queue file when the helper is absent).
+   A **resolved** finding's `resolution` is the decision that moved the item,
+   so its card leads with it — "decided in FND-104 (resolved <date>,
+   surgical): <fix>" — as the position-1 recommendation with basis
+   `measured` (a recorded resolution is a fact, not an analogy), and never
+   re-offers "record a finding" for that item. An open or triaged finding is
+   context for the card, not a gate: it was not owed to this file. (aicf
+   LSN-082: a DATA-MODEL 3.1 change whose changelog cited FND-104 was carded
+   as an open incorporate / ignore / finding menu one session after the
+   repair that decided it — ledger IMP-101.)
 4. **One confirmation card per class of change**, never one per item (Step 4
    above holds the options: incorporate / ignore + warn / defer / the upstream
    is wrong):
@@ -388,7 +426,11 @@ The steps, in order:
      nothing here depends on is not this run's business. Per item, two
      questions, batched across items: *does the change contradict what this
      file says?* (→ correct it here) and *does it assign something this file
-     does not cover yet?* (→ an authoring card). Neither → refresh the text
+     does not cover yet?* (→ an authoring card — unless it *delegates* the
+     decision here: then the discovery step first, Step 4 above, and a
+     delegation it cannot substantiate is void and becomes a finding, never
+     an element). An item a cited finding already decided leads with that
+     resolution (step 3). Neither → refresh the text
      that quotes the upstream in place, with no question. `--drift` already
      leaves declaration-only edits (`touches_entities`, `status`) off the list.
 5. **Incorporate means a scoped drill, not the interview.** Each accepted
@@ -445,7 +487,7 @@ This is the canonical definition — skills mirror it, they do not redefine it:
 ```yaml
 delta_review:
   upstreams: []    # [{file, recorded_sha256, current_sha256}] — Step 2's verdicts
-  decisions: []    # [{key, choice: incorporate|ignore_warn|defer|upstream_wrong, at}]
+  decisions: []    # [{key, choice: incorporate|ignore_warn|defer|upstream_wrong|delegation_void, at}]
                    #   key = the id (FR-014) or natural key (aicf-cli/emit/render)
   unresolved: []   # the queue still to review — what an EXIT-then-resume continues from
 reconcile_queue: []  # sharded skills only (arch keeps it per sub-session): the

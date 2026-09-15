@@ -7,6 +7,17 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.14 (2026-09-15) — `docs_index.py --drift` prints its item lists and the fallback residue whole (they are the delta a reconcile takes verbatim), `--check` names every ambiguity candidate, and `--stale` warns about sha-only stamps (no items map), naming the re-stamp
+
+Ledger IMP-097 (aicf LSN-078): the canonical reporting block's `join_ids(ids, 8)` capped
+the added / removed / changed-in-body lists the reconcile form says to take verbatim, and two
+hidden ids needed edits. The rule now lives in `reporting-to-the-user.md`: a capped sample is
+for a verdict a person skims, an operand a later step consumes is printed whole; the five
+operand sites pass `len(ids)`, the shared helper is untouched. Ledger IMP-102 (aicf LSN-083):
+`--stale` lists every provenance entry that records a sha256 but no items map (`sha_only` in
+`--stale --json`) - the hand-written stamps five consumer skills wrote until 0.9.13 - and names
+the `--stamp` that records the map. Regression: `_smoke/index_selftest.py` sections 13 and 14.
+
 ## 1.13 (2026-09-12) — `docs_index.py --drift` recovers a sha-only stamp's old upstream from git: the newest committed revision whose text hash equals the recorded sha256 yields the exact item delta ("recovered from git"); only an uncommitted stamp falls back to the reference residue
 
 Ledger IMP-083 (aicf LSN-065). Every recorded `sha256` is a text hash a git blob can

@@ -179,6 +179,12 @@ python "${CLAUDE_SKILL_DIR}/doctor.py" --docs-dir docs --emit-findings
 python "${CLAUDE_SKILL_DIR}/doctor.py" --docs-dir docs --provenance --json > .claude/skills-state/sdlc-repair.doctor.json
 ```
 
+The second is the **pre-run stale snapshot**: its `provenance.stale` lists
+every artifact/upstream pair that already owed a reconcile before this run
+wrote anything. Surgical step 5 stamps only pairs absent from it, and Phase 5
+reads a leftover `--stale` row that is in it as that owed reconcile, not as a
+missed stamp (ledger IMP-099).
+
 The first runs every skill validator against its canonical artifact, every
 `TASKS__*.json` shard, `crosscheck_artifacts.py`, and the docs-index dangling
 gate (the project's `.claude/sdlc/docs_index.py`, or the plugin's own copy -
@@ -349,15 +355,32 @@ walk cold, with no guarantee of the same reading (aicf LSN-019 / LSN-040).
      stamped file's own hash, and it must land BEFORE the re-slice, which
      stamps the shard against the upstream bytes it sees (the plugin's
      `"${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs` form when
-     the project has no copy; ledger IMP-088);
+     the project has no copy; ledger IMP-088). **Only for a pair that was
+     fresh before this run's first write.** A stamp claims that EVERY delta
+     between the recorded upstream and the current one was reviewed, and
+     this run reviewed one finding's change; a pair the Phase 2 snapshot
+     (`sdlc-repair.doctor.json`, `provenance.stale`) already listed owes an
+     older, unreviewed delta to `/sdlc:<skill> … --reconcile`, and stamping
+     it now forges that review. Leave the row, name the pair on the close
+     card's `Attention:` row as pre-existing, and route the owed reconcile in
+     `Next:` (ledger IMP-099, aicf LSN-080; `forward-propagation.md`, "What a
+     stamp claims");
   6. `python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --symbol <cid>/<component>/<work_unit>`
      (or `--tst TST-NNN` / `--entity <Name>` / `--operation <operation_id>`)
      — LAST, so the shard is stamped against the final upstream bytes;
      re-slices every embed copied from the changed symbol, bumps the shard,
      refreshes its `upstream_provenance`, prints the moved task ids with their
-     before/after fingerprints;
+     before/after fingerprints. **Add `--hold-stamp docs/<upstream>` for every
+     pair the Phase 2 snapshot listed**: the embed still moves (a mechanical
+     copy, not a review), but the shard's stamp for that upstream stays, so
+     the owed `--reconcile` still sees the whole delta — the re-slice's own
+     stamp refresh would otherwise forge it exactly as a hand `--stamp` would
+     (IMP-099). A pre-existing embed drift on such a pair is a baseline
+     failure for Phase 5, not this run's to clear;
   7. verify (Phase 5) — `reslice_embeds.py --check` green, the validators
-     bare, and `docs_index.py --stale` listing nothing this run reconciled;
+     bare, and `docs_index.py --stale` listing nothing this run reconciled —
+     a row the Phase 2 snapshot already held is the owed reconcile step 5
+     left alone, not a missed stamp;
   8. `python "${CLAUDE_SKILL_DIR}/../code/topo_order.py" --scope <cid> --state .claude/skills-state/sdlc-code.state.yaml`
      plus `--affected <FR-NNN…>` for a PRD change → `resolution.stale_tasks`
      (stale + affected, with the reason recorded).
@@ -477,7 +500,9 @@ python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --contain
 python "${CLAUDE_SKILL_DIR}/../task/crosscheck_artifacts.py" --docs-dir docs
 python .claude/sdlc/docs_index.py                 # regenerate the index - the PROJECT's copy only
 python .claude/sdlc/docs_index.py --check         # dangling-reference gate
-python .claude/sdlc/docs_index.py --stale         # must list nothing this run reconciled - a row here is a missed stamp
+python .claude/sdlc/docs_index.py --stale         # must list nothing this run reconciled - a row here is a missed stamp,
+                                                  # unless the Phase 2 snapshot already held it (a pre-existing pair,
+                                                  # owed to its own --reconcile: name it on the close card, never stamp it)
 ```
 
 The `test` and `task` lines run only where those skills ship; in the demo
@@ -689,4 +714,4 @@ context that codegen is trying to conserve.
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.11"
+skill_version: "1.12"

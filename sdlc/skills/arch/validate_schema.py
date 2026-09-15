@@ -3196,6 +3196,71 @@ def _current_upstream_hash(docs_dir: Path, rel_file: str) -> Optional[str]:
     return None
 
 
+def _shard_ids(docs_dir: Path, pattern: str, key: str) -> Dict[str, str]:
+    """{<id>: <shard file name>} over docs/<pattern>, read from each file's
+    `<key>` (surface_id for UX__*, resource_id for API__*)."""
+    out: Dict[str, str] = {}
+    for path in sorted(docs_dir.glob(pattern)):
+        try:
+            raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError):
+            continue
+        if isinstance(raw, dict) and raw.get(key):
+            out[str(raw[key]).strip()] = path.name
+    return out
+
+
+def check_shard_provenance(arch: Any, containers: Dict[str, Any], docs_dir: Path) -> List[str]:
+    """Warning-only (CLAUDE.md 7, ledger IMP-102 / aicf LSN-083). Provenance is
+    file-granular - `docs_index.py --drift` and `--stale` compare the files an
+    artifact RECORDS - and a container reads the UX__ / API__ shard of every
+    surface and resource it owns. A complete container shard that records
+    `UX.yaml` but not the `UX__<surface>.yaml` it owns is blind to any edit that
+    leaves `UX.yaml` byte-identical: five moved surface shards went unreported
+    on one project's reconcile. Names the unrecorded shard and the stamp that
+    records it. Never blocks."""
+    warns: List[str] = []
+    ux_files = _shard_ids(docs_dir, "UX__*.yaml", "surface_id")
+    api_files = _shard_ids(docs_dir, "API__*.yaml", "resource_id")
+    if not ux_files and not api_files:
+        return warns
+    rows = {str(getattr(c, "container_id", "")): c for c in (getattr(arch, "containers", None) or [])}
+    for name, shard in containers.items():
+        meta = getattr(shard, "metadata", None)
+        if meta is None or getattr(meta, "status", None) != "complete":
+            continue
+        entries = [e for e in (getattr(meta, "upstream_provenance", None) or []) if isinstance(e, dict)]
+        if not entries:
+            continue   # no provenance at all is check_provenance_staleness's row
+        recorded = {Path(str(e.get("file") or "")).name for e in entries}
+        cid = str(getattr(shard, "container_id", "") or "")
+        row = rows.get(cid)
+        if row is None:
+            continue
+        missing: List[str] = []
+        # ownership from the ARCH.yaml row, or the shard's own header when it carries one
+        owned_ux = getattr(shard, "owns_ux_surfaces", None) or getattr(row, "owns_ux_surfaces", None) or []
+        owned_api = getattr(shard, "owns_api_resources", None) or getattr(row, "owns_api_resources", None) or []
+        for sid in owned_ux:
+            f = ux_files.get(str(sid).strip())
+            if f and f not in recorded and f not in missing:
+                missing.append(f)
+        for rid in owned_api:
+            f = api_files.get(str(rid).strip())
+            if f and f not in recorded and f not in missing:
+                missing.append(f)
+        if missing:
+            flags = " ".join(f"--upstream docs/{f}" for f in missing)
+            warns.append(
+                f"{name} reads {', '.join(f'docs/{f}' for f in missing)} (owned by {cid}) but never "
+                f"recorded it in metadata.upstream_provenance, so an edit to that shard that leaves "
+                f"the system file byte-identical is invisible to docs_index.py --drift and to "
+                f"/sdlc:arch {cid} --reconcile - record it: python .claude/sdlc/docs_index.py "
+                f"--stamp docs/{name} {flags} (one --upstream per file read)"
+            )
+    return warns
+
+
 def check_provenance_staleness(
     prov: Optional[List[Dict[str, Any]]],
     status: str,
@@ -3946,6 +4011,7 @@ def validate_all(arch_path: Path) -> int:
             c.metadata.upstream_provenance, c.metadata.status,
             container_versions.get(name, (0, 0)), docs_dir, name,
             f"/sdlc:arch {c.container_id}"))
+    shard_prov_warns = check_shard_provenance(arch, containers, docs_dir)
     deferral_shape_warns = dindex.shape_warnings
 
     status = arch.metadata.status
@@ -3983,6 +4049,7 @@ def validate_all(arch_path: Path) -> int:
         ("{n} deferral entr(y/ies) are malformed and defer nothing", deferral_shape_warns),
         ("{n} requirement(s) are excluded from coverage by the reason-less non_container_features list alone - move each to `deferrals` with a reason (this escape is honoured for one more schema version) [deferral hygiene]", feature_legacy_fallback),
         ("{n} artifact(s) may be stale against the upstream documents they were built from", prov_warns),
+        ("{n} container file(s) read a UX__ or API__ shard they own but never recorded in upstream_provenance, so edits to that shard are invisible to every drift check [CLAUDE.md 7]", shard_prov_warns),
     ]
 
     # 6) Reporting (CLAUDE.md 14). Each category becomes one plain sentence;

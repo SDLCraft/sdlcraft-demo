@@ -7,6 +7,21 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.15 (2026-09-15) — `upstream-reconciliation.md`: a delegating upstream item goes through the discovery step and a void delegation becomes a finding, never "the upstream is wrong"; a resolved finding the delta cites leads its card as the decision; Phase 7 stamps through the helper
+
+Ledger IMP-100 (aicf LSN-081): Step 4 read a changed-in-body item as a contradiction or an
+assignment; an item that delegates a decision here ("until DATA-MODEL describes it") was
+carded as an assignment, the element presumed necessary, "the upstream is wrong" offered
+beside define/remove. A delegation now routes like an added item - the skill's discovery step
+first - and when it names no candidate the delegation is void: a finding for repair
+(`finding_notes`), nothing authored; the state enum gains `delegation_void`. Ledger IMP-101
+(aicf LSN-082): step 3 also collects the `FND-NNN` ids the `--drift` `why` lines and changed
+items cite, reads them with `findings.py list --id`, and a resolved finding's resolution leads
+the card as position 1 with basis measured - never re-offering "record a finding" for an item
+a finding decided. Ledger IMP-102: Phase 7 stamps `UX.yaml` through `docs_index.py --stamp`
+instead of a hand-written sha-only entry. Regressions: eval cases 4 (reconcile-delegated-item)
+and 5 (reconcile-decided-finding).
+
 ## 1.14 (2026-09-12) — `upstream-reconciliation.md`: the no-items fallback tries git first, and a handoff note quantifying over an enumeration is verified against that enumeration whatever its basis
 
 Ledger IMP-083 (aicf LSN-065): the helper-absent bullet and the name-addressed

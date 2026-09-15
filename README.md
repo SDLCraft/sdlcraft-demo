@@ -10,7 +10,7 @@ This is the **demo edition** (MIT). It takes a project from idea to a complete,
 validated architecture. The full edition, SDLCraft, continues from there to
 tested code — see [Editions](#editions).
 
-> Pre-1.0 (version 0.9.12): expect the skills to keep changing.
+> Pre-1.0 (version 0.9.13): expect the skills to keep changing.
 
 ## Install
 
@@ -28,12 +28,14 @@ pip install "pydantic>=2" pyyaml
 ## Pipeline Overview
 
 ```
-setup → prd → (ux) → (design) → data → (api) → arch → test → task → code → [deploy: planned]
-         ▲─────────────────────────────────────────────────────────────┘
+setup → prd → [ux] → [design] → data → [api] → arch → test* → task* → code* → (deploy: planned)
+         ▲───────────────────────────────────────────────────────────────┘
                                    repair
+*: only in full version
+[]: optional
 ```
 
-One skill's output is the next skill's input — `setup` to initialize a new project, `prd` defines *what* to build, `ux`/`design`/`data`/`api` flesh out surfaces/look/storage/contract, `arch` turns that into containers, `test` and `task` turn each container into a test strategy and a dependency-ordered task graph, and `code` executes that graph into actual source files. `repair` sits off to the side and can be invoked at any point to diagnose and fix a defect — it walks backward from wherever the defect surfaced to the *earliest* artifact whose content is actually wrong. `deploy` is the one stage not yet implemented.
+One skill's output is the next skill's input — `setup` to initialize a new project, `prd` defines *what* to build, `ux`/`design`/`data`/`api` flesh out surfaces/look/storage/contract, `arch` turns that into containers. The full version contains `test` and `task` which turn each container into a test strategy and a dependency-ordered task graph, and `code` which executes that graph into actual source files. `repair` sits off to the side and can be invoked at any point to diagnose and fix a defect — it walks backward from wherever the defect surfaced to the *earliest* artifact whose content is actually wrong. `deploy` is the one stage not yet implemented.
 
 ### Skipping a stage
 
