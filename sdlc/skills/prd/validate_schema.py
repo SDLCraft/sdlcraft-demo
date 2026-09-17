@@ -375,6 +375,7 @@ class NonFunctionalRequirements(_ThemeBase):
 class DataModel(_ThemeBase):
     key_entities: Optional[List[str]] = None
     data_ownership: Optional[DataOwnership] = None
+    data_ownership_rationale: Optional[str] = None
     data_ownership_confidence: Optional[Confidence] = None
     data_volume_estimate: Optional[DataVolume] = None
     data_volume_estimate_confidence: Optional[Confidence] = None
@@ -601,6 +602,11 @@ class Metadata(BaseModel):
     session_id: str
     monorepo: bool = False
     status: Literal["draft", "complete"] = "draft"
+    # Newest entry first (CLAUDE.md §1), one line each:
+    # "<version> (<YYYY-MM-DD>): <one-line summary>". repair's bump_artifact.py
+    # prepends to it. No upstream_provenance sibling: the PRD is the pipeline's
+    # root artifact and consumes no upstream artifact to stamp (CLAUDE.md §7).
+    changelog: Optional[List[str]] = None
 
 
 class Product(_ThemeBase):
@@ -978,6 +984,86 @@ def _legacy_shape_allowed(prd: "PRD") -> bool:
     return version < LEGACY_SHAPE_FLOOR
 
 
+# Item-shape floor (CLAUDE.md 10). The physical SPELLING of a requirement item
+# is part of its contract, not a style choice: line-scanning consumers - the
+# docs index and the codegen packet builder among them - read items off raw
+# lines, so a wrapped, single-quoted, unquoted or comment-tailed item is
+# invisible to them and a PRD that validates complete shipped EMPTY requirement
+# text into every worker packet that implemented it (ledger IMP-159).
+#
+# This SHARES LEGACY_SHAPE_FLOOR rather than adding a third number. A floor
+# nothing can reach is decoration - it makes the blocking half dead code - and
+# new writes now stamp 2.0 precisely so both checks arm on a file written by a
+# skill that knows the rule, while every PRD already on disk (an edit counter
+# in the 1.x range, which bump_artifact.py moves 1.9 -> 1.10) stays below it
+# and only warns.
+ITEM_SHAPE_FLOOR: Tuple[int, int] = LEGACY_SHAPE_FLOOR
+ITEM_SHAPE_FAMILIES = ("FR", "NFR", "WKF", "ACR")
+
+
+def _item_shape_allowed(prd: "PRD") -> bool:
+    """True below the floor, where a mis-spelled item warns instead of blocking."""
+    m = re.match(r"^\s*(\d+)(?:\.(\d+))?", str(prd.metadata.prd_version or ""))
+    version = (int(m.group(1)), int(m.group(2) or 0)) if m else (0, 0)
+    return version < ITEM_SHAPE_FLOOR
+
+# The pinned spelling, mirroring code/topo_order.py's _REQ_RE: one physical
+# line, double-quoted, closing quote last, nothing after it. The two patterns
+# are compared byte-for-byte by _smoke/item_shape_selftest.py, because a check
+# that re-declares its subject's rule passes while the shipped rule is broken.
+_ITEM_SHAPE_RE = re.compile(r'"(?P<id>(?:FR|NFR|WKF|ACR)-\d+):\s*(?P<text>.*)"\s*$')
+# A line that OPENS a requirement item, whatever its spelling. Anchored on the
+# `- ` so a retired-id entry (`- FR-058`, no statement) and a reference such as
+# `blocks: [FR-001]` are not mistaken for items.
+_ITEM_OPENER_RE = re.compile(r'^\s*-\s*["\']?(?P<id>(?:FR|NFR|WKF|ACR)-\d+):')
+_SHAPE_TOP_KEY_RE = re.compile(r"^([A-Za-z_][\w.-]*)\s*:")
+
+
+def _shape_audit_trail_lines(lines: List[str]) -> set:
+    """0-based line numbers of the top-level `metadata` and `changelog` blocks.
+
+    A changelog entry legitimately quotes an item beside the requirement it used
+    to belong to ("ACR-002 moved from FR-002 to FR-001"). That is an audit
+    trail, not a declaration. Same idiom as test/validate_schema.py and the docs
+    index, replicated rather than imported - validators are standalone and share
+    no imports.
+    """
+    starts = [i for i, ln in enumerate(lines) if _SHAPE_TOP_KEY_RE.match(ln)]
+    skip: set = set()
+    for n, i in enumerate(starts):
+        key = _SHAPE_TOP_KEY_RE.match(lines[i]).group(1)
+        if key not in ("metadata", "changelog"):
+            continue
+        end = starts[n + 1] if n + 1 < len(starts) else len(lines)
+        skip.update(range(i, end))
+    return skip
+
+
+def check_item_line_shape(text: str) -> List[str]:
+    """Requirement items spelled so a line-scanning consumer cannot read them.
+
+    Takes the raw file text, not the parsed PRD: quoting and line wrapping are
+    exactly what YAML has already thrown away by the time the model is built,
+    which is why every spelling validates identically today.
+    """
+    lines = text.splitlines()
+    skip = _shape_audit_trail_lines(lines)
+    bad: List[str] = []
+    for n, line in enumerate(lines):
+        if n in skip:
+            continue
+        m = _ITEM_OPENER_RE.match(line)
+        if m is None:
+            continue
+        if _ITEM_SHAPE_RE.search(line) is None:
+            bad.append(
+                f"line {n + 1}: {m.group('id')} is not written as one "
+                f"double-quoted line, so the codegen packet builder reads no "
+                f"statement for it"
+            )
+    return bad
+
+
 _ID_PREFIX_RE_CACHE: Dict[str, re.Pattern] = {}
 
 
@@ -1037,6 +1123,72 @@ def check_ids(prd: "PRD", legacy: Optional[List[str]] = None) -> List[str]:
     return violations
 
 
+# Families whose ids a downstream gate resolves one at a time: a task implements
+# FR-001, a test covers ACR-001, a workflow trace names WKF-001. A second item
+# wearing an id already taken sends every such trace to whichever copy the
+# reader happens to see first, because the id IS the item's identity. QUE and
+# USR have been checked for this since they became typed (check_open_questions /
+# check_user_stories); this is the string families' half of the same rule, and a
+# fifth family joins it by being named here.
+DUPLICATE_CHECKED_FAMILIES = ("FR", "NFR", "WKF", "ACR")
+
+_ITEM_ID_RE = re.compile(r"^([A-Z]{2,4})-(\d{3,}):")
+
+
+def check_duplicate_ids(prd: "PRD", warnings: Optional[List[str]] = None) -> List[str]:
+    """Return violations for an id stamped on more than one item of a family.
+
+    Ids are unique per SCOPE, not per list: the legacy must_have/nice_to_have
+    split and the two NFR lists each share one counter with the rest of their
+    family, so an FR-001 in `features` collides with an FR-001 in
+    `must_have_features`. In monorepo mode each product owns its id space, so
+    the check restarts per product.
+
+    New blocking check, version-gated (CLAUDE.md §10): from LEGACY_SHAPE_FLOOR
+    a duplicate is a violation, and below it the message goes to ``warnings``
+    when the caller passes a list - prd_version is also an edit counter that
+    repair's bump_artifact.py moves, so a PRD written before this check existed
+    keeps validating until it is rewritten at the floor. An item whose prefix is
+    missing or malformed is check_ids' business, not this one's, and is skipped
+    here so one defect is not reported twice.
+    """
+    violations: List[str] = []
+    lenient = warnings is not None and _legacy_shape_allowed(prd)
+
+    def _check_scope(root: object, scope_label: str) -> None:
+        seen: Dict[str, str] = {}
+        for prefix, dotted_path, scope in ID_FAMILIES:
+            if scope != "product" or prefix not in DUPLICATE_CHECKED_FAMILIES:
+                continue
+            items = _get_dotted(root, dotted_path)
+            if not isinstance(items, list):
+                continue
+            for i, item in enumerate(items):
+                if not isinstance(item, str):
+                    continue
+                m = _ITEM_ID_RE.match(item.strip())
+                if m is None or m.group(1) != prefix:
+                    continue
+                item_id = f"{m.group(1)}-{m.group(2)}"
+                where = f"{scope_label}{dotted_path}[{i}]"
+                if item_id in seen:
+                    (warnings if lenient else violations).append(  # type: ignore[union-attr]
+                        f"{where}: '{item_id}' is already the id of {seen[item_id]} - "
+                        f"give this item the next free {prefix} number, or a "
+                        f"downstream trace to '{item_id}' reaches only one of the two"
+                    )
+                else:
+                    seen[item_id] = where
+
+    if prd.metadata.monorepo and prd.products:
+        for slug, product in prd.products.items():
+            _check_scope(product, f"products.{slug}.")
+    else:
+        _check_scope(prd, "")
+
+    return violations
+
+
 _QUE_ID_RE = re.compile(r"^QUE-\d{3,}$")
 
 
@@ -1047,8 +1199,17 @@ def check_open_questions(prd: "PRD", legacy: Optional[List[str]] = None) -> List
     (undecided_decisions + parking_lot) share one continuous QUE counter per
     scope. A legacy plain-string bullet is a violation from prd_version 2.0
     (LEGACY_SHAPE_FLOOR) and goes to ``legacy`` - a warning - below it; the
-    update flow retrofits them with the next QUE id and status: open. A
+    update flow retrofits them with the next QUE id and the list's status:
+    status: open in undecided_decisions, status: deferred in parking_lot. A
     malformed TYPED entry is a violation at every version.
+
+    parking_lot is a deferred-scope bin, not a live decision, so it shares
+    OpenQuestionItem's shape but not its default: a parking_lot item whose
+    status is "open" (explicit or the schema's own default) or that carries
+    a non-empty `blocks` list is byte-for-byte indistinguishable from a live,
+    build-gating undecided_decisions entry. Both are violations from
+    LEGACY_SHAPE_FLOOR (shared, not a third number) and warnings below it,
+    same lenient/violations split as the plain-string case above.
     """
     violations: List[str] = []
     lenient = legacy is not None and _legacy_shape_allowed(prd)
@@ -1065,13 +1226,26 @@ def check_open_questions(prd: "PRD", legacy: Optional[List[str]] = None) -> List
             for i, item in enumerate(items):
                 where = f"{scope_label}open_questions.{field}[{i}]"
                 if isinstance(item, str):
+                    retrofit_status = "deferred" if field == "parking_lot" else "open"
                     (legacy if lenient else violations).append(  # type: ignore[union-attr]
                         f"{where}: expected typed mapping "
                         f"{{id: QUE-NNN, question, status}}, got plain string "
                         f"{item!r} — retrofit with the next QUE id and "
-                        f"status: open"
+                        f"status: {retrofit_status}"
                     )
                     continue
+                if field == "parking_lot":
+                    if item.status in (None, "open"):
+                        (legacy if lenient else violations).append(
+                            f"{where}: a parking-lot item is deferred scope, "
+                            f"not a live decision — set status: deferred, or "
+                            f"move it to undecided_decisions if it is undecided"
+                        )
+                    if isinstance(item.blocks, list) and item.blocks:
+                        (legacy if lenient else violations).append(
+                            f"{where}: a parked idea gates nothing — drop "
+                            f"blocks, or move the item to undecided_decisions"
+                        )
                 qid = (item.id or "").strip()
                 if not _QUE_ID_RE.match(qid):
                     violations.append(f"{where}.id: expected 'QUE-NNN', got {item.id!r}")
@@ -1401,6 +1575,28 @@ def check_mitigation_refs(prd: PRD) -> List[str]:
     return warns
 
 
+def check_unknown_top_level_keys(raw: Dict[str, Any]) -> List[str]:
+    """WARNING (never blocks): a top-level key the PRD model does not declare.
+
+    `model_config = ConfigDict(extra="allow")` (PRD, above) keeps such a key on
+    write - merge behaviour preserves unrelated keys - but nothing in this
+    schema, or any downstream reader, ever looks at it. Reference prose has
+    named a field the model never had before (`product_vision`, ledger
+    IMP-008) and validated clean the whole time; this makes the next phantom
+    field visible instead of silently kept-but-unread.
+    """
+    known = set(PRD.model_fields.keys())
+    warns: List[str] = []
+    for key in raw.keys():
+        if key not in known:
+            warns.append(
+                f"unknown top-level key {key!r} — kept (extra keys are "
+                f"preserved) but nothing reads it; check for a typo or a "
+                f"stale field name"
+            )
+    return warns
+
+
 def check_required(prd: PRD) -> List[str]:
     """Return list of missing required field paths.
 
@@ -1448,7 +1644,8 @@ def validate_file(path: Path) -> int:
         return 2
 
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        raw = yaml.safe_load(text)
     except yaml.YAMLError as e:
         print(f"ERROR: YAML parse error in {path}:\n  {e}", file=sys.stderr)
         return 2
@@ -1479,10 +1676,15 @@ def validate_file(path: Path) -> int:
     legacy_shape: List[str] = []
     id_violations = (check_ids(prd, legacy_shape) + check_open_questions(prd, legacy_shape)
                      + usr_violations)
+    duplicate_warns: List[str] = []
+    duplicate_violations = check_duplicate_ids(prd, duplicate_warns)
     value_violations = check_runtime_platform(prd) + check_pipeline_scope(prd)
+    shape_bad = check_item_line_shape(text)
+    shape_lenient = _item_shape_allowed(prd)
     acr_gaps = check_acr_coverage(prd)
     mitigation_warns = check_mitigation_refs(prd)
     que_warns = check_que_blocks(prd)
+    unknown_key_warns = check_unknown_top_level_keys(raw)
     status = prd.metadata.status
 
     def _soft_warnings() -> List[object]:
@@ -1504,9 +1706,28 @@ def validate_file(path: Path) -> int:
                 f"gives each one the next id. Not blocking below prd_version 2.0:",
                 legacy_shape,
             ))
+        if shape_bad and shape_lenient:
+            out.append((
+                f"{len(shape_bad)} requirement item(s) are written so that the "
+                f"codegen packet builder cannot read them, so every worker that "
+                f"implements one would build with no requirement text at all. "
+                f"Write each as one double-quoted line, with the closing quote "
+                f"last. Not blocking below prd_version 2.0:",
+                shape_bad,
+            ))
+        if duplicate_warns:
+            out.append((
+                f"{len(duplicate_warns)} requirement id(s) are stamped on more than one "
+                f"item, so a task or test that traces one of them reaches whichever copy "
+                f"it reads first. Give each item its own id - /sdlc:prd's update flow "
+                f"mints the next free number. Not blocking below prd_version 2.0:",
+                duplicate_warns,
+            ))
         for w in mitigation_warns:
             out.append(w)
         for w in usr_warns:
+            out.append(w)
+        for w in unknown_key_warns:
             out.append(w)
         if len(que_warns) > 4:
             out.append((
@@ -1521,7 +1742,10 @@ def validate_file(path: Path) -> int:
     if status == "complete":
         problems = [f"a required field is empty: {m}" for m in missing]
         problems += [f"wrong id format - {v}" for v in id_violations]
+        problems += [f"duplicate id - {v}" for v in duplicate_violations]
         problems += [f"invalid value - {v}" for v in value_violations]
+        if not shape_lenient:
+            problems += [f"unreadable item - {v}" for v in shape_bad]
         if problems:
             print(f"[FAIL] {path} says it is finished, but {len(problems)} thing(s) "
                   f"are wrong. /sdlc:ux and everything after it will refuse it.")
@@ -1531,14 +1755,18 @@ def validate_file(path: Path) -> int:
             return 1
         print(f"[OK] {path} is finished - /sdlc:ux can run it.")
         print_findings([], _soft_warnings())
-        print_next("/sdlc:ux", show_glossary=bool(acr_gaps or mitigation_warns
-                                                  or usr_warns or que_warns or legacy_shape))
+        print_next("/sdlc:ux", show_glossary=bool(acr_gaps or mitigation_warns or usr_warns
+                                                  or que_warns or legacy_shape
+                                                  or duplicate_warns or unknown_key_warns))
         return 0
 
     # status == "draft"
     todo = [f"a required field is empty: {m}" for m in missing]
     todo += [f"wrong id format - {v}" for v in id_violations]
+    todo += [f"duplicate id - {v}" for v in duplicate_violations]
     todo += [f"invalid value - {v}" for v in value_violations]
+    if not shape_lenient:
+        todo += [f"unreadable item - {v}" for v in shape_bad]
     if missing:
         print(f"[DRAFT] {path} is saved but not finished - {len(missing)} required "
               f"field(s) still empty. Later skills will refuse it until it says "
@@ -1548,8 +1776,9 @@ def validate_file(path: Path) -> int:
               f"metadata.status to 'complete' to release it to the next skill.")
     print_findings(todo, _soft_warnings(), blocking_header="TO FINISH IT")
     print_next("re-run /sdlc:prd to continue, or set metadata.status: complete.",
-               show_glossary=bool(todo or acr_gaps or mitigation_warns
-                                  or usr_warns or que_warns or legacy_shape))
+               show_glossary=bool(todo or acr_gaps or mitigation_warns or usr_warns
+                                  or que_warns or legacy_shape or duplicate_warns
+                                  or unknown_key_warns))
     return 0
 
 

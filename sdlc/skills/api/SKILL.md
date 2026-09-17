@@ -85,7 +85,6 @@ Runtime files (NOT inside this skill directory):
 | `docs/API.yaml` (project root) | Global API contract consumed by downstream agents. |
 | `docs/API__<resource>.yaml` (project root) | One file per API resource. `<resource>` is kebab-case. |
 | `.claude/skills-state/sdlc-api.state.yaml` | Session state for resumability. |
-| `CLAUDE.md` (project root) | Pointer bullet injected on completion. |
 
 ## Reserved EXIT command
 
@@ -125,10 +124,20 @@ Before doing anything else, check for
   > "I found an unfinished API session from `<last_updated>`. Would you
   > like to **resume**, **restart** (discard previous answers), or
   > **discard** (delete state and exit)?"
-- If `status: complete` or `status: aborted` and `docs/API.yaml`
-  exists, treat this as an update flow — see
+- If `status: complete` or `aborted` and `docs/API.yaml` exists, scope the
+  update — see `sdlc/skills/ux/references/upstream-reconciliation.md`'s
+  REFINE row (open only the named themes, the §7 delta items, and the
+  non-confirmed set; confirm the rest in one summary) — then
   `references/merge-validate.md`.
+- If `status: complete` or `aborted` and `docs/API.yaml` is ABSENT, only
+  `partial_answers` survives: offer restart-from-partial_answers or
+  discard — never resume.
 - If no state file, continue to Phase 2.
+- If the state file's `skill_version` is older than this file's footer: run
+  the canonical recipe
+  (`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` → "Resume with
+  stale state" — migrate additively, reconcile the theme lists and
+  `last_ids`, then offer resume at position 1).
 
 ### Phase 2 — Scan inputs
 
@@ -143,7 +152,11 @@ look the needed section/symbol up in `INDEX.yaml` (`sections` /
 `Read` only that slice — the extraction lists below name exactly which
 blocks each upstream contributes. Fall back to a whole-file read only
 when `INDEX.yaml` is absent or the doc is genuinely small. See
-`.claude/rules/sdlc-docs-access.md`.
+`.claude/rules/sdlc-docs-access.md`. Every `python .claude/sdlc/docs_index.py …`
+in this file runs the copy
+`${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once per
+run: an installed copy older than the plugin's counts as absent, and every
+fallback this file gives for a missing `docs_index.py` applies to it.
 
 1. **`docs/PRD.yaml`** — required.
 
@@ -153,7 +166,12 @@ when `INDEX.yaml` is absent or the doc is genuinely small. See
 
    - If exit code ≠ 0 or `metadata.status != "complete"` → stop. Print
      a clear warning telling the user to complete the PRD first
-     (`/sdlc:prd`).
+     (`/sdlc:prd`). One exception, for the exit code only: when
+     `python "${CLAUDE_SKILL_DIR}/../repair/doctor.py" --docs-dir docs --artifact docs/PRD.yaml`
+     reports the check `accepted (N, unchanged)`, the project accepted that
+     deviance — proceed (never `--quick`; rule:
+     `sdlc/skills/repair/references/accepted-deviance.md`). The same holds for
+     every upstream validator this phase runs below.
    - Extract the fields the API skill needs:
      - `security_compliance.auth_model` → preliminary `auth.schemes`
      - `users_personas.primary_users` + `secondary_users` →
@@ -376,18 +394,27 @@ These determine the *shape* of the API output:
    - Always surface the recommendation as `⚠ inferred` position-1
      option; user must confirm or pick another.
 
-2. **(only if `api_kind == none`)** Capture `rationale` (one sentence)
-   and **skip to Phase 7**. Write a minimal `API.yaml` with
+2. **(only if `api_kind == none`)** Capture `rationale` (one sentence),
+   then run theme 11 (`external_dependencies`, now/skip/todo gate) BEFORE
+   skipping to Phase 7 — asked regardless of `api_kind`, because a
+   CLI/library with no inbound API can still call outbound providers (the
+   motivating case: a 14-integration CLI). Write a minimal `API.yaml` with
    `api_kind: none`, `rationale`, empty `resource_inventory`, no
-   `API__*.yaml` files. Coverage + entity-link checks are skipped.
+   `API__*.yaml` files, and whatever theme 11 produced. Coverage +
+   entity-link checks are still skipped.
 
-   **Also stamp the uniform marker**: `metadata.applicability:
-   not_applicable`, `metadata.applicability_rationale` (the same sentence)
-   and `metadata.applicability_confidence`. `api_kind: none` is this
-   artifact's own vocabulary; `metadata.applicability` is what every other
-   skill reads, and it is what lets `arch` skip the API without an `ls` and
-   without asking the user. The validator errors when the two disagree, and
-   warns when a legacy `api_kind: none` file carries no marker. Mechanics:
+   **Also stamp the uniform marker** — but only when `external_dependencies`
+   came back empty too: `metadata.applicability: not_applicable`,
+   `metadata.applicability_rationale` (the same sentence) and
+   `metadata.applicability_confidence`. A `none`-kind file that DOES declare
+   `external_dependencies` found something to model (an outbound
+   integration surface), so it stamps `metadata.applicability: applicable`
+   instead — `not_applicable` means this stage found NOTHING to model.
+   `api_kind: none` is this artifact's own vocabulary; `metadata.applicability`
+   is what every other skill reads, and it is what lets `arch` skip the API
+   without an `ls` and without asking the user. The validator errors when
+   the two disagree, and warns when a legacy `api_kind: none` file with no
+   `external_dependencies` carries no marker. Mechanics:
    `sdlc/skills/prd/references/optional-stages.md`.
 
 3. **`transport_styles`** — multi-select from `rest, graphql, grpc,
@@ -437,7 +464,8 @@ Walk the themes in this order (canonical order from
     CRITICAL tier. For each resource defined in theme 8, run a
     per-resource mini-interview that fills out the per-resource yaml
     (endpoints, DTO schemas, primary_entity, traces).
-11. `external_dependencies` — optional (now/skip/todo gate).
+11. `external_dependencies` — optional (now/skip/todo gate). Also asked at
+    `api_kind: none`, in Phase 4 step 2, before the skip to Phase 7.
 12. `sdk_and_clients` — optional (now/skip/todo gate).
 
 Required questions can never be `todo`'d. They must be answered, set to
@@ -520,8 +548,9 @@ CLAUDE.md §7.
 Deferrals the user explicitly chose (a PRD FR that needs no endpoint, a UX
 screen no endpoint serves) are written to the top-level
 `deferrals: [{id, reason}]` list — never as a bare id in `non_api_features`
-(deprecated: still passes for one more version, but every id that relies on
-it is reported) and never as prose in `api_warnings` alone (the WRN note
+(deprecated: passes below `api_version` 2.0 only, and every id that relies
+on it is reported; at/above 2.0 it no longer covers anything) and never as
+prose in `api_warnings` alone (the WRN note
 stays the human-readable companion, not the machine channel). Internal-only
 resources (health, metrics, ops) set `internal: true` instead of inventing
 traces.
@@ -533,14 +562,15 @@ python "${CLAUDE_SKILL_DIR}/validate_schema.py" --path docs/API.yaml
 ```
 
 The validator also walks `docs/API__*.yaml` siblings and runs three
-checks (all skipped when `api_kind: none`):
+coverage checks (all skipped when `api_kind: none`) plus one integration
+check that is NOT:
 
 1. **Feature coverage**: every PRD `features` `FR-NNN` must
    appear in some resource's `traces_prd_features` OR be deferred via
    the top-level `deferrals: [{id, reason}]` list (a bare id in
-   `non_api_features` still passes for one more version and is
-   reported). Uncovered features are appended to `api_warnings` and
-   force `status: draft`.
+   `non_api_features` passes below `api_version` 2.0 only, and is
+   reported; at/above 2.0 it no longer covers anything). Uncovered
+   features are appended to `api_warnings` and force `status: draft`.
 2. **Surface coverage**: every data-bearing UX surface (see
    `references/merge-validate.md` for the type list) must appear in
    some resource's `traces_ux_surfaces` or be deferred the same way.
@@ -549,6 +579,11 @@ checks (all skipped when `api_kind: none`):
    `DATA-MODEL.yaml.entities`. Unresolved entities force
    `status: draft`. Skipped if `DATA-MODEL.yaml` is absent (with a
    warning).
+4. **Integration contracts** (NOT skipped at `api_kind: none`): every
+   `external_dependencies` entry must name an `integration_ref: INT-NNN`
+   that resolves in `PRD.yaml.functional_requirements.integrations_required`
+   — never minted here. Blocks `status: draft` from `api_version` 2.0;
+   below 2.0 it only warns.
 
 For full merge logic and the exit-code recovery flow, see
 `references/merge-validate.md`.
@@ -558,8 +593,8 @@ When writing files: inline YAML comments on top-level keys, updated
 
 Set `metadata.status`:
 - `"complete"` — only when all required fields are filled, the validator
-  passes with `[OK]`, AND all three checks pass (or are skipped due to
-  `api_kind: none`).
+  passes with `[OK]`, AND checks 1-3 pass (or are skipped due to
+  `api_kind: none`) AND check 4 passes.
 - `"draft"` — on early EXIT, when any required field is null, or when
   any check fails.
 
@@ -835,4 +870,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.10"
+skill_version: "1.13"

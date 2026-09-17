@@ -61,6 +61,8 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 # =============================================================================
 
 GLOSSARY_PATH = ".claude/rules/sdlc-output-glossary.md"
+STALE_NOTE = ("an upstream moved after this file was written; review the delta "
+              "before the next stage reads it")
 
 def join_ids(ids, limit=12):
     """Render a grouped finding's id list. Capped, because a line nobody
@@ -974,10 +976,20 @@ class DeferralIndex:
             _reason = str(_w.get("text") or "").strip()
             if not _reason:
                 continue
-            for _eid in (_w.get("defers") or []):
-                _eid = str(_eid).strip()
-                if _eid:
-                    self.declared.setdefault(_eid.upper(), _reason)
+            _ids = [str(_e).strip() for _e in (_w.get("defers") or []) if str(_e).strip()]
+            for _eid in _ids:
+                self.declared.setdefault(_eid.upper(), _reason)
+            # Warn-first (CLAUDE.md 10, ledger IMP-109): the canonical WRN block
+            # ignores a mapping whose id is not WRN-NNN, yet its deferral still
+            # counts for one more version - say so instead of honouring it silently.
+            _wid = str(_w.get("id") or "").strip()
+            if _ids and not _WRN_ID_RE.match(_wid):
+                self.shape_warnings.append(
+                    f"{scope_label}design_warnings entry '{_wid}' still defers "
+                    f"{', '.join(_ids)}, but that id is not of the form WRN-NNN, so the "
+                    f"warning itself is ignored. The deferral counts for one more version "
+                    f"only - give the warning a WRN-NNN id."
+                )
 
     def defer(self, aid: str) -> bool:
         s = str(aid).strip()
@@ -1107,7 +1119,8 @@ def check_provenance(
             current = _content_hash_16(up_path)
         if current and current != recorded:
             warns.append(
-                f"built against an older {f} - run /sdlc:design to review the delta"
+                f"built against an older {f} - run /sdlc:design --reconcile to "
+                f"review the delta"
             )
     return warns
 
@@ -1214,6 +1227,8 @@ def validate_all(design_path: Path) -> int:
         design.metadata, design_path,
         no_prov_gate=_version_tuple(design.metadata.design_version) >= (2, 0),
     )
+    # Ledger IMP-127: NEXT names the reconcile form while an upstream is stale.
+    stale_upstream = [w for w in prov_warnings if "built against an older" in str(w)]
 
     status = design.metadata.status
     n_tokens, n_assets = len(tokens_by_slug), len(assets_by_slug)
@@ -1312,7 +1327,11 @@ def validate_all(design_path: Path) -> int:
         print(f"[OK] {design_path} is finished - {n_tokens} token file(s), "
               f"{n_assets} asset file(s). /sdlc:data can run it.")
         print_findings([], soft)
-        print_next("/sdlc:data", show_glossary=bool(soft))
+        if stale_upstream:
+            print_next(f"/sdlc:design --reconcile  ({STALE_NOTE})", "then /sdlc:data",
+                       show_glossary=bool(soft))
+        else:
+            print_next("/sdlc:data", show_glossary=bool(soft))
         return 0
 
     # status == "draft"

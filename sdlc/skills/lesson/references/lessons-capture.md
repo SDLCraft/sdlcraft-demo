@@ -167,6 +167,12 @@ python .claude/sdlc/lessons.py add --skill test --kind schema_gap \
   `references/x.md`, `validate_schema.py`, `<skill>-questions.yaml`);
   `--where-anchor` a phase name, check number, or question id.
 - `--related FND-NNN` links the finding whose diagnosis surfaced it.
+- `skill_version` is stamped from the named skill's own state file (what
+  actually wrote what you observed), never overridden by the installed
+  footer — except a ledger-shaped state (`code` today), which nothing
+  re-stamps between runs: there the installed footer, when it disagrees, is
+  recorded alongside as `footer_skill_version` rather than replacing the
+  ledger's number (ledger IMP-144).
 - Severity: `blocker` = the run could not finish correctly; `degraded` =
   finished with rework or friction; `cosmetic` = polish. On a project that
   opted in to sharing, severity also decides **when** the lesson reaches the

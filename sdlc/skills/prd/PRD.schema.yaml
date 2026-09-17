@@ -74,12 +74,33 @@
 #
 #   Why list items stay "<PREFIX>-NNN: <text>" STRINGS, not typed mappings:
 #   every downstream validator (ux/data/api/arch/test/task) and the codegen
-#   packet builder (code/topo_order.py `_REQ_RE`) parse exactly that string
-#   form out of this file. The typed FeatureSpec / NfrEntry /
+#   packet builder (code/topo_order.py) parse exactly that string form out of
+#   this file. The typed FeatureSpec / NfrEntry /
 #   AcceptanceCriterion objects the AICF meta-corpus uses for its own
 #   Pydantic PRD would silently break that grounding, so they are NOT
 #   adopted. QUE and USR are typed because no downstream string-scan reads
 #   them.
+#
+#   HOW an item is SPELLED is part of that contract, not a style choice. Write
+#   each one as ONE physical line, double-quoted, closing quote last, nothing
+#   after it:
+#       - "FR-001: <statement>"
+#   A wrapped, single-quoted, unquoted or comment-tailed item is still valid
+#   YAML and still parses to the same value — but line-scanning consumers
+#   disagree about it, and one of them indexes this file while another builds
+#   the codegen packets, so such an item shipped EMPTY requirement text to every
+#   worker that implemented it (ledger IMP-159). `validate_schema.py` warns
+#   below prd_version 2.0 and refuses at or above it; `migrate_ids.py`'s
+#   normalize-shape pass rewrites a file already written the other way.
+#
+# Schema 2.0 (2026-09-16) — no field changed shape. The STAMP moved, so that the
+#   version floors can actually fire: a requirement item's physical spelling
+#   (see "Why list items stay STRINGS" above) and the typed ACR / QUE forms both
+#   block from 2.0 and only warn below it. Every PRD already on disk carries a
+#   1.x edit counter that bump_artifact.py moves 1.9 -> 1.10, so it can never
+#   cross the floor just by being edited — only a file written by a skill that
+#   knows the rules starts at 2.0. A floor nothing can reach makes the blocking
+#   half of a check dead code, which is what hid ledger IMP-159 for so long.
 #
 # Schema 1.1 (2026-09-01) — adopted from the AICF meta-corpus PRD schema
 #   (DATA-MODEL.yaml `ProductRequirements` + sub-models):
@@ -110,8 +131,13 @@
 # metadata — always at top level, present in both single- and multi-product mode
 # -----------------------------------------------------------------------------
 metadata:
-  prd_version: "1.1"                       # schema version this file conforms to;
-                                           # new writes stamp "1.1", 1.0 files validate unchanged
+  prd_version: "2.0"                       # schema version this file conforms to, and the
+                                           # artifact's edit counter (repair's bump_artifact.py
+                                           # moves it 1.9 -> 1.10). New writes stamp "2.0"; every
+                                           # 1.x file validates unchanged, below the floors that
+                                           # make the typed ACR/QUE forms and the item spelling
+                                           # above blocking rather than a warning that lets the
+                                           # file through.
   last_updated: "2026-05-05T12:00:00Z"     # ISO-8601 UTC timestamp of last write
   generated_by: sdlc-prd                   # always literal string "sdlc-prd"
   session_id: "00000000-0000-0000-0000-000000000000"  # UUID of the interview session
@@ -121,6 +147,17 @@ metadata:
                                             # required fields are filled and the
                                             # validator passes. Downstream agents
                                             # MUST reject the PRD if status != "complete".
+  changelog: null                           # Optional[list[string]]. Append-only.
+                                            # Each entry one line, format:
+                                            #   "<version> (<YYYY-MM-DD>): <one-line summary>"
+                                            # Most-recent entry first (CLAUDE.md §1) —
+                                            # repair's bump_artifact.py prepends to it and
+                                            # fails closed on an oldest-first file. Used to
+                                            # record post-generation manual edits or skill
+                                            # re-runs that materially changed the file.
+                                            # No upstream_provenance sibling here: the PRD is
+                                            # the pipeline's root artifact, so it consumes no
+                                            # upstream artifact to stamp (CLAUDE.md §7).
 
 # -----------------------------------------------------------------------------
 # pipeline_scope — which downstream SDLC stages this project needs at all.
@@ -197,7 +234,10 @@ pipeline_scope:               # Optional[Dict[str, {applicable, rationale?, conf
 # the way a malformed `deferrals` entry defers nothing. A malformed STRING is
 # the blocking error it has always been. New writes emit the mapping at
 # <name>_version >= 2.0 (DATA-MODEL: >= 3.0); `.claude/sdlc/migrate_warnings.py`
-# converts an existing artifact.
+# converts an existing artifact - from any skill but repair, run it as
+# `--by sdlc-<skill> --no-bump` (or bare: it derives both from
+# $CLAUDE_SKILL_DIR), so the changelog credits the skill that ran and the run
+# bumps the version once.
 prd_warnings: []
 
 # =============================================================================
@@ -388,6 +428,7 @@ data_model:
                               # each item: "ENT-NNN: <entity>" (e.g. "ENT-001: User")
   data_ownership: null        # one of: user_owned | org_owned | platform_owned |
                               #         third_party | mixed (enum)
+  data_ownership_rationale: null  # (string|null)
   data_volume_estimate: null  # one of: kilobytes | megabytes | gigabytes |
                               #         terabytes | petabytes | unknown (enum)
   storage_preferences: null   # e.g. ["postgres", "s3"] (list[string]|null) — no ID
@@ -446,7 +487,7 @@ stakeholders:
 # -----------------------------------------------------------------------------
 # milestones — REMOVED (D2). No MVP/phase split: every consumer of this skillset
 # is built whole by /sdlc:code, so phased milestones have no downstream consumer.
-# The 1–3-sentence MVP narrative folds into `product_vision`. Legacy PRDs that
+# The 1–3-sentence MVP narrative folds into `product_identity.vision`. Legacy PRDs that
 # still carry a `milestones:` block validate unchanged (models are extra="allow",
 # so the key is retained on read, not rejected) — new writes never emit it.
 # -----------------------------------------------------------------------------
@@ -613,7 +654,8 @@ support_model:
 # continuous QUE counter (writer-managed, state.last_ids.QUE), like FR
 # across must/nice. Legacy plain-string bullets are violations (warning in
 # draft, error in complete) — the update flow retrofits them with the next
-# QUE id and `status: open`. A `todo`-gated theme also lands here as a
+# QUE id and the list's status: `status: open` in undecided_decisions,
+# `status: deferred` in parking_lot. A `todo`-gated theme also lands here as a
 # typed entry, not a bare bullet.
 # Downstream consumption: read by test (test-discovery, next to top_risks); the
 #   prd update flow gates on `status`; code lists QUE-blocked units at its
@@ -634,8 +676,15 @@ open_questions:
   #                           #   Resolved at validate time against the ids
   #                           #   this PRD emits (FR/NFR/WKF/ACR); a malformed
   #                           #   or dangling ref is a WARNING (never blocks).
-  parking_lot: null           # list[OpenQuestionItem] — ideas to revisit later;
-                              # same shape, same shared QUE counter
+  parking_lot: null           # list[OpenQuestionItem] — deferred-scope ideas,
+                              # not live decisions; same shape and shared QUE
+                              # counter as undecided_decisions, but ALWAYS
+                              # `status: deferred` and NEVER a non-empty
+                              # `blocks` (a parked idea gates nothing). Either
+                              # one here is a violation from prd_version 2.0
+                              # (LEGACY_SHAPE_FLOOR) and warns below it — move
+                              # the item to undecided_decisions if it becomes
+                              # a live, gating decision.
 
 # -----------------------------------------------------------------------------
 # conventions — binding cross-cutting project conventions

@@ -62,9 +62,10 @@ Read whenever the agent hits a situation off the happy path.
 
 ## ID-family edge cases
 
-- **`AST-NNN` / `WRN-NNN` counter drift on resume** → if `state.last_ids.<P>` is
-  lower than the max id already on disk (user copied entries between projects),
-  set the counter to `max(on_disk, state)` before assigning the next id.
+- **`AST-NNN` / `WRN-NNN` counter drift.** Covered by the canonical resume
+  recipe (`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` → "Resume
+  with stale state"; AUTHORING §5's `max(state counter, highest id present
+  on disk)`), not restated here.
 - **A `traces_ux_surfaces` / `implements_requirements` / `references_entities`
   ref points to an id that no longer exists** (UX/PRD edited between sessions) →
   detect during Phase 2; ask per stale ref: "Surface/requirement/entity `<id>`
@@ -136,9 +137,8 @@ don't duplicate it here).
 
 ## Resume with stale state
 
-If `state.skill_version` is older than the current skill, migrate the file
-**additively** before the resume prompt (bump the version, add missing
-baseline keys with empty defaults, record a `migrations` entry, touch no
-answer or theme list), then offer resume at position 1. Canonical recipe:
-`prd/references/edge-cases.md` → "Resume with stale state". Only a state file
-NEWER than the skill gets "warn and offer a clean restart".
+SKILL.md's Phase 1 carries the inline trigger (all four states, plus the
+older-`skill_version` line). The canonical recipe — the additive migration,
+and the theme-list / `last_ids` reconciliation — lives in
+`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` → "Resume with stale
+state". Nothing to add here.

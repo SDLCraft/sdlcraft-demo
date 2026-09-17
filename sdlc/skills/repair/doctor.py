@@ -44,6 +44,10 @@ What a check's output means here:
     NAME, so the finding is honoured whether the sweep runs with
     `--docs-dir docs` or an absolute path, and every finding this script
     mints carries the repo-relative POSIX path whatever form it ran with.
+    The finding's detected_by must name the check; under --artifact, one that
+    pins a count for a red check's artifact with detected_by empty or naming
+    no check is listed as a warning ("not applied"), and the check stays red.
+    Canonical rule: references/accepted-deviance.md.
   * Awaiting re-invocation: an open|triaged re-invoke finding still owes the
     commands in its downstream_rerun, and every propagation hop without a
     verified_at. A failing check on an artifact those name is labelled
@@ -54,7 +58,13 @@ What a check's output means here:
     with the current upstream files and prints one [stale] line per drift
     (a warning — staleness is a known state, not a defect), plus a hint for
     each triaged re-invoke finding whose downstream artifacts have all been
-    rebuilt since the fix.
+    rebuilt since the fix, plus a "should be reopened" hint for each RESOLVED
+    re-invoke finding whose downstream artifact is still stale — a chain that
+    silently never ran, or ran and drifted again, invisible to every other
+    owed-work reader the moment the finding closed (findings.py reopen
+    FND-NNN is the sanctioned way back). Such a check is also held out of
+    --emit-findings, exactly like an open finding's, so the reopen hint stays
+    the only new thing said about it.
 
 Every check runs BARE and its exit code is captured directly — never read an
 exit status after a pipe (CLAUDE.md section 11: an upstream validator once ran
@@ -368,11 +378,39 @@ ARTIFACT_RE = fq.ARTIFACT_RE
 FAMILY_RE = re.compile(r"\b(PRD|UX|DESIGN|DATA-MODEL|API|ARCH|TEST-STRATEGY|TASKS|CODE-MANIFEST)\b")
 
 
+# <FAMILY>[__<slug>] at the START of a defect line, with no extension: the
+# referrer the line is ABOUT. Its family resolves to an extension through
+# CANONICAL, so TASKS resolves to .json and TEST-STRATEGY to .yaml.
+FAMILY_EXT = {artifact.split(".")[0]: artifact.rsplit(".", 1)[-1] for _, artifact in CANONICAL}
+LEADING_REFERRER_RE = re.compile(
+    r"^\s*(?:[-*]\s+)?(PRD|UX|DESIGN|DATA-MODEL|API|ARCH|TEST-STRATEGY|TASKS|CODE-MANIFEST)"
+    r"(__[a-z0-9-]+)?(?=[.\[\s:,]|$)")
+
+
 def artifact_in(line: str, docs: Path, default: str) -> str:
     """The docs/ path of the artifact a defect line names, else the default.
     A validator run on ARCH.yaml reports its sibling shards by name; the
     finding should point at the shard, not at the file the sweep happened to
-    pass on the command line."""
+    pass on the command line.
+
+    The LEADING referrer wins, and it is resolved even when it carries no
+    extension: crosscheck_artifacts writes its test-side referrer as
+    `TEST-STRATEGY__<cid>.tests[i]`, which ARTIFACT_RE (it requires .yaml or
+    .json) can never match - so such a line was attributed to the next file
+    MENTIONED in the sentence, usually PRD.yaml, and the per-line hold never
+    recognised it as an artifact an open re-invoke finding already owes, and
+    minted it again at every component checkpoint (ledger IMP-130). The
+    resolution is doctor-local on purpose: widening the shared
+    findings.ARTIFACT_RE would change what `list --owed-by` and
+    validate_findings.py mean in the same change. A candidate is accepted only
+    when the file exists, so a mention of a family no project has stays a
+    fallback.
+    """
+    m = LEADING_REFERRER_RE.match(line)
+    if m:
+        cand = docs / f"{m.group(1)}{m.group(2) or ''}.{FAMILY_EXT.get(m.group(1), 'yaml')}"
+        if cand.is_file():
+            return cand.as_posix()
     m = ARTIFACT_RE.search(line)
     if not m:
         return default
@@ -521,12 +559,150 @@ def _project_roots(docs: Path) -> List[Path]:
     return [docs.resolve().parent, Path.cwd()]
 
 
+STOCK_GENERATOR_REL = ".claude/sdlc/docs_index.py"
+_FOREIGN_INDEX_TOKENS = ("docs_index", "docs-index")
+_INDEX_FILE_TOKEN = "INDEX.yaml"
+_GENERATOR_VERB_RE = re.compile(r"docs-index|\bindex\b|generate", re.IGNORECASE)
+# Verbs that only READ an index: a hook naming one of these and no generator
+# verb CHECKS the index, it does not write it (wire_setup._READONLY_VERB_RE,
+# mirrored - ledger IMP-118).
+_READONLY_VERB_RE = re.compile(
+    r"\b(?:check|lint|validate|verify|audit|assert|grep|diff)\w*", re.IGNORECASE)
+
+_WIRE_SETUP_MOD: List[Any] = []
+
+
+def wire_setup_module():
+    """setup/wire_setup.py, if it is still beside this skill - else None.
+
+    "Does this project run its own index toolchain?" has ONE implementation,
+    the installer's, and this reader imports it rather than deciding for itself
+    - the way statusboard.py imports warning_item.py instead of keeping a
+    private copy of the warnings grammar. Two answers to that question is the
+    defect ledger IMP-118 records: the copy below drifted from the installer
+    twice (it read a read-only `check_docs_index.py` hook as a generator, and
+    never looked in settings.local.json at all) while a truthiness-only pin
+    stayed green over both.
+
+    Cached, and never raising: this labels a check, so an unimportable
+    installer degrades to the copy rather than failing the sweep.
+    """
+    if _WIRE_SETUP_MOD:
+        return _WIRE_SETUP_MOD[0]
+    mod = None
+    try:
+        import importlib.util
+        cand = SKILLS_DIR / "setup" / "wire_setup.py"
+        if cand.is_file():
+            spec = importlib.util.spec_from_file_location("_wire_setup_for_doctor", cand)
+            if spec is not None and spec.loader is not None:
+                candidate = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(candidate)
+                if all(hasattr(candidate, n) for n in
+                       ("foreign_index_reasons", "foreign_hook_reasons")):
+                    mod = candidate
+    except Exception:
+        mod = None
+    _WIRE_SETUP_MOD.append(mod)
+    return mod
+
+
+# --- the installer's predicate, mirrored -----------------------------------
+# Used only when wire_setup.py is unreachable. Every function below answers
+# exactly as its wire_setup twin, reason text included (the reason IS the label
+# a consumer reads, so it must not depend on whether the import worked), and
+# _smoke/doctor_selftest.py pins the two signal by signal.
+
+
+def _reads_only(cmd: str) -> bool:
+    """wire_setup._reads_only, mirrored: a command that only INSPECTS an index.
+    A generator verb anywhere in the same command wins."""
+    return bool(_READONLY_VERB_RE.search(cmd)) and not _GENERATOR_VERB_RE.search(cmd)
+
+
+def _is_foreign_index_command(cmd: str) -> bool:
+    """wire_setup.is_foreign_index_command, mirrored. A `docs_index` token is a
+    signal, not proof: `python scripts/check_docs_index.py --strict` carries it
+    and only READS the file. The bare INDEX.yaml token likewise counts only
+    beside a generator verb, so a hook that GREPS the index is never mistaken
+    for one that regenerates it."""
+    if not cmd or STOCK_GENERATOR_REL in cmd:
+        return False
+    if any(t in cmd for t in _FOREIGN_INDEX_TOKENS):
+        return not _reads_only(cmd)
+    if _INDEX_FILE_TOKEN in cmd:
+        return bool(_GENERATOR_VERB_RE.search(cmd.replace(_INDEX_FILE_TOKEN, " ")))
+    return False
+
+
+def _post_tool_use(settings: Dict[str, Any]) -> List[Any]:
+    """wire_setup._post_tool_use, mirrored."""
+    hooks = settings.get("hooks", {}) if isinstance(settings, dict) else {}
+    post = hooks.get("PostToolUse", []) if isinstance(hooks, dict) else []
+    return post if isinstance(post, list) else []
+
+
+def _fallback_foreign_index_reasons(index_text: Optional[str]) -> List[str]:
+    """wire_setup.foreign_index_reasons, mirrored. An unrecognised header -
+    hand-trimmed, or from an older stock generator - is read as OURS: nothing
+    pins the stock header's history."""
+    if not index_text:
+        return []
+    first = next(
+        (ln.strip().lstrip("﻿").strip() for ln in index_text.splitlines()
+         if ln.strip().lstrip("﻿").strip()), "")
+    if "GENERATED" in first.upper() and STOCK_GENERATOR_REL not in first:
+        return [f"docs/INDEX.yaml says it is generated by another tool: "
+                f"{first.lstrip('#').strip()}"]
+    return []
+
+
+def _fallback_foreign_hook_reasons(settings: Dict[str, Any],
+                                   local_settings: Optional[Dict[str, Any]] = None) -> List[str]:
+    """wire_setup.foreign_hook_reasons, mirrored. BOTH settings files, because
+    a fork may declare its generator hook in settings.local.json."""
+    reasons: List[str] = []
+    for name, blob in ((".claude/settings.json", settings),
+                       (".claude/settings.local.json", local_settings or {})):
+        for entry in _post_tool_use(blob):
+            for h in (entry.get("hooks", []) if isinstance(entry, dict) else []):
+                cmd = str(h.get("command", "")) if isinstance(h, dict) else ""
+                if _is_foreign_index_command(cmd):
+                    reasons.append(
+                        f"a hook in {name} already regenerates the index with "
+                        f"another tool: {cmd}")
+    return reasons
+
+
+def _fallback_foreign_wiring(index_text: Optional[str], settings: Dict[str, Any],
+                             local_settings: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Both signals together, as wire_setup.detect_foreign_wiring composes them.
+    The installer keeps them separate because they gate different things: a
+    foreign HEADER holds back the index file alone, a foreign HOOK the whole
+    install."""
+    return (_fallback_foreign_index_reasons(index_text)
+            + _fallback_foreign_hook_reasons(settings, local_settings))
+
+
+def _settings_obj(path: Path) -> Dict[str, Any]:
+    """One settings file as a mapping; {} when absent, unreadable or not an
+    object - a consumer's malformed settings is not this sweep's business."""
+    try:
+        if not path.is_file():
+            return {}
+        blob = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return blob if isinstance(blob, dict) else {}
+
+
 def own_index_generator_reasons(docs: Path) -> List[str]:
     """Why this project regenerates docs/INDEX.yaml with its OWN tool - the
-    same two signals /sdlc:setup's installer refuses to clobber (its
-    wire_setup.detect_foreign_wiring): a docs/INDEX.yaml header naming another
-    generator, or a hook that regenerates the index with another command.
-    Empty when the index looks stock or is absent."""
+    same two signals /sdlc:setup's installer weighs: a docs/INDEX.yaml header
+    naming another generator, and a hook that regenerates the index with
+    another command, in EITHER settings file (the installer reads
+    settings.local.json for exactly this and never writes it). Empty when the
+    index looks stock or is absent."""
     index_text: Optional[str] = None
     try:
         p = docs / "INDEX.yaml"
@@ -534,27 +710,28 @@ def own_index_generator_reasons(docs: Path) -> List[str]:
     except OSError:
         index_text = None
     settings: Dict[str, Any] = {}
+    local_settings: Dict[str, Any] = {}
     for root in _project_roots(docs):
-        sp = root / ".claude" / "settings.json"
-        if sp.is_file():
-            try:
-                settings = json.loads(sp.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                settings = {}
+        claude = root / ".claude"
+        sp, lp = claude / "settings.json", claude / "settings.local.json"
+        if sp.is_file() or lp.is_file():
+            # Both come from the SAME root, so a hook never lands in the report
+            # from one project while the rest is read from another.
+            settings, local_settings = _settings_obj(sp), _settings_obj(lp)
             break
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "_wire_setup_for_doctor", SKILLS_DIR / "setup" / "wire_setup.py")
-        ws = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(ws)  # type: ignore[union-attr]
-        return list(ws.detect_foreign_wiring(index_text, settings))
-    except Exception:  # the installer is optional here - fall back to the header check
-        if index_text:
-            first = next((ln.strip() for ln in index_text.splitlines() if ln.strip()), "")
-            if "GENERATED" in first.upper() and ".claude/sdlc/docs_index.py" not in first:
-                return [f"docs/INDEX.yaml says it is generated by another tool: {first.lstrip('#').strip()}"]
-        return []
+    ws = wire_setup_module()
+    if ws is not None:
+        try:
+            # The installer's own answer wins whenever it is reachable, so the
+            # two cannot drift. Non-string entries are dropped rather than
+            # stringified: a shape this reader does not understand must not
+            # reach the label.
+            reasons = (list(ws.foreign_index_reasons(index_text))
+                       + list(ws.foreign_hook_reasons(settings, local_settings)))
+            return [r for r in reasons if isinstance(r, str)]
+        except Exception:  # an installer whose predicate no longer fits - use the copy
+            pass
+    return _fallback_foreign_wiring(index_text, settings, local_settings)
 
 
 def setup_helpers_present(docs: Path) -> bool:
@@ -612,28 +789,58 @@ def artifact_key(path: Any) -> str:
 
 
 def project_relative(where: str, docs: Path) -> str:
-    """A minted finding's path, repo-relative and POSIX whatever --docs-dir
-    the sweep was invoked with. An absolute form written into the queue is
-    invocation-specific noise: the statusboard prints it, and a registry
-    keyed on it (before artifact_key) never matched a relative run."""
+    """A minted finding's path, relative to the project that OWNS the queue and
+    POSIX, whatever --docs-dir the sweep was invoked with. An absolute form
+    written into the queue is invocation-specific noise: the statusboard prints
+    it, and a registry keyed on it (before artifact_key) never matched a
+    relative run.
+
+    The docs parent is tried FIRST, as everywhere else since IMP-078: resolved
+    against the cwd first, a sweep run from an ANCESTOR of the project wrote
+    'proj/docs/PRD.yaml' into proj's own queue, and /sdlc:repair, which runs
+    from the project root, cannot open that path (ledger IMP-130). A relative
+    path is re-anchored for the same reason instead of being kept as written -
+    `--docs-dir proj/docs` from the ancestor is exactly that case.
+    """
     raw = str(where or "").replace("\\", "/")
     if not raw:
         return raw
     p = Path(raw)
-    if not p.is_absolute():
-        return p.as_posix()
-    for root in (Path.cwd(), docs.resolve().parent):
+    for root in (docs.resolve().parent, Path.cwd()):
         try:
             return p.resolve().relative_to(root.resolve()).as_posix()
         except (ValueError, OSError):
             continue
-    return raw
+    return p.as_posix()
 
 
-def accepted_registry(data: Dict[str, Any]) -> Dict[Tuple[str, str], Tuple[str, int]]:
-    """(detected_by, artifact file name) -> (fnd_id, expected N) from wontfix
-    findings. The name, not the path: see artifact_key."""
-    reg: Dict[Tuple[str, str], Tuple[str, int]] = {}
+# Until repair 1.17 the doctor keyed BOTH the minting and the acceptance side
+# on the file the check ran on, so a wontfix accepting a defect that lives in a
+# shard names the swept system file in every queue minted 0.9.8 -> 1.16. Those
+# are still honoured through the `target` fallback in apply_accepted; anything
+# recorded after the fix must name the located shard. The fallback is gated
+# rather than permanent because the registry key is a BASENAME identity: left
+# open, one system-file wontfix would go on accepting every future defect
+# located in any shard that shares the check name - the accept-direction twin
+# of the bug being fixed (ledger IMP-130).
+LOCATED_KEY_FIX_DATE = "2026-09-17"
+
+
+def predates_located_fix(f: Dict[str, Any]) -> bool:
+    """Was this finding recorded before the doctor started keying on `located`?
+    findings.py stamps raised_at on every add, so the date is present on
+    everything the pipeline minted. A finding with none (hand-written, or a
+    pre-1.0 queue) counts as older: for a queue we cannot date, honouring an
+    acceptance somebody recorded is the compatible direction."""
+    raised = str(f.get("raised_at") or "").strip()
+    return not raised or raised[:10] < LOCATED_KEY_FIX_DATE
+
+
+def accepted_registry(data: Dict[str, Any]) -> Dict[Tuple[str, str], Tuple[str, int, bool]]:
+    """(detected_by, artifact file name) -> (fnd_id, expected N, predates the
+    located-key fix) from wontfix findings. The name, not the path: see
+    artifact_key. The third element gates the `target` fallback below."""
+    reg: Dict[Tuple[str, str], Tuple[str, int, bool]] = {}
     for f in data.get("findings") or []:
         if not isinstance(f, dict) or f.get("status") != "wontfix":
             continue
@@ -646,7 +853,7 @@ def accepted_registry(data: Dict[str, Any]) -> Dict[Tuple[str, str], Tuple[str, 
         where = artifact_key(sa.get("file") or f.get("suspected_source"))
         det = str(f.get("detected_by") or "")
         if det and where:
-            reg[(det, where)] = (str(f.get("fnd_id")), int(m.group(1)))
+            reg[(det, where)] = (str(f.get("fnd_id")), int(m.group(1)), predates_located_fix(f))
     return reg
 
 
@@ -657,10 +864,21 @@ def apply_accepted(checks: List[Check], data: Dict[str, Any]) -> None:
     for c in checks:
         if c.skipped or c.exit == 0:
             continue
-        hit = reg.get((c.name, artifact_key(c.target)))
+        # The shard the defect is IN comes first: one defective shard fails
+        # every sibling row with the same error, so accepting it on the file
+        # that HOLDS it must green all of them - keyed on the swept file, an
+        # accepted deviance greened 1 row of N and the --artifact gate stayed
+        # red (references/accepted-deviance.md; ledger IMP-130). The swept file
+        # is still tried, but for a row whose defect is located elsewhere only
+        # from a finding that predates the fix.
+        hit = reg.get((c.name, artifact_key(c.located))) if c.located else None
+        if hit is None:
+            hit = reg.get((c.name, artifact_key(c.target)))
+            if hit is not None and c.located and not hit[2]:
+                hit = None
         if not hit:
             continue
-        fnd_id, expected = hit
+        fnd_id, expected, _legacy = hit
         n = top_level_count(c.blocking)
         if n == expected:
             c.accepted = f"accepted ({expected}, unchanged) per {fnd_id}"
@@ -668,6 +886,44 @@ def apply_accepted(checks: List[Check], data: Dict[str, Any]) -> None:
         else:
             c.summary = (f"{fnd_id} accepted {expected} problem line(s) here, now {n} - "
                          f"the accepted deviance moved; {c.summary}")
+
+
+def unapplied_deviance(checks: List[Check], data: Dict[str, Any]) -> List[str]:
+    """wontfix findings that pin `expected_count` for a red check's artifact but
+    were never applied, because the registry keys on detected_by and theirs is
+    empty or names no check (a hand-recorded finding, or a skill name such as
+    sdlc-arch). The check stays red - the key is not widened, so a finding
+    cannot silence a check it never named - but the gate says why (ledger
+    IMP-104)."""
+    known = {f"{skill}/validate_schema" for skill, _ in CANONICAL} | {
+        "crosscheck_artifacts", "docs_index --check"}
+    red = [c for c in checks if c.failed]
+    lines: List[str] = []
+    for f in data.get("findings") or []:
+        if not isinstance(f, dict) or f.get("status") != "wontfix":
+            continue
+        res = f.get("resolution") if isinstance(f.get("resolution"), dict) else {}
+        text = " ".join(str(x or "") for x in (f.get("summary"), res.get("reason"), res.get("summary")))
+        m = EXPECTED_COUNT_RE.search(text)
+        if not m:
+            continue
+        det = str(f.get("detected_by") or "").strip()
+        if det in known:
+            continue
+        sa = f.get("surfaced_at") if isinstance(f.get("surfaced_at"), dict) else {}
+        where = artifact_key(sa.get("file") or f.get("suspected_source"))
+        fam = family_of(where) if where else None
+        if not fam:
+            continue
+        for c in red:
+            if c.name == f"{fam[0]}/validate_schema":
+                lines.append(
+                    f"{f.get('fnd_id')} pins expected_count: {m.group(1)} for {where} but was not applied - "
+                    f"its detected_by is {repr(det) if det else 'empty'}, and a count is accepted only from "
+                    f"a finding that names its check; set detected_by: {c.name} on it (a /sdlc:repair edit) "
+                    f"and this failure is accepted while the count holds")
+                break
+    return lines
 
 
 # artifact file name -> (fnd_id, label, owed commands) for every artifact an
@@ -762,7 +1018,13 @@ def failure_entries(c: Check, docs: Path) -> List[Dict[str, Any]]:
                 c.target, [f"exit {c.exit}", f"{len(items)} defect lines in total"], docs=docs,
             ))
     else:
-        out.append(_entry(c, f"{c.name} exit {c.exit}: {c.summary}", c.target, lines[:MAX_EVIDENCE], docs=docs))
+        # The shard the defect is IN, not the file the check ran on: the row
+        # keeps its own target (IMP-069), but a finding that names the swept
+        # file sends /sdlc:repair to open the wrong document, and a whole
+        # sibling sweep records the one defect against the system file
+        # (ledger IMP-130; artifact_in's docstring states the same rule).
+        out.append(_entry(c, f"{c.name} exit {c.exit}: {c.summary}", c.located or c.target,
+                          lines[:MAX_EVIDENCE], docs=docs))
     return out
 
 
@@ -826,7 +1088,14 @@ def emit_findings(path: Path, checks: List[Check], docs: Path,
         for f in data.get("findings") or []
         if isinstance(f, dict) and f.get("status") in DEDUPE_STATUSES
     }
-    owed = awaiting_registry(data)
+    owed = dict(awaiting_registry(data))
+    # A resolved re-invoke finding whose downstream artifact is still stale
+    # (the chain it recorded never actually ran, or drifted again) is folded
+    # in HERE, before the loop below ever sees a check on that artifact - so
+    # the failing check is held exactly like an open finding's, and the
+    # `reopen` hint (--provenance) stays the only new thing this run says
+    # about it, never a second, handoff-less finding (ledger IMP-158).
+    owed.update(resolved_stale_registry(docs, data))
     entries: List[Dict[str, Any]] = []
     held = 0
     for c in checks:
@@ -851,7 +1120,9 @@ def emit_findings(path: Path, checks: List[Check], docs: Path,
     if not entries:
         return 0, held, None
     try:
-        added, _skipped = fq.append_findings(path, entries, allow_duplicate=True)
+        # No tolerate_existing here on purpose: the sweep is not a producer
+        # with one finding to place, and an invalid queue is its own report.
+        added, _skipped, _pre = fq.append_findings(path, entries, allow_duplicate=True)
     except fq.QueueError as e:
         return 0, held, str(e)
     except fq.EntryRejected as e:
@@ -939,8 +1210,72 @@ def artifact_provenance(docs: Path, path: Path, hasher: Hasher):
     return rows
 
 
-def provenance_report(docs: Path, findings_path: Optional[Path]) -> Tuple[List[str], List[str]]:
-    """([stale] lines, 'can be marked resolved' hints)."""
+def resolved_reinvoke_findings(data: Dict[str, Any]) -> List[Tuple[str, List[str]]]:
+    """(fnd_id, owed artifact names) for every RESOLVED re-invoke finding.
+
+    `awaiting_registry`/`owed_findings` stop tracking a re-invoke finding the
+    moment it closes (`AWAITING_STATUSES` is open/triaged only), so a chain
+    that silently never ran - or ran and then drifted again - becomes
+    invisible to every owed-work reader the instant the finding is marked
+    resolved (ledger IMP-158). `owed_artifacts` itself has no status
+    condition; only `mode` gates it, so a resolved finding qualifies exactly
+    like an open one would."""
+    out: List[Tuple[str, List[str]]] = []
+    for f in data.get("findings") or []:
+        if not isinstance(f, dict) or f.get("status") != "resolved":
+            continue
+        res = f.get("resolution") if isinstance(f.get("resolution"), dict) else None
+        names = fq.owed_artifacts(res)
+        if names:
+            out.append((str(f.get("fnd_id")), names))
+    return out
+
+
+def resolved_stale_registry(docs: Path, data: Dict[str, Any],
+                            hasher: Optional[Hasher] = None) -> Dict[str, Tuple[str, str]]:
+    """artifact_key -> (fnd_id, reopen hint) for every artifact a RESOLVED
+    re-invoke finding rewrote that still reads a stale upstream hash - the
+    `downstream_rerun` the resolution recorded never actually ran, or ran and
+    the artifact drifted again with nobody telling the queue. Reuses the same
+    provenance-hash comparison `--provenance` already prints (never a second
+    comparator), worded as staleness only: a legitimate LATER upstream edit
+    looks identical from here, and this makes no claim about WHY the chain
+    never happened.
+
+    The caller merges this into `emit_findings`' `owed` registry BEFORE its
+    per-check loop, so a failing check on such an artifact is HELD rather than
+    minted as a fresh finding - the `reopen` hint stays the only channel; a
+    second, handoff-less finding about the same gap is not a second answer."""
+    reg: Dict[str, Tuple[str, str]] = {}
+    findings = resolved_reinvoke_findings(data)
+    if not findings:
+        return reg
+    hasher = hasher or Hasher(docs)
+    for fnd_id, names in findings:
+        for name in names:
+            key = artifact_key(name)
+            if key in reg:
+                continue
+            rows = artifact_provenance(docs, docs / name, hasher)
+            if not rows:
+                continue
+            bad = next(((up, recorded, current) for up, recorded, current in rows
+                        if current is None
+                        or (recorded and current[:len(recorded)] != recorded[:len(current)])),
+                       None)
+            if bad is None:
+                continue
+            up, recorded, current = bad
+            detail = (f"was built against docs/{up}, which is no longer in docs/" if current is None
+                      else f"was built against docs/{up}@{recorded}, now @{current}")
+            reg[key] = (fnd_id, f"{fnd_id} should be reopened: docs/{name} {detail}, but the "
+                                f"finding that owed rebuilding it is resolved - "
+                                f"`findings.py reopen {fnd_id}`")
+    return reg
+
+
+def provenance_report(docs: Path, findings_path: Optional[Path]) -> Tuple[List[str], List[str], List[str]]:
+    """([stale] lines, 'can be marked resolved' hints, 'should be reopened' hints)."""
     hasher = Hasher(docs)
     stale: List[str] = []
     fresh_artifacts: Dict[str, bool] = {}
@@ -991,7 +1326,10 @@ def provenance_report(docs: Path, findings_path: Optional[Path]) -> Tuple[List[s
             if ok:
                 hints.append(f"{f.get('fnd_id')} can be marked resolved: every artifact its re-invocations "
                              f"rewrite ({join_ids(targets, 4)}) was rebuilt after the fix and reads fresh upstream hashes")
-    return stale, hints
+    else:
+        data = {"findings": []}
+    reopen = [hint for _fnd_id, hint in resolved_stale_registry(docs, data, hasher).values()]
+    return stale, hints, reopen
 
 
 # '/sdlc:test demo-api --reconcile' -> 'TEST-STRATEGY__demo-api.yaml'. Shared
@@ -1096,6 +1434,7 @@ def main() -> int:
     accepted = [c for c in checks if c.accepted]
     awaiting = [c for c in checks if c.awaiting]
     warn_total = sum(c.warnings for c in checks)
+    unapplied = unapplied_deviance(checks, queue_data) if args.artifact else []
 
     added = 0
     held = 0
@@ -1104,8 +1443,9 @@ def main() -> int:
 
     stale: List[str] = []
     hints: List[str] = []
+    reopen_hints: List[str] = []
     if args.provenance:
-        stale, hints = provenance_report(docs, findings_path)
+        stale, hints, reopen_hints = provenance_report(docs, findings_path)
 
     if args.as_json:
         print(json.dumps(
@@ -1116,11 +1456,13 @@ def main() -> int:
                 "failed": len(failed),
                 "accepted": [c.accepted for c in accepted],
                 "awaiting": [c.awaiting for c in awaiting],
+                "unapplied_deviance": unapplied,
                 "warnings_total": warn_total,
                 "findings_added": added,
                 "findings_awaiting": held,
                 "queue_error": queue_error,
-                "provenance": {"stale": stale, "resolvable": hints} if args.provenance else None,
+                "provenance": {"stale": stale, "resolvable": hints, "reopenable": reopen_hints}
+                              if args.provenance else None,
             },
             indent=2,
         ))
@@ -1161,6 +1503,7 @@ def main() -> int:
     for c in accepted:
         warnings.append(f"{c.name} on {c.target} exited {c.exit} but is {c.accepted} - "
                         f"a known, accepted deviance; it fails again the moment its count moves")
+    warnings += unapplied
     owed_by: Dict[str, List[Check]] = {}
     for c in awaiting:
         owed_by.setdefault(c.awaiting_by or "", []).append(c)
@@ -1178,6 +1521,11 @@ def main() -> int:
     if hints:
         print()
         for h in hints:
+            print(f"  {h}")
+
+    if reopen_hints:
+        print()
+        for h in reopen_hints:
             print(f"  {h}")
 
     if emit_path is not None:

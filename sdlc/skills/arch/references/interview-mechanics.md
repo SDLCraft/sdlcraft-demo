@@ -59,8 +59,8 @@ AskUserQuestion call. `⚠ inferred` candidates appear at position 1.
   2. Show the draft to the user — and END the turn with it (the typed
      `ok`/`confirm` reply is the approval channel), or carry the draft
      inside an `AskUserQuestion` option's `preview`; chat markdown sharing
-     a turn with a tool call may not render (the channel rule:
-     `../../prd/references/importance-flows.md`).
+     a turn with a tool call may not render (the channel rule: AUTHORING
+     §18, `../../prd/references/importance-flows.md`).
   3. User approves (`ok` / `confirm`) or iterates ("change pattern to
      microservices because we have 5 teams").
   4. Cap at 3 iteration rounds. After the cap, default to the last

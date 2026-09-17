@@ -1,7 +1,6 @@
 # Merging, validating, and closing out
 
-Detailed rules for Phase 7 (write & validate) and Phase 8 (CLAUDE.md
-pointer). Read this when entering Phase 7.
+Detailed rules for Phase 7 (write & validate) and Phase 8 (refresh & close). Read this when entering Phase 7.
 
 ## Merging into an existing DATA-MODEL.yaml
 
@@ -120,12 +119,13 @@ Write `docs/DATA-MODEL.yaml` with:
   are explicitly allowed.
 - `data_warnings`: every entry MUST be `"WRN-NNN: <message>"`. The
   WRN counter lives in `state.last_ids.WRN`; increment-then-write per
-  appended item. On resume, **reconcile the counter** with the
-  on-disk file before appending: if `max(WRN-NNN in on-disk
-  data_warnings) > state.last_ids.WRN`, sync the counter up. Used
-  for low-confidence answers, merge conflicts, deferred themes,
-  classification orphans flagged in error recovery, deferred sweep
-  candidates, etc. — not for required-field acknowledgement.
+  appended item. Counter drift is covered by the canonical resume recipe
+  (`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` → "Resume with
+  stale state"; AUTHORING §5's `max(state counter, highest id present on
+  disk)`), not restated here. Used for low-confidence answers, merge
+  conflicts, deferred themes, classification orphans flagged in error
+  recovery, deferred sweep candidates, etc. — not for required-field
+  acknowledgement.
 
 ## Running the validator
 
@@ -138,14 +138,17 @@ Exit codes:
 | Code | Meaning | What the agent does |
 |---|---|---|
 | 0 (`[OK]`) | Complete and valid; all cross-checks pass | ✓ Proceed to Phase 8. |
-| 0 (`[DRAFT]`) | Draft — structurally valid, possibly missing required fields or with soft-check warnings | Inform user and proceed to Phase 8 (pointer still injected). |
+| 0 (`[DRAFT]`) | Draft — structurally valid, possibly missing required fields or with soft-check warnings | Inform user and proceed to Phase 8. |
 | 1 (`[FAIL]`) | Schema invalid, OR `status: complete` but required fields missing, OR `status: complete` but a hard cross-check failed (relationship integrity, paradigm structural integrity, classification integrity, bounded-context partition) | Show field-level errors verbatim. If required fields are missing, offer via `AskUserQuestion`: fill them in now, or accept `status: draft`. If a cross-check failed, walk the user through the offending block (e.g. show the relationship that references a nonexistent entity). Re-run validation after re-entry. |
 | 2 | Cannot read/parse the file | Surface to user (missing file, bad YAML, permission error). Do not retry silently. |
 | 3 | Missing dependency | Validator prints `pip install` instructions. Do **not** auto-install — ask the user to install and re-run. |
 
 **Downstream-agent contract**: downstream agents (api, arch, test) MUST
 reject the DATA-MODEL if `metadata.status != "complete"` OR if
-`validate_schema.py` exits non-zero.
+`validate_schema.py` exits non-zero. The one exception is to the exit code,
+never to the status: a failure every check of which
+`doctor.py --artifact docs/DATA-MODEL.yaml` reports as accepted deviance does
+not reject (`sdlc/skills/repair/references/accepted-deviance.md`).
 
 ## Cross-check recovery flows
 
@@ -196,7 +199,7 @@ Both are harmless no-ops when the project has not run `/sdlc:setup`.
 
 ## Closing the session
 
-After Phase 8's CLAUDE.md write succeeds:
+Once Phase 8's refresh has run:
 
 - Set `status: complete` in the state file.
 - Keep the state file as an audit trail — do **not** delete it.

@@ -125,8 +125,12 @@ can never schedule building it. Sweep for them explicitly:
    coverage (see prd's FR-authoring note). The converse case is a path the
    running system WRITES (a packaged bundle under `dist/`, sidecars under
    `assets/`, a scaffolded app under an output root): no component owns it
-   because nothing ships it — declare the root once under ARCH.yaml
-   `output_locations` and #25 leaves every path beneath it alone.
+   because nothing ships it. `output_locations` is a **system-mode field —
+   container mode may not write it** (`references/merge-validate.md`'s mode
+   boundary). Leave the advisory standing; the next `/sdlc:arch --system` or
+   `--reconcile` run is where it gets asked and recorded (SKILL.md → "system
+   mode's update flow, #25 rows"). There is no interview question for it
+   today — hand-editing `docs/ARCH.yaml` also works, but never from here.
 4. **Content assets need authoring units.** A `content_asset` component's
    work_units are not code callables; they are the authoring deliverables
    (`author_review_prompt_pack`, `write_cli_question_inventory`), each with

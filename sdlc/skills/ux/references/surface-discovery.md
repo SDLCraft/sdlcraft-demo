@@ -87,11 +87,13 @@ isn't already covered by a WKF-### candidate, add a candidate. Mark its
 rule *and* the command that exposes it ("every error ends with a hint;
 `myapp explain <code>` prints the long form"). The backticked
 `<root_command> <verb>` is a candidate even when the rest of the FR is not
-UX work: the FR-coverage gate is whole-FR (trace OR defer, as one), so
-deferring such an FR with a reason about the other clause silences the
-command — the validator reports it as `[FR names a command]`. Either the
-command gets a surface (and the FR is traced from it) or the deferral reason
-says why the *named command* needs none.
+UX work: the FR-coverage gate is whole-FR (trace OR defer, as one), and
+**either half silences the command** — a deferral whose reason is about the
+other clause, or a trace to something that does not run the named command (a
+surface for a different verb, or a `cli.exit_codes` entry, which has no
+invocation at all). The validator reports both as `[FR names a command]`.
+Either the command gets a surface that runs it *and* the FR is traced from
+that surface, or the deferral reason says why the *named command* needs none.
 
 **This step is not first-interview-only.** On a re-run, every FR (and ENT,
 via 1c) the delta review reports as **added** goes through 1b/1c *before*

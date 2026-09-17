@@ -313,6 +313,83 @@ def _migrate_open_questions(data: Any, changes: List[str]) -> None:
         _migrate_open_questions_scope(data, "", changes)
 
 
+# The four families a line-scanning consumer reads, and the spelling it needs:
+# ONE physical line, double-quoted, closing quote last, nothing after it. The
+# pattern mirrors code/topo_order.py's _REQ_RE and prd/validate_schema.py's
+# _ITEM_SHAPE_RE (ledger IMP-159).
+ITEM_SHAPE_FAMILIES = ("FR", "NFR", "WKF", "ACR")
+_PINNED_ITEM_RE = re.compile(r'"(?P<id>(?:FR|NFR|WKF|ACR)-\d+):\s*(?P<text>.*)"\s*$')
+_ITEM_OPENER_RE = re.compile(r'^\s*-\s*["\']?(?:FR|NFR|WKF|ACR)-\d+:')
+_CORRECT_ITEM_RE = re.compile(r"^(?:FR|NFR|WKF|ACR)-\d{3,}: .+", re.DOTALL)
+
+
+def _scoped_lists(data: Any, paths: List[str], scope: str):
+    """Yield (parent, key, path_label) for one family, across product scopes.
+
+    The same traversal `_migrate_family` walks, kept separate so the normalize
+    pass adds no behaviour at all to the id migration itself.
+    """
+    metadata = data.get("metadata") if hasattr(data, "get") else None
+    is_monorepo = bool(metadata.get("monorepo", False)) if metadata is not None else False
+    roots: List[Tuple[Any, str]] = [(data, "")]
+    if scope != "top" and is_monorepo:
+        products = data.get("products")
+        roots = []
+        if products is not None and hasattr(products, "items"):
+            for slug, product_data in products.items():
+                if product_data is not None and hasattr(product_data, "get"):
+                    roots.append((product_data, f"products.{slug}."))
+    for root, label in roots:
+        for path in paths:
+            parent, key = _get_parent_and_key(root, path)
+            if parent is not None and key is not None:
+                yield parent, key, f"{label}{path}"
+
+
+def normalize_item_shape(data: Any, changes: List[str]) -> None:
+    """Re-write every correctly-prefixed requirement item as one quoted line.
+
+    Off by default. This module's contract is that an already-correct item keeps
+    its own quote style, and rewriting every item would break that promise on a
+    file the caller only wanted renumbered. `--normalize-shape` is the caller
+    asking for exactly that rewrite, because the SPELLING is what a
+    line-scanning consumer reads (ledger IMP-159).
+
+    A wrapped item is already a double-quoted scalar, so re-wrapping records
+    nothing - the dump re-flows it onto one line, which is the fix. An item
+    carrying a trailing comment is left strictly alone: ruamel keeps the comment
+    attached to it, so re-wrapping would still emit an unreadable line, and
+    deleting the comment would destroy content nobody asked this tool to touch.
+    `unreadable_items()` reports those for a human.
+    """
+    for prefix, paths, scope in FAMILIES:
+        if prefix not in ITEM_SHAPE_FAMILIES:
+            continue
+        for parent, key, path_label in _scoped_lists(data, paths, scope):
+            items = parent.get(key)
+            if not isinstance(items, list):
+                continue
+            for idx in range(len(items)):
+                item = items[idx]
+                if not isinstance(item, str) or not _CORRECT_ITEM_RE.match(item):
+                    continue
+                was_quoted = isinstance(item, DoubleQuotedScalarString)
+                items[idx] = DoubleQuotedScalarString(str(item))
+                if not was_quoted:
+                    changes.append(
+                        f"  {path_label}[{idx}]: spelling  ->  one double-quoted line"
+                    )
+
+
+def unreadable_items(rendered: str) -> List[str]:
+    """Item lines a line-scanning consumer still cannot read, after rendering."""
+    out: List[str] = []
+    for n, line in enumerate(rendered.splitlines(), start=1):
+        if _ITEM_OPENER_RE.match(line) and _PINNED_ITEM_RE.search(line) is None:
+            out.append(f"line {n}: {line.strip()[:72]}")
+    return out
+
+
 def migrate(data: Any) -> Tuple[Any, List[str]]:
     """Run all family migrations on `data` in place. Returns (data, change-log)."""
     changes: List[str] = []
@@ -365,6 +442,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="Print the change-log and proposed YAML without writing.",
     )
+    parser.add_argument(
+        "--normalize-shape",
+        action="store_true",
+        help="Also re-write every FR/NFR/WKF/ACR item as one double-quoted "
+             "line, the spelling line-scanning consumers read.",
+    )
     args = parser.parse_args(argv)
 
     path: Path = args.path
@@ -374,6 +457,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     _, changes = migrate(data)
+    if args.normalize_shape:
+        normalize_item_shape(data, changes)
+        # A wrapped item re-flows onto one line without any item being
+        # rewritten, so the change-log alone would report "nothing to do" on a
+        # file this pass genuinely fixes. The rendered bytes are the truth.
+        if not changes and _dump_yaml(yaml, data) != path.read_text(encoding="utf-8"):
+            changes.append("  re-flowed a wrapped item onto a single line")
 
     if not changes:
         print(f"[OK] {path} already conforms to the v1.1 ID convention. No changes.")
@@ -383,6 +473,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     for line in changes:
         print(line)
 
+    if args.normalize_shape:
+        residual = unreadable_items(_dump_yaml(yaml, data))
+        if residual:
+            print(f"\nWARNINGS ({len(residual)}) - left exactly as they were. Each "
+                  f"carries a trailing comment, which is content this tool will "
+                  f"not delete for you. Move the comment onto its own line above "
+                  f"the item, by hand:")
+            for line in residual:
+                print(f"  - {line}")
+
     if args.dry_run:
         print("\n--- proposed YAML (dry-run; not written) ---")
         print(_dump_yaml(yaml, data))
@@ -391,8 +491,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     backup = path.with_suffix(path.suffix + ".pre-id-migration.bak")
-    backup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-    path.write_text(_dump_yaml(yaml, data), encoding="utf-8")
+    # docs/PRD.yaml is the consumer's artifact, so it keeps the line endings it
+    # has. Detect them from BYTES: _load_yaml read this file with read_text(),
+    # whose universal-newline decoding has already collapsed CRLF to LF, so a
+    # bare newline="" here would pin LF and flip a CRLF PRD - a whole-file diff
+    # in the artifact the rest of the pipeline hashes and slices (IMP-116).
+    raw = path.read_bytes()
+    newline = "\r\n" if b"\r\n" in raw else "\n"
+    backup.write_bytes(raw)  # a backup is a byte-for-byte copy of the original
+    path.write_text(_dump_yaml(yaml, data), encoding="utf-8", newline=newline)
     print(f"\n[WROTE] {path}")
     print(f"[BACKUP] original saved to {backup}")
     return 0

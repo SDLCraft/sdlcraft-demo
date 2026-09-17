@@ -30,6 +30,15 @@ Validates:
        whose PRD text names `<cli.root_command> <verb>` in backticks is
        reported, because a deferral covers the WHOLE requirement and the
        command clause is then specified nowhere (ledger IMP-076).
+    8. CLI-contract typing (blocking at ux_version >= 3.0, warning below -
+       CLAUDE.md section 10): a `layout.cli_args` or `cli.global_flags`
+       entry that is not a {name, kind, type, required, description}
+       mapping, or a `cli_command` surface's `exit_conditions` entry that
+       is a plain string or names a code absent from `cli.exit_codes`
+       (ledger IMP-009).
+    9. Inventory-shard integrity (same floor): a `surface_inventory`
+       `file_path` that names no file on disk, or a `UX__*.yaml` on disk
+       that no `surface_inventory` entry names (ledger IMP-171).
 
 Exit codes:
     0 — schema valid; either status='complete' (with all required fields
@@ -60,6 +69,8 @@ from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 # =============================================================================
 
 GLOSSARY_PATH = ".claude/rules/sdlc-output-glossary.md"
+STALE_NOTE = ("an upstream moved after this file was written; review the delta "
+              "before the next stage reads it")
 
 def join_ids(ids, limit=12):
     """Render a grouped finding's id list. Capped, because a line nobody
@@ -172,6 +183,16 @@ def _prose_deferrals_allowed(obj, _fields=('ux_version',), _floor=2):
         if v:
             return tuple(_version_tuple(v)[:2]) < (_floor, 0)
     return True
+
+
+# CLI-contract typing + inventory-shard integrity gate (CLAUDE.md section 10,
+# ledger IMP-009 / IMP-171). New in 3.0 - one version above the 2.0
+# provenance gate and above the 2.1 fixture ceiling. Both this floor and the
+# 2.0 one above it were dead code until references/merge-validate.md's
+# write-time stamp rule started stamping every new write at >= 3.0; an older
+# stamp silently degrades every check gated on either floor to a warning.
+CLI_CONTRACT_FLOOR: Tuple[int, int] = (3, 0)
+CLI_CONTRACT_GATE_NOTE = "ux_version < 3.0"
 
 
 # =============================================================================
@@ -395,6 +416,14 @@ class Cli(_ThemeBase):
     exit_codes: Optional[Dict[str, Any]] = None
     interactive_mode: Optional[Any] = None
     config_file: Optional[CliConfigFile] = None
+    # Flags shared by every command, declared ONCE instead of re-specified
+    # (and re-typed) inside every cli_command surface's layout.cli_args.
+    # Same CLIArg shape as layout.cli_args (name/kind/type/required/
+    # description at minimum) - see check_cli_args_shape. Untyped here for
+    # the same reason cli_args is: the shape is enforced by a version-gated
+    # check (CLAUDE.md 10), not by the pydantic field type, so a garbage
+    # entry on a pre-3.0 artifact warns instead of instantly breaking it.
+    global_flags: Optional[List[Any]] = None
 
 
 # -----------------------------------------------------------------------------
@@ -611,7 +640,10 @@ class UXSurface(BaseModel):
     route: Optional[str] = None
     cli_invocation: Optional[str] = None
     entry_conditions: Optional[List[str]] = None
-    exit_conditions: Optional[List[str]] = None
+    # list[str] (legacy prose) or list[{code: int, when: str}] (typed, ux
+    # >= 3.0) - see check_cli_exit_conditions. Untyped here so a legacy
+    # string entry is a version-gated warning, not an instant schema break.
+    exit_conditions: Optional[List[Any]] = None
     layout: Optional[SurfaceLayout] = None
     states: Optional[SurfaceStates] = None
     interactions: Optional[List[SurfaceInteraction]] = None
@@ -1220,10 +1252,20 @@ class DeferralIndex:
             _reason = str(_w.get("text") or "").strip()
             if not _reason:
                 continue
-            for _eid in (_w.get("defers") or []):
-                _eid = str(_eid).strip()
-                if _eid:
-                    self.declared.setdefault(_eid.upper(), _reason)
+            _ids = [str(_e).strip() for _e in (_w.get("defers") or []) if str(_e).strip()]
+            for _eid in _ids:
+                self.declared.setdefault(_eid.upper(), _reason)
+            # Warn-first (CLAUDE.md 10, ledger IMP-109): the canonical WRN block
+            # ignores a mapping whose id is not WRN-NNN, yet its deferral still
+            # counts for one more version - say so instead of honouring it silently.
+            _wid = str(_w.get("id") or "").strip()
+            if _ids and not _WRN_ID_RE.match(_wid):
+                self.shape_warnings.append(
+                    f"ux_warnings entry '{_wid}' still defers {', '.join(_ids)}, "
+                    f"but that id is not of the form WRN-NNN, so the warning itself is "
+                    f"ignored. The deferral counts for one more version only - give the "
+                    f"warning a WRN-NNN id."
+                )
 
     def defer(self, fid: str) -> bool:
         s = str(fid).strip()
@@ -1253,7 +1295,7 @@ class DeferralIndex:
 def _fr_covered_set(ux: "UX", surfaces: Dict[str, UXSurface]) -> Set[str]:
     """Every FR/NFR id some surface (file or inventory entry) or exit code
     traces - the TRACE half of trace-or-defer, shared by check_fr_coverage
-    and check_deferred_fr_names_command."""
+    and check_fr_names_unbuilt_command."""
     covered = {
         str(x).strip().upper()
         for surface in surfaces.values()
@@ -1318,40 +1360,106 @@ def _commands_named_in(text: str, root: str) -> List[str]:
     return [m.group("cmd").strip() for m in pat.finditer(text)]
 
 
-def _surface_lookalike(
+def _surface_lookalikes(
     cmd: str, root: str, ux: "UX", surfaces: Dict[str, UXSurface],
-) -> Optional[str]:
-    """A surface that already looks like the named command: an inventory
+) -> List[str]:
+    """Every surface that already looks like the named command: an inventory
     surface_id equal to (or containing / contained in) the command's slug, or
-    a UX__ file whose cli_invocation starts with `<root> <cmd>`."""
+    a UX__ file whose cli_invocation starts with `<root> <cmd>`.
+
+    The slug arm stays CONTAINMENT on purpose. Looking like the command is a
+    shape hint, never the verdict - the verdict is whether such a surface also
+    TRACES the requirement (_traces_fr). A project may call the surface behind
+    `acme explain` either `explain` or `explain-error`, and both are the same
+    surface (ledger IMP-136).
+    """
     slug = "-".join(cmd.lower().split())
+    out: List[str] = []
     for inv in _iter_inventory_items(ux):
         sid = str(getattr(inv, "surface_id", None) or "").strip().lower()
-        if sid and (sid == slug or slug in sid or sid in slug):
-            return sid
+        if sid and (sid == slug or slug in sid or sid in slug) and sid not in out:
+            out.append(sid)
     prefix = f"{root} {cmd}".lower()
     for surface in surfaces.values():
         inv_str = " ".join(str(surface.cli_invocation or "").lower().split())
-        if inv_str.startswith(prefix) and (surface.surface_id or "").strip():
-            return str(surface.surface_id).strip()
-    return None
+        sid = str(surface.surface_id or "").strip()
+        if inv_str.startswith(prefix) and sid and sid.lower() not in out:
+            out.append(sid.lower())
+    return out
 
 
-def check_deferred_fr_names_command(
+def _traces_fr(
+    sid: str, fid: str, ux: "UX", surfaces: Dict[str, UXSurface],
+) -> bool:
+    """Does the surface named `sid` list `fid` in implements_requirements -
+    in its inventory entry, or in its own UX__ file?"""
+    want = fid.strip().upper()
+    key = sid.strip().lower()
+    for inv in _iter_inventory_items(ux):
+        if str(getattr(inv, "surface_id", None) or "").strip().lower() == key:
+            if any(str(x).strip().upper() == want for x in
+                   (getattr(inv, "implements_requirements", None) or [])):
+                return True
+    for surface in surfaces.values():
+        if str(surface.surface_id or "").strip().lower() == key:
+            if any(str(x).strip().upper() == want
+                   for x in (surface.implements_requirements or [])):
+                return True
+    return False
+
+
+def _fr_tracers(
+    fid: str, ux: "UX", surfaces: Dict[str, UXSurface],
+) -> List[str]:
+    """What traces `fid` today, named the way the reader can find it again."""
+    want = fid.strip().upper()
+    names: List[str] = []
+
+    def _add(label: str) -> None:
+        if label not in names:
+            names.append(label)
+
+    for inv in _iter_inventory_items(ux):
+        if any(str(x).strip().upper() == want for x in
+               (getattr(inv, "implements_requirements", None) or [])):
+            sid = str(getattr(inv, "surface_id", None) or "").strip()
+            _add(f"surface '{sid}'" if sid else "a surface_inventory entry")
+    for surface in surfaces.values():
+        if any(str(x).strip().upper() == want
+               for x in (surface.implements_requirements or [])):
+            sid = str(surface.surface_id or "").strip()
+            _add(f"surface '{sid}'" if sid else "a screen/command file")
+    for scope in _iter_ux_scopes(ux):
+        cli = getattr(scope, "cli", None)
+        for code, spec in (getattr(cli, "exit_codes", None) or {}).items():
+            if isinstance(spec, dict) and any(
+                    str(x).strip().upper() == want
+                    for x in (spec.get("implements_requirements") or [])):
+                _add(f"the cli.exit_codes entry {str(code)!r}")
+    return names
+
+
+def check_fr_names_unbuilt_command(
     fr_texts: Dict[str, str], ux: "UX", surfaces: Dict[str, UXSurface],
     dfr: DeferralIndex,
 ) -> List[str]:
-    """WARNING (never blocks) — a DEFERRED FR whose text names a command.
+    """WARNING (never blocks) — an FR naming a command that nothing builds.
 
-    Coverage is whole-FR: one deferral reason silences every clause of the
-    requirement, including a clause that names `<root_command> <verb>` in
-    backticks - which is a surface by definition. Such an FR needs a surface
-    for the command (or a trace from the surface that already looks like it),
-    or a deferral reason that says why the NAMED command needs none. Only
-    FRs that are uncovered AND deferred are examined, so no new prose-only
-    hit is recorded (the same defer() calls check_fr_coverage makes). Ledger
-    IMP-076 (aicf LSN-056: FR-097 deferred as a 'global content rule' while
-    its text named `aicf explain <term>`; nothing downstream ever built it).
+    Coverage is whole-FR on BOTH halves of trace-or-defer, so both halves can
+    silence a clause that names `<root_command> <verb>` in backticks - which
+    is a surface by definition. A deferral reason written for the other clause
+    silences it; so does a trace to something that does not run the named
+    command - a surface for a different verb, or a cli.exit_codes entry, which
+    carries description and implements_requirements only and can never be the
+    surface that runs anything (IMP-046 put exit codes in the coverage set;
+    ledger IMP-136 stopped one standing in for a command).
+
+    The FR is therefore exempt only when a surface that looks like the command
+    ALSO traces this FR - then the command really is specified and built. An
+    FR that is neither traced nor deferred is left to check_fr_coverage, which
+    already reports it by name; this check would only say the same thing
+    twice. Ledger IMP-076 (aicf LSN-056: FR-097 deferred as a 'global content
+    rule' while its text named `aicf explain <term>`; nothing ever built it).
     """
     roots = _root_commands(ux)
     if not roots:
@@ -1359,31 +1467,46 @@ def check_deferred_fr_names_command(
     covered = _fr_covered_set(ux, surfaces)
     out: List[str] = []
     for fid, text in fr_texts.items():
-        if fid.upper() in covered or not dfr.defer(fid):
+        deferred = bool(dfr.defer(fid))
+        if not deferred and fid.upper() not in covered:
             continue
         named: List[Tuple[str, str]] = []
         for root in roots:
             named.extend((root, cmd) for cmd in _commands_named_in(text, root))
         if not named:
             continue
-        reason = dfr.declared.get(fid.upper()) or "by a ux_warnings note"
+        lookalikes = [sid for root, cmd in named
+                      for sid in _surface_lookalikes(cmd, root, ux, surfaces)]
+        if any(_traces_fr(sid, fid, ux, surfaces) for sid in lookalikes):
+            continue
         shown = ", ".join(f"`{root} {cmd}`" for root, cmd in named)
-        lookalike = next(
-            (s for s in (_surface_lookalike(cmd, root, ux, surfaces) for root, cmd in named) if s),
-            None,
-        )
-        if lookalike:
+        if lookalikes:
             remedy = (f"Add {fid} to the implements_requirements of surface "
-                      f"'{lookalike}', whose invocation already looks like it")
+                      f"'{lookalikes[0]}', whose invocation already looks like it")
         else:
             remedy = f"Add a cli_command surface that implements {fid}"
-        out.append(
-            f"{fid} is deferred ({reason[:90]!r}), but its text names a command: "
-            f"{shown}. A deferral covers the whole requirement, so that command "
-            f"is now specified nowhere and no task will build it. {remedy}, or "
-            f"reword the deferral to say why {shown} needs no surface. "
-            f"[FR names a command]"
-        )
+        if deferred:
+            reason = dfr.declared.get(fid.upper()) or "by a ux_warnings note"
+            out.append(
+                f"{fid} is deferred ({reason[:90]!r}), but its text names a command: "
+                f"{shown}. A deferral covers the whole requirement, so that command "
+                f"is now specified nowhere and no task will build it. {remedy}, or "
+                f"reword the deferral to say why {shown} needs no surface. "
+                f"[FR names a command]"
+            )
+        else:
+            tracers = _fr_tracers(fid, ux, surfaces)
+            by = " and ".join(tracers[:3]) or "nothing that runs it"
+            if len(tracers) > 3:
+                by += f" and {len(tracers) - 3} more"
+            out.append(
+                f"{fid} is traced by {by}, but its text names a command: "
+                f"{shown}. A trace covers the whole requirement, and nothing "
+                f"tracing {fid} runs {shown}, so that command is specified "
+                f"nowhere and no task will build it. {remedy}, or defer {fid} "
+                f"with a reason that says why {shown} needs no surface. "
+                f"[FR names a command]"
+            )
     return out
 
 
@@ -1479,7 +1602,8 @@ def check_provenance(
             current = _content_hash_16(up_path)
         if current and current != recorded:
             warns.append(
-                f"built against an older {f} - run /sdlc:ux to review the delta"
+                f"built against an older {f} - run /sdlc:ux --reconcile to review "
+                f"the delta"
             )
     return warns
 
@@ -1530,6 +1654,186 @@ def check_downstream_claims(ux: UX, docs_dir: Path) -> List[str]:
     for slug, product in (ux.products or {}).items():
         _sweep(product.surface_inventory, f"products.{slug}.")
     return warns
+
+
+# =============================================================================
+# CLI-contract typing + inventory-shard integrity (CLAUDE.md section 10,
+# ledger IMP-009 / IMP-171). Version-gated at CLI_CONTRACT_FLOOR: blocking
+# at/above it, a warning below it - never a hard pydantic type, so a garbage
+# entry on a pre-3.0 artifact does not turn an already-`complete` file red
+# the moment this validator ships.
+# =============================================================================
+
+
+def _cli_arg_like_lists(
+    ux: "UX", surfaces: Dict[str, UXSurface],
+) -> "list[tuple[str, list]]":
+    """Every list this lesson's CLIArg typing covers: each surface's
+    `layout.cli_args`, and `cli.global_flags` at every scope (top level and,
+    in monorepo mode, each product)."""
+    out: List[Tuple[str, list]] = []
+    for name, surface in surfaces.items():
+        layout = getattr(surface, "layout", None)
+        args = getattr(layout, "cli_args", None)
+        if args:
+            out.append((f"{name}: layout.cli_args", args))
+    for scope_label, scope in _iter_ux_scopes_labeled(ux):
+        cli = getattr(scope, "cli", None)
+        flags = getattr(cli, "global_flags", None)
+        if flags:
+            out.append((f"{scope_label}cli.global_flags", flags))
+    return out
+
+
+def _iter_ux_scopes_labeled(ux: "UX"):
+    yield "", ux
+    for slug, prod in (getattr(ux, "products", None) or {}).items():
+        yield f"products.{slug}.", prod
+
+
+def check_cli_args_shape(
+    ux: "UX", surfaces: Dict[str, UXSurface], floor_met: bool,
+) -> Tuple[List[str], List[str]]:
+    """New at ux_version >= 3.0 (ledger IMP-009): every `layout.cli_args`
+    entry and every `cli.global_flags` entry must be a mapping - a CLIArg
+    (name/kind/type/required/description at minimum, references/cli-ux.md).
+    `sdlc-code`'s worker copies these blocks verbatim into a parser and
+    never reads the UX shard itself, so a bare string or other garbage entry
+    reaches codegen with nothing upstream having checked its shape. Blocking
+    at CLI_CONTRACT_FLOOR, a warning below it (CLAUDE.md section 10).
+
+    Returns (errors, legacy_warnings).
+    """
+    errors: List[str] = []
+    legacy: List[str] = []
+    for where, entries in _cli_arg_like_lists(ux, surfaces):
+        for i, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                msg = (
+                    f"{where}[{i}] is {entry!r}, not a "
+                    f"{{name, kind, type, required, description}} mapping"
+                )
+                (errors if floor_met else legacy).append(msg)
+    return errors, legacy
+
+
+def _exit_codes_declared(ux: "UX") -> Set[str]:
+    """Every code cli.exit_codes declares, across every scope."""
+    codes: Set[str] = set()
+    for _label, scope in _iter_ux_scopes_labeled(ux):
+        cli = getattr(scope, "cli", None)
+        for code in (getattr(cli, "exit_codes", None) or {}).keys():
+            codes.add(str(code).strip())
+    return codes
+
+
+def check_cli_exit_conditions(
+    ux: "UX", surfaces: Dict[str, UXSurface], floor_met: bool,
+) -> Tuple[List[str], List[str], List[str]]:
+    """New at ux_version >= 3.0 (ledger IMP-009): a `cli_command` surface's
+    `exit_conditions` entries are typed `{code: int, when: str}`, existence-
+    checked against `cli.exit_codes`. A legacy plain-string entry, or a
+    typed `code` that names no key of `cli.exit_codes`, is a violation -
+    blocking at CLI_CONTRACT_FLOOR, a warning below it (CLAUDE.md 10). A
+    malformed typed entry (no integer `code`, or no `when`) is reported but
+    never blocks, the same way a malformed WRN mapping never does (section 2).
+
+    Returns (errors, legacy_warnings, shape_warnings).
+    """
+    errors: List[str] = []
+    legacy: List[str] = []
+    shape: List[str] = []
+    declared = _exit_codes_declared(ux)
+    for name, surface in surfaces.items():
+        if surface.surface_type != SurfaceType.cli_command:
+            continue
+        for i, entry in enumerate(surface.exit_conditions or []):
+            where = f"{name}: exit_conditions[{i}]"
+            if isinstance(entry, str):
+                msg = (
+                    f"{where} is a plain string ({entry!r}) - exit_conditions "
+                    f"on a cli_command surface is typed {{code, when}} so the "
+                    f"code can be checked against cli.exit_codes; rewrite it "
+                    f"as {{code: <int>, when: {entry!r}}}"
+                )
+                (errors if floor_met else legacy).append(msg)
+                continue
+            if not isinstance(entry, dict):
+                shape.append(
+                    f"{where} is {entry!r}, neither a string nor a "
+                    f"{{code, when}} mapping - ignored"
+                )
+                continue
+            code = entry.get("code")
+            when = str(entry.get("when") or "").strip()
+            if code is None or isinstance(code, bool) or not isinstance(code, int):
+                shape.append(f"{where} declares no integer 'code' - ignored")
+                continue
+            if not when:
+                shape.append(f"{where} (code {code}) has no 'when' - ignored")
+                continue
+            if str(code) not in declared:
+                msg = (
+                    f"{where}: code {code} is not a key of cli.exit_codes - "
+                    f"declare it there so the exit code's meaning is recorded "
+                    f"once, not re-described per surface"
+                )
+                (errors if floor_met else legacy).append(msg)
+    return errors, legacy, shape
+
+
+def check_inventory_shard_integrity(
+    ux: "UX", docs_dir: Path, floor_met: bool,
+) -> Tuple[List[str], List[str]]:
+    """Cross-check mirroring arch's check #8 (`check_file_path_integrity`,
+    arch/validate_schema.py:2994): `surface_inventory` `file_path` <-> on-disk
+    `UX__*.yaml` integrity (ledger IMP-171). Resolution order for a relative
+    `file_path` is IDENTICAL to arch's:
+      1. `docs_dir.parent / file_path`  (canonical production layout, where
+         `file_path` already carries a `docs/` prefix)
+      2. `docs_dir / Path(file_path).name`  (fixture / flat layout)
+    The first one that exists wins. Vacuous when the inventory is empty -
+    including a `not_applicable` artifact, whose caller never reaches this
+    function at all. Blocking at CLI_CONTRACT_FLOOR, a warning below it
+    (CLAUDE.md section 10).
+
+    Returns (errors, legacy_warnings).
+    """
+    errors: List[str] = []
+    legacy: List[str] = []
+    items = list(_iter_inventory_items(ux))
+    if not items:
+        return errors, legacy
+
+    referenced: Set[Path] = set()
+    for item in items:
+        fp = str(item.file_path or "").strip()
+        if not fp:
+            continue  # an empty file_path is its own required-field violation
+        p = Path(fp)
+        resolved: Optional[Path] = None
+        if p.is_absolute():
+            if p.exists():
+                resolved = p
+        else:
+            cand1 = (docs_dir.parent / p).resolve()
+            if cand1.exists():
+                resolved = cand1
+            else:
+                cand2 = (docs_dir / p.name).resolve()
+                if cand2.exists():
+                    resolved = cand2
+        if resolved is None:
+            msg = f"surface_inventory file_path '{fp}' does not exist on disk"
+            (errors if floor_met else legacy).append(msg)
+        else:
+            referenced.add(resolved.resolve())
+
+    on_disk = {p.resolve() for p in docs_dir.glob("UX__*.yaml")}
+    for p in sorted(on_disk - referenced):
+        msg = f"{p.name} exists on disk but is not listed in surface_inventory"
+        (errors if floor_met else legacy).append(msg)
+    return errors, legacy
 
 
 def _load_yaml(path: Path) -> tuple[Any, Optional[str]]:
@@ -1635,13 +1939,29 @@ def validate_all(ux_path: Path) -> int:
     dfr = DeferralIndex(ux)
     fr_texts = load_prd_fr_texts(prd_path)
     fr_gaps = check_fr_coverage(list(fr_texts), ux, surfaces, dfr)
-    # A deferred FR whose text names `<root_command> <verb>` (IMP-076).
-    cmd_warnings = check_deferred_fr_names_command(fr_texts, ux, surfaces, dfr)
+    # An FR whose text names `<root_command> <verb>` that no surface running
+    # that command traces - deferred, or traced from somewhere else (IMP-076,
+    # widened to the trace half by IMP-136).
+    cmd_warnings = check_fr_names_unbuilt_command(fr_texts, ux, surfaces, dfr)
 
     # 8) Provenance-staleness warning (never blocks, CLAUDE.md 7).
     prov_warnings = check_provenance(
         ux.metadata, ux_path,
         no_prov_gate=_version_tuple(ux.metadata.ux_version) >= (2, 0),
+    )
+    # Ledger IMP-127: NEXT names the reconcile form while an upstream is stale.
+    stale_upstream = [w for w in prov_warnings if "built against an older" in str(w)]
+
+    # 9) CLI-contract typing (ledger IMP-009) + inventory-shard integrity
+    # (ledger IMP-171). Version-gated at CLI_CONTRACT_FLOOR, warn below it
+    # (CLAUDE.md 10).
+    cli_floor_met = _version_tuple(ux.metadata.ux_version) >= CLI_CONTRACT_FLOOR
+    cli_args_errs, cli_args_legacy = check_cli_args_shape(ux, surfaces, cli_floor_met)
+    exit_cond_errs, exit_cond_legacy, exit_cond_shape = check_cli_exit_conditions(
+        ux, surfaces, cli_floor_met
+    )
+    inv_shard_errs, inv_shard_legacy = check_inventory_shard_integrity(
+        ux, ux_path.parent, cli_floor_met
     )
 
     def _soft() -> List[str]:
@@ -1662,6 +1982,10 @@ def validate_all(ux_path: Path) -> int:
         dep = dfr.deprecation_warning()
         if dep:
             out.append(dep)
+        out.extend(f"{m} [{CLI_CONTRACT_GATE_NOTE}]" for m in cli_args_legacy)
+        out.extend(f"{m} [{CLI_CONTRACT_GATE_NOTE}]" for m in exit_cond_legacy)
+        out.extend(exit_cond_shape)
+        out.extend(f"{m} [{CLI_CONTRACT_GATE_NOTE}]" for m in inv_shard_legacy)
         return out
 
     def _problems() -> List[str]:
@@ -1676,6 +2000,11 @@ def validate_all(ux_path: Path) -> int:
                 f"command carrying them out: {join_ids(ids)}. Every workflow needs at "
                 f"least one surface that traces it."
             )
+        out += [f"layout.cli_args or cli.global_flags is malformed - {m}"
+                for m in cli_args_errs]
+        out += [f"exit_conditions is malformed - {m}" for m in exit_cond_errs]
+        out += [f"surface_inventory/on-disk shard mismatch - {m}"
+                for m in inv_shard_errs]
         return out
 
     status = ux.metadata.status
@@ -1745,7 +2074,11 @@ def validate_all(ux_path: Path) -> int:
                   f"docs/PRD.yaml was {reason}, so PRD workflow coverage was NOT "
                   f"checked. /sdlc:design can run it.")
         print_findings([], soft)
-        print_next("/sdlc:design", show_glossary=bool(soft))
+        if stale_upstream:
+            print_next(f"/sdlc:ux --reconcile  ({STALE_NOTE})", "then /sdlc:design",
+                       show_glossary=bool(soft))
+        else:
+            print_next("/sdlc:design", show_glossary=bool(soft))
         return 0
 
     # status == "draft"

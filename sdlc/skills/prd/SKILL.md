@@ -56,7 +56,6 @@ Runtime files (NOT inside this skill directory):
 |---|---|
 | `docs/PRD.yaml` (project root) | Output artifact consumed by downstream agents. |
 | `.claude/skills-state/sdlc-prd.state.yaml` | Session state for resumability. |
-| `CLAUDE.md` (project root) | Pointer block injected on completion. |
 
 ## Reserved EXIT command
 
@@ -67,24 +66,60 @@ saved automatically after each confirmed batch, so progress is never lost —
 
 There is no `SAVE` command — saving is implicit.
 
+## Invocation dispatch
+
+Classify `$ARGUMENTS`:
+
+1. **Empty** → the full flow below (Phases 1–8).
+2. **`--set <schema_path>=<value>`** → the **set rung**: change exactly that
+   one field, ask no question. Needs a `complete` `docs/PRD.yaml` — without
+   one, name plain `/sdlc:prd` and abort. `<schema_path>` must resolve to a
+   scalar leaf or a whole list — a list-item id inside a list-valued path
+   (e.g. one feature in `functional_requirements.features`) is out of scope
+   this run, no id→schema_path index exists yet. This is a distinct,
+   field-scoped rung from the theme-scoped update flow above (Phase 1); the
+   two never combine in one invocation. Steps:
+   1. Parse `<value>` as a YAML scalar/flow (`[web, cli]` parses as a list).
+   2. Apply the edit to an **in-memory copy** of `docs/PRD.yaml` and
+      validate it — run `validate_schema.py` against a temp file — before
+      the real file moves. On failure, print the field-level error and
+      touch nothing on disk.
+   3. Only then write `docs/PRD.yaml` for real. If the field has a sibling
+      `<field>_confidence`, write it `confirmed`; if it has a sibling
+      `<field>_rationale`, require `--rationale "<why>"` or clear the stale
+      one and say so.
+   4. Run `python .claude/sdlc/bump_artifact.py --file docs/PRD.yaml
+      --summary "set <schema_path>" --by sdlc-prd` — the one changelog pen
+      (falls back to the documented `metadata.changelog` line format only
+      when the helper is absent). Update `last_updated`; keep `session_id`.
+   5. Phase 8's `docs/INDEX.yaml` + statusboard refresh still runs, then
+      `docs_index.py --stale` so the close card names the downstream skill
+      that must `--reconcile`.
+3. **Anything else** → print the two forms above and abort.
+
 ## The 8-phase flow
 
 ### Phase 1 — Resume check
 
 Before doing anything else, check for `.claude/skills-state/sdlc-prd.state.yaml`:
 
-- If it exists with `status: in_progress`, first compare its `skill_version`
-  to this file's footer: older → **migrate it additively before asking**
-  (`references/edge-cases.md` → "Resume with stale state": bump the version,
-  add the missing baseline keys with empty defaults, record a `migrations`
-  entry, touch no answer or theme list) — a version bump never costs the user
-  a completed interview. Then ask:
-  > "I found an unfinished session from `<last_updated>`. Would you like to
-  > **resume**, **restart** (discard previous answers), or **discard** (delete
-  > state and exit)?"
-- If `status: complete` or `status: aborted` and `docs/PRD.yaml` exists, treat
-  this as an update flow — see Phase 7's *merge* behavior.
+- If it exists with `status: in_progress`, ask: "I found an unfinished
+  session from `<last_updated>`. Would you like to **resume**, **restart**
+  (discard previous answers), or **discard** (delete state and exit)?"
+- If `status: complete` or `aborted` and `docs/PRD.yaml` exists, scope the
+  update — see `sdlc/skills/ux/references/upstream-reconciliation.md`'s
+  REFINE row (open only the named themes, the §7 delta items, and the
+  non-confirmed set; confirm the rest in one summary) — then Phase 7's merge.
+- If `status: complete` or `aborted` and `docs/PRD.yaml` is ABSENT, only
+  `partial_answers` survives: offer restart-from-partial_answers or
+  discard — never resume (the artifact is authoritative for answers, the
+  state file for progress).
 - If no state file, continue to Phase 2.
+- If the state file's `skill_version` is older than this file's footer: run
+  the recipe below (`references/edge-cases.md` → "Resume with stale state" —
+  migrate additively, reconcile the theme lists and `last_ids`, then offer
+  resume at position 1) — a version bump never costs the user a completed
+  interview.
 
 ### Phase 2 — Scan
 
@@ -93,7 +128,10 @@ is present (the project ran `/sdlc:setup`) and the PRD is large, read it by
 slice rather than whole: look an `FR-###` or a top-level section up in
 `INDEX.yaml` (or `python .claude/sdlc/docs_index.py --show <symbol>`) and `Read`
 only its range. A fresh PRD is small, so this matters mainly on re-runs of a
-mature spec. Protocol: `.claude/rules/sdlc-docs-access.md`.
+mature spec. Protocol: `.claude/rules/sdlc-docs-access.md`. Every `python
+.claude/sdlc/docs_index.py …` in this file runs the copy
+`${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once per
+run: an installed copy older than the plugin's counts as absent.
 
 Start with the shared sweep, which handles the traversal, the skip list and
 the cost caps in one place:
@@ -215,11 +253,10 @@ Ask in order:
      > "Are you working on a single product, or several distinct products
      > in one repo (monorepo)? (Default: single.)"
 2. **(only if multi)** Which product slugs? (free text list — kebab-case)
-3. **(only if multi)** Should each product get its own theme answers, or
-   are some themes shared at the root? (Default: each product gets its own
-   for product_identity, problem_opportunity, users_personas, use_cases,
-   functional_requirements; technical_constraints and downstream themes
-   may be shared.)
+3. **(only if multi)** State this, do not ask it as a choice — the validator
+   refuses a top-level theme block once `metadata.monorepo` is true: in
+   monorepo mode EVERY theme lives under `products.<slug>`, with no
+   exceptions and nothing shared at the root.
 
 Persist these to state under `monorepo:` and `products:` (already in the
 state schema) before proceeding.
@@ -407,19 +444,45 @@ Set `metadata.status`:
 - `"draft"` — on early EXIT or when any required field is still null.
 
 If the validator returns `[FAIL]` because required fields are missing despite
-`status: complete`, ask the user via `AskUserQuestion` to either fill them
-in now or accept `status: draft`.
+`status: complete`, fold the field-level errors so they ride inside the
+`AskUserQuestion` call itself (question text or each option's description
+— the channel rule, AUTHORING §18) and ask the user to either fill them in
+now or accept `status: draft`. The full report may also be printed, never
+instead.
 
 **Acceptance-criteria backfill.** When the validator's warnings name features
 that no acceptance criterion covers ("N feature(s) have no acceptance
 criterion…"), offer to close the gap before leaving Phase 7 — ONE
 `AskUserQuestion`: *"Add acceptance criteria for these N features now?"* with
-options **Add now — I'll draft one per feature** (recommended) / **Skip —
-keep the warning**. On "Add now": draft one `ACR-NNN: FR-NNN — <observable
-done-condition>` per named feature, confirm the drafts in batches of ≤4 per
-call (the drafts ride inside the call, channel rule), mint ids from
-`state.last_ids.ACR`, append to `success_metrics.acceptance_criteria`, and
-re-run the validator once. Never loop the offer.
+options **Add now — I'll draft as many criteria as the feature's own text
+warrants** (recommended) / **Skip — keep the warning**. On "Add now": draft
+`ACR-NNN: FR-NNN — <observable done-condition>` entries, **none, one, or
+several per feature**. The count is the feature's to set, not the list's: a
+feature whose text carries two guarantees one sentence cannot hold gets two,
+and a feature that states no done-condition at all gets none — never a
+restatement of its own title. Mint ids from `state.last_ids.ACR`, append to
+`success_metrics.acceptance_criteria`, and re-run the validator once. Never
+loop the offer.
+
+*Pacing.* Up to ~20 named features, confirm the drafts in batches of ≤4 per
+call (the drafts ride inside the call, channel rule). Past that threshold —
+`references/importance-flows.md`, "Caps (per-list)" — **change the pacing, not
+the scope**: draft every entry into this run's own state first
+(`state.partial_answers`, under `success_metrics.acceptance_criteria`; this
+skill writes no scratch file, and its only Write grants are `docs/PRD.yaml` and
+its state file), print the drafted list **whole**, because a list whose members
+the user must judge one by one is an **operand**, not a verdict to skim
+(`references/reporting-to-the-user.md`, "Volume"), and then confirm **only the
+entries where a judgement was made** that the feature's text did not settle: a
+feature given none, a feature given several, or a done-condition you inferred
+rather than read. The rest are already on screen. A 100-feature backfill is one
+review pass, not 25 approval calls the user rubber-stamps by the tenth.
+
+*Authoring rule.* An ACR **may state only what its own FR states**. Never
+import a guarantee from a sibling feature, a repo convention or a stack
+default: downstream, every criterion becomes a trace-or-defer obligation on
+`/sdlc:test`, so one nothing in the requirement supports is false
+traceability — a promise no upstream text ever made.
 
 ### Phase 8 — Refresh & complete
 
@@ -654,4 +717,4 @@ The interview is potentially long. Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.13"
+skill_version: "1.19"

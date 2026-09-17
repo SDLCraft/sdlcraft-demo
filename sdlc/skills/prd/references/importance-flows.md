@@ -106,7 +106,11 @@ every registered family. Items without the prefix are warnings in
 
 The writer prepends `WRN-NNN:` to each warning when serializing the
 list. Use a monotonic counter `state.last_ids.WRN`; persist after every
-warning append.
+warning append. This counter is NEVER scoped per-product, even in
+monorepo mode — `prd_warnings` stays top-level (`check_ids`'s `scope: "top"`),
+so the "replace `state.last_ids.<PREFIX>` ... throughout" instruction below
+does not apply to it; scoping it per-product would mint colliding `WRN-NNN`
+ids across products into the one shared list.
 
 ## How batching changes with tier
 
@@ -124,7 +128,9 @@ batch.
 
 ## The channel rule — content rides inside the question
 
-A hard rendering constraint shapes every flow in this file: **markdown printed
+Canonical statement: AUTHORING §18 (this section holds the worked examples;
+that one is what every citing skill points at). A hard rendering constraint
+shapes every flow in this file: **markdown printed
 to the chat in the same turn as a tool call may not be rendered to the user.**
 Therefore:
 
@@ -159,8 +165,8 @@ typed answer) or `inferred` (accepted as-is).
 
 ### Scalar `high` fields (string)
 
-These are: `problem_opportunity.problem_statement`, `product_vision` (the MVP
-narrative folded here after D2 retired `milestones`).
+These are: `problem_opportunity.problem_statement`, `product_identity.vision`
+(the MVP narrative folded here after D2 retired `milestones`).
 
 1. **Propose.** Compose a 2–4-sentence draft from prior context.
 2. **Ask for approval — the draft rides in the call** (channel rule above).
@@ -443,14 +449,18 @@ into one string:
 
 ```yaml
 # Item about to be added (<PREFIX>-NNN assigned on approval):
-- "FR-003: OAuth2 login — users authenticate via Google or GitHub. Input:
-   user click on a provider button (SCR-002). Output: a session cookie
-   (ENT-007) plus a short-lived access token with refresh-token rotation.
-   Dependencies: INT-002 (OAuth provider), NFR-004 (session timeout).
-   Edge: when the provider returns no email scope, fall back to manual
-   email entry. Why: removing password storage cuts our attack surface
-   and matches user expectation for B2B SaaS."
+- "FR-003: OAuth2 login — users authenticate via Google or GitHub. Input: user click on a provider button (SCR-002). Output: a session cookie (ENT-007) plus a short-lived access token with refresh-token rotation. Dependencies: INT-002 (OAuth provider), NFR-004 (session timeout). Edge: when the provider returns no email scope, fall back to manual email entry. Why: removing password storage cuts our attack surface and matches user expectation for B2B SaaS."
 ```
+
+That line is long, and that is correct. **The stored string is ONE physical
+line, double-quoted, with the closing quote last and nothing after it** — not a
+wrapped scalar, not single-quoted, and never with a trailing `# comment`.
+Line-scanning consumers read requirement items straight off the raw line, so
+any other spelling makes the item invisible to them: it still parses to the
+same string and still validates, but the codegen packet builder reads no
+statement for it and every worker implementing it builds with no requirement
+text at all. `validate_schema.py` refuses the other spellings from
+`prd_version` 2.0 (ledger IMP-159).
 
 Then ask:
 
@@ -588,9 +598,17 @@ user edited the sweep candidate in step b's free-text path, promote to
   3–10 for a focused product). The sweep can take a list past 10 if the
   user keeps picking candidates; that's intentional — a real product has
   as many FRs as it has, and there is no post-MVP list to spill into.
-- **Hard cap**: 20. After that, refuse politely and suggest routing
-  lower-priority ideas to `open_questions.parking_lot` (for FR) or
-  splitting the NFR list into more focused buckets.
+- **No numeric ceiling.** The list takes every in-scope requirement,
+  however many that is — one project's PRD closed at 96 features over 108
+  entries. Never turn an item away because a list has grown, and never
+  route one to `open_questions.parking_lot` to keep it short: that bin is
+  for a **de-scoped** or later idea, and an in-scope requirement parked
+  there reads downstream as an open question that no coverage gate can
+  see.
+- **Past ~20 items, change the pacing, not the scope.** Keep step c's
+  single-item approval — it is what makes each entry real — and batch the
+  sweep candidates and any bulk confirmations at the tool's four-per-call
+  limit, so the walk stays proportionate to the list.
 
 ### State-write timing
 

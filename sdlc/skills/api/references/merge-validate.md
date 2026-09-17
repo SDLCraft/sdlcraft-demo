@@ -1,7 +1,6 @@
 # Merge, validate, and closing out
 
-Detailed rules for Phase 7 (write & validate) and Phase 8 (CLAUDE.md
-pointer). Read this when entering Phase 7.
+Detailed rules for Phase 7 (write & validate) and Phase 8 (refresh & close). Read this when entering Phase 7.
 
 ## What Phase 7 writes
 
@@ -64,18 +63,25 @@ For `API.yaml`:
   a template).
 - Updated `metadata.last_updated` (ISO-8601 UTC) and
   `metadata.session_id`.
+- `metadata.api_version`: new writes stamp `"2.0"` (CLAUDE.md §10). An
+  update-flow merge on an older file keeps the file's existing version —
+  do not silently bump a legacy artifact's floor out from under it.
 - `metadata.status`:
   - Set to `"complete"` only when:
     1. all required fields are filled,
     2. the validator passes with `[OK]`,
     3. feature coverage passes (every PRD FR-NNN traced or deferred
-       via the top-level `deferrals: [{id, reason}]` list),
+       via the top-level `deferrals: [{id, reason}]` list — a bare
+       `non_api_features` entry covers below `api_version` 2.0 only),
     4. surface coverage passes (matched by SCR-NNN id; traced or
        deferred),
     5. entity-link check passes,
     6. every ID-prefix format check passes (WRN/FR/SCR/WKF/OPR)
        (or the validator skipped coverage/entity-link because
-       `api_kind: none`).
+       `api_kind: none`),
+    7. every `external_dependencies` entry names an
+       `integration_ref: INT-NNN` that resolves in PRD.yaml (from
+       `api_version` 2.0; not skipped at `api_kind: none`).
   - Set to `"draft"` on early EXIT, when any required field is null,
     OR when any check fails.
 - `metadata.changelog` (append-only, most-recent first): on a fresh
@@ -86,8 +92,10 @@ For `API.yaml`:
   convention, not enforced.
 - `api_warnings`: every entry MUST be `"WRN-NNN: <message>"`. The
   WRN counter lives in `state.last_ids.WRN`; increment-then-write per
-  appended item. On resume, reconcile the counter with the on-disk
-  file before appending. Used for uncovered PRD features, uncovered
+  appended item. Counter drift is covered by the canonical resume recipe
+  (`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` → "Resume with
+  stale state"; AUTHORING §5's `max(state counter, highest id present on
+  disk)`), not restated here. Used for uncovered PRD features, uncovered
   UX surfaces, unresolved primary_entity references, low-confidence
   answers, merge conflicts, dropped optional themes (the now/skip/todo
   gates), sweep deferrals.
@@ -110,7 +118,7 @@ For each `API__<resource_id>.yaml`:
 python "${CLAUDE_SKILL_DIR}/validate_schema.py" --path docs/API.yaml
 ```
 
-The validator does six things in one pass:
+The validator does seven things in one pass:
 
 1. Schema-validates `docs/API.yaml`.
 2. Schema-validates every `docs/API__*.yaml` sibling.
@@ -118,8 +126,10 @@ The validator does six things in one pass:
    `PRD.functional_requirements.features` (parsed as `FR-NNN`)
    appears in at least one resource's `traces_prd_features`, OR is
    deferred via the top-level `deferrals: [{id, reason}]` list
-   (consulted FIRST), OR — deprecated, one more version, always
-   reported — sits bare in `API.yaml.non_api_features`.
+   (consulted FIRST), OR — DEPRECATED, covers below `api_version` 2.0
+   only, always reported — sits bare in `API.yaml.non_api_features`.
+   At/above 2.0 a bare `non_api_features` entry no longer covers
+   anything: the FR is reported as uncovered like any other untraced id.
 4. **Surface coverage**: every data-bearing UX surface appears in at
    least one resource's `traces_ux_surfaces` OR is deferred via the
    same `deferrals` list. A surface is
@@ -131,13 +141,20 @@ The validator does six things in one pass:
    a resource_inventory item or in a per-resource yaml) exists in
    `DATA-MODEL.yaml.entities`. Skipped (with a printed warning) if
    `DATA-MODEL.yaml` is absent.
-6. **Provenance freshness** (warn-level, never blocks): each
+6. **Integration contracts** (NOT skipped at `api_kind: none`): every
+   `external_dependencies` entry names an `integration_ref: INT-NNN`
+   that resolves in `PRD.functional_requirements.integrations_required`
+   — never minted here (CLAUDE.md §4). A missing or dangling
+   `integration_ref` blocks from `api_version` 2.0; below 2.0 it only
+   warns. Vacuous on an empty/null `external_dependencies` list.
+7. **Provenance freshness** (warn-level, never blocks): each
    `metadata.upstream_provenance` sha256 is compared to the
    upstream's current hash; a mismatch warns "built against an older
    docs/X - run /sdlc:api to review the delta". `status: complete`
    with no provenance at all warns from `api_version >= 2.0`.
 
-All three coverage / link checks are skipped when `api_kind: none`.
+Checks 3-5 are skipped when `api_kind: none`; check 6 is NOT — an
+integration-only CLI/library still needs typed provider contracts.
 
 **Absent-upstream honesty**: when `docs/PRD.yaml`, the `docs/UX__*.yaml`
 shards, or `docs/DATA-MODEL.yaml` are absent, the corresponding check
@@ -150,14 +167,17 @@ Exit codes:
 | Code | Meaning | What the agent does |
 |---|---|---|
 | 0 (`[OK]`) | API.yaml is complete, all resources valid, all enabled checks pass | ✓ Proceed to Phase 8. |
-| 0 (`[DRAFT]`) | Draft — schema valid, possibly missing required fields or coverage | Inform user; proceed to Phase 8 (pointer still injected). |
+| 0 (`[DRAFT]`) | Draft — schema valid, possibly missing required fields or coverage | Inform user; proceed to Phase 8. |
 | 1 (`[FAIL]`) | Schema invalid, OR `status: complete` but required fields missing, OR `status: complete` but a check failed | Show field-level errors verbatim. Offer via `AskUserQuestion`: fix now, or accept `status: draft`. Re-run validation after re-entry. |
 | 2 | Cannot read/parse one of the files | Surface to user (missing file, bad YAML, permission error). Do not retry silently. |
 | 3 | Missing dependency | Validator prints `pip install` instructions. Ask the user to install and re-run; do NOT auto-install. |
 
 **Downstream-agent contract**: downstream skills/agents MUST reject
 the API artifacts if `API.yaml.metadata.status != "complete"` OR if
-the validator exits non-zero.
+the validator exits non-zero. The one exception is to the exit code, never to
+the status: a failure every check of which `doctor.py --artifact docs/API.yaml`
+reports as accepted deviance does not reject
+(`sdlc/skills/repair/references/accepted-deviance.md`).
 
 ## Coverage-check details
 
@@ -188,10 +208,12 @@ the `FR-NNN` prefix (case-insensitive). A feature is **covered** when
 at least one resource lists the `FR-NNN` (verbatim, ignoring
 description text) in its `traces_prd_features` list, OR when the
 FR-NNN is deferred via `deferrals` (read first), OR — DEPRECATED,
-honoured for one more version — when it sits bare in
-`API.yaml.non_api_features`. Every id that only the bare
-`non_api_features` fallback saves is reported once in the WARNINGS
-section (`[deferral hygiene]`); new writes always use `deferrals`.
+covers below `api_version` 2.0 only — when it sits bare in
+`API.yaml.non_api_features`. Below the floor, every id that only the
+bare `non_api_features` fallback saves is reported once in the
+WARNINGS section (`[deferral hygiene]`); at/above 2.0 the fallback no
+longer covers anything and the FR is reported as uncovered instead.
+New writes always use `deferrals`.
 
 If `docs/PRD.yaml` is missing, the validator continues without the
 feature coverage check (prints a warning).
@@ -262,6 +284,29 @@ with a printed warning. The agent should refuse to set
 `metadata.status: complete` in that case unless the user has been
 warned and explicitly accepts the gap.
 
+### Integration contracts
+
+NOT skipped at `api_kind: none` — an integration-only CLI/library still
+calls outbound providers. For every `external_dependencies` entry (top
+level, or under each `products.<slug>` in monorepo mode), the validator
+reads `integration_ref` and requires it to be a well-formed `INT-NNN` id
+that exists in `PRD.functional_requirements.integrations_required`:
+
+- No `integration_ref` at all, or a malformed one: reported as a
+  format/missing error.
+- A well-formed `integration_ref` that does not resolve in `PRD.yaml`:
+  reported as a dangling-reference error naming the PRD list to extend
+  — never mint an INT-NNN here (CLAUDE.md §4).
+
+Both cases block `status: complete` from `api_version` 2.0; below 2.0
+they only warn (CLAUDE.md §10). The check is vacuous on an empty or
+null `external_dependencies` list, so a `none`-kind file with no
+outbound integrations is unaffected. `metadata.applicability:
+not_applicable` is valid only when `api_kind: none` AND
+`external_dependencies` is empty/null (SKILL.md Phase 4 step 2): a
+`none`-kind file that DOES declare `external_dependencies` stamps
+`applicable`, not `not_applicable`.
+
 ## CLAUDE.md is not this skill's to write (Phase 8)
 
 **This skill never writes `CLAUDE.md`.** The project-root `CLAUDE.md` is owned by
@@ -292,7 +337,7 @@ Both are harmless no-ops when the project has not run `/sdlc:setup`.
 
 ## Closing the session
 
-After Phase 8's CLAUDE.md write succeeds:
+Once Phase 8's refresh has run:
 
 - Set `status: complete` in the state file.
 - Keep the state file as an audit trail — do **not** delete it.

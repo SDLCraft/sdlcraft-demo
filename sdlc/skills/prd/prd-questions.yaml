@@ -149,7 +149,8 @@ themes:
     description: "Who decides, who builds, who blocks?"
 
   # milestones theme REMOVED (D2) — no MVP/phase split; the 1–3-sentence MVP
-  # narrative folds into product_vision, de-scoped ideas into parking_lot.
+  # narrative folds into product_identity.vision, de-scoped ideas into
+  # parking_lot.
 
   - id: success_metrics
     title: "Success Metrics"
@@ -437,7 +438,7 @@ questions:
     id: features
     schema_path: functional_requirements.features
     question: "What are the product's functional requirements? List the features it must do. Be verbose."
-    hint: "One flat list — no must/should/could split (every consumer is built whole by /sdlc:code, so an economic MVP tier has no downstream consumer). Each item is stored as 'FR-NNN: <description>' (e.g. 'FR-001: …'); the ID is assigned automatically at approval and used for cross-stage traceability. A de-scoped or later idea that surfaces here is NOT dropped — route it to open_questions.parking_lot (a QUE-NNN) so it stays reviewable without inflating scope."
+    hint: "One flat list — no must/should/could split (every consumer is built whole by /sdlc:code, so an economic MVP tier has no downstream consumer). Each item is stored as 'FR-NNN: <description>' (e.g. 'FR-001: …'); the ID is assigned automatically at approval and used for cross-stage traceability. A de-scoped or later idea that surfaces here is NOT dropped — route it to open_questions.parking_lot (a QUE-NNN, status: deferred — it is deferred scope, not a live decision) so it stays reviewable without inflating scope."
     suggested_answers: []
     free_text_allowed: true
     required: true
@@ -733,8 +734,8 @@ questions:
       - "p95 response under 200ms"
       - "p95 response under 1s"
       - "Best-effort, no hard targets"
-      - "Throughput-driven (state your number)"
-      - "Latency-driven (state your number)"
+      - "Throughput-driven: <N> req/s"
+      - "Latency-driven: <N> ms"
     free_text_allowed: true
     free_text_expected: true   # the options are templates - the number is always typed
     required: false
@@ -1125,7 +1126,8 @@ questions:
 
   # ---------------------------------------------------------------------------
   # Milestones — REMOVED (D2). No MVP/phase questions: the product is built whole
-  # by /sdlc:code. Any tightest-scope narrative folds into product_vision.
+  # by /sdlc:code. Any tightest-scope narrative folds into
+  # product_identity.vision.
   # ---------------------------------------------------------------------------
 
   # ---------------------------------------------------------------------------
@@ -1164,6 +1166,7 @@ questions:
       - "Reviewed by a human"
       - "Passes accessibility check"
       - "Performance budget respected"
+      - "ACR-NNN: <FR-NNN> — <observable outcome>"
     free_text_allowed: true
     free_text_expected: true   # every product adds its own "ACR-NNN: ..." lines
     required: false
@@ -1207,7 +1210,7 @@ questions:
     id: top_risks
     schema_path: risks_assumptions.top_risks
     question: "Top risks that could derail this? (Pick all that apply, or describe.)"
-    hint: "Risks the team has named are risks the team can manage."
+    hint: "Risks the team has named are risks the team can manage. When you know its disposition, EMIT A TYPED ENTRY: {statement, disposition: mitigated|accepted_residual|open, mitigation_refs: [...]} — a plain string is still valid for a risk with no disposition yet."
     suggested_answers:
       - "Unproven user demand"
       - "Technical complexity / unknowns"
@@ -1529,10 +1532,12 @@ questions:
     hint: >
       A safe place to capture ideas without committing to them. Same typed
       shape as undecided_decisions ({id: QUE-NNN, question, status} —
-      usually status: deferred), continuing the SAME QUE counter. This is where
-      de-scoped feature ideas land now that there is no nice-to-have list (D2):
-      when the features theme surfaces something out of scope, route it here as
-      a QUE rather than dropping it.
+      ALWAYS status: deferred here, never blocks: a parked idea gates
+      nothing; the validator warns below prd_version 2.0 and blocks from it),
+      continuing the SAME QUE counter. This is where de-scoped feature ideas
+      land now that there is no nice-to-have list (D2): when the features
+      theme surfaces something out of scope, route it here as a QUE rather
+      than dropping it.
     suggested_answers: []
     free_text_allowed: true
     required: false

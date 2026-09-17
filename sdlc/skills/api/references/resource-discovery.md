@@ -272,7 +272,7 @@ narrative, now scoped to after-the-sweep cleanup):
 header: "Coverage?"
 question: "After the sweep, these items still aren't covered:\n - FR ids: <ids>\n - SCR surfaces: <ids>\nWhat to do?"
 options:
-  - { label: "Mark uncovered FR ids as non_api_features", description: "They become UI-only / batch / internal — recorded in API.yaml.non_api_features." }
+  - { label: "Defer with a reason", description: "Add {id, reason} to API.yaml's top-level `deferrals` list — the auditable form (SKILL.md: never a bare id). A bare non_api_features entry covers below api_version 2.0 only, and is still reported even then." }
   - { label: "Leave gap — record in api_warnings (WRN-NNN)", description: "API.yaml will save as draft." }
   - { label: "Edit existing traces",         description: "Re-open an existing resource to add the missing trace(s)." }
 ```
@@ -308,7 +308,7 @@ For each resource:
 Open the resource with a one-line recap — "Now: `<resource_id>` at
 `<base_path>` (primary entity: `<primary_entity>`); traces F-IDs `<F-IDs>`
 and UX surfaces `<ids>`." Because chat markdown sharing a turn with a tool
-call may not render (the channel rule:
+call may not render (the channel rule: AUTHORING §18,
 `../../prd/references/importance-flows.md`), either END the turn with the
 recap or fold it into the first step-b question's text — never rely on a
 banner printed in the same turn as an `AskUserQuestion` call.
@@ -415,7 +415,7 @@ options:
 
 The drafted per-resource yaml (or a compact summary if it's long) rides
 INSIDE the approval question — in the "Approve" option's `preview`, or the
-question text when preview is unavailable (channel rule:
+question text when preview is unavailable (channel rule: AUTHORING §18,
 `../../prd/references/importance-flows.md`) — never only as chat markdown
 printed in the same turn as the call:
 

@@ -7,6 +7,45 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.21 (2026-09-17) — The re-run delta review's consolidated summary rides inside the decision question, and the REFINE row scopes a re-run before the merge
+
+Ledger IMP-137 (AUTHORING §18). upstream-reconciliation.md's Step 4 presented the consolidated summary and asked for the decision in the same turn — the seven skills that delegate their delta review here inherited it. The summary now rides in the decision question's text and option descriptions (or the turn ends with it and takes a typed reply), and the reference cites §18. Pinned by prd's `_smoke/channel_rule_selftest.py`.
+
+Ledger IMP-016 / IMP-112 / IMP-173 / IMP-174: the REFINE row of upstream-reconciliation.md's three-meanings table pointed at the merge mechanics alone; it now links a "Refine scoping" section — open only the themes or shard the user names, the §7 delta items and the non-confirmed set (open QUE entries, schema-added `null` fields, finding-named buckets, legacy plain-string ids through the skill's id-migration helper), confirm the rest in one summary — and every interview skill's Phase-1 update branch points here before Phase 7. Phase 1 itself is the shared five-line trigger (four states — the ABSENT-artifact case offers restart-from-partial_answers or discard, never resume — plus the older-`skill_version` line pointing at prd's edge-cases.md recipe, which reconciles the theme lists and the `last_ids` counters before offering resume); edge-cases.md's stale-state restatement is a pointer to that recipe. Pinned by prd's `_smoke/resume_recipe_lockstep_selftest.py`.
+
+## 1.20 (2026-09-17) — The CLI contract is typed and version-gated at a floor new writes actually stamp, and the shard inventory is reconciled with the files on disk
+
+Ledger IMP-009: `layout.cli_args` and the new once-declared `cli.global_flags` are checked as `{name, kind, type, required, description}` mappings, and a cli_command surface's `exit_conditions` entries are typed `{code, when}` with each code cross-checked against `cli.exit_codes` — one writer of the fact, no third field. All blocking from `ux_version` 3.0, warnings below. Two red-team findings shaped it: the skill had NO write-time stamp rule (schema example "1.1", corpus at 1.21), so the existing 2.0 floor was already dead code — merge-validate.md now says new writes stamp 3.0 (or higher) and the schema example does; and a `global_flags` key nobody asks for is a zero-producer field, so ux-questions.yaml gains the producer question. task's second hand-kept CLI field tuple became the imported `CLI_FIELDS` (one copy). Regression: `_smoke/24_typed_cli_contract/` (exit 1) / `25_…_below_floor/` (exit 0). The exit-code existence sub-check is verified by hand but not smoke-pinned: a typed entry failed pydantic at HEAD, so no fixture can flip on it. The consumer of `global_flags` (joined live into worker packets) is IMP-172.
+
+Ledger IMP-171: `surface_inventory` and the on-disk `UX__*.yaml` set are two writers of one set and are now reconciled, mirroring arch's `check_file_path_integrity` and its resolution order — a ghost inventory `file_path` and an orphan shard both block at 3.0, warn below, and the check is vacuous on an empty inventory or a `not_applicable` artifact. Regression: `_smoke/26_inventory_shard_mismatch/` (exit 1) / `27_…_below_floor/` (exit 0).
+
+## 1.19 (2026-09-16) — An FR naming a command is examined whether it is deferred or traced, so a trace from an unrelated surface no longer silences the clause
+
+Ledger IMP-136.
+
+`check_deferred_fr_names_command` skipped every FR already in the covered set before it read the requirement text, so an FR whose text names `<root> <verb>` was examined only while it was deferred. A trace from a surface that is not that command, or from a bare `cli.exit_codes` entry that carries no invocation at all, silenced the clause and nothing downstream built the command. Both halves were reported separately; they are one predicate, and shipping two exemptions would have let them drift.
+
+The check is now `check_fr_names_unbuilt_command` — the old name asserted the defect — and it examines every such FR, traced or deferred, exempting it only when a lookalike surface **also traces that FR**. The slug match stays containment rather than equality, deliberately: the eval grader accepts any surface id containing the verb, so an exact match would let a graded-pass run trip the very warning the same grader asserts is absent. The trace is the strict half; the slug shape never was the signal. The deferred sentence is byte-identical, so the existing fixture's pins are untouched, and the new traced sentence names its tracers.
+
+The three prose sites that stated the deferral-only rule moved in the same pass, or the canonical reconciliation step would now contradict the validator.
+
+Regression: `_smoke/23_traced_fr_names_command/` with new sections in `_smoke/deferral_selftest.py` that assert the remedy **wording**, not merely that a row appears — a section added to a selftest whose assertions all pass can otherwise silently no-op if the predicate is wired wrong.
+
+## 1.18 (2026-09-16) — A stale upstream routes NEXT to `/sdlc:ux --reconcile`, and the Phase 8 pointer-write prose is gone
+
+Ledger IMP-127 and IMP-111. The validator warned "built against an older docs/PRD.yaml - run /sdlc:ux to review the delta" and printed `NEXT: /sdlc:design` in the same run, so an agent following the NEXT line skipped the review and design built on a stale UX. NEXT now names the reconcile form with the successor on the second line. `merge-validate.md` no longer says a draft still injects a pointer or that the close waits on a CLAUDE.md write. Regression: `_smoke/deferral_selftest.py` (fixture 14).
+
+## 1.17 (2026-09-15) — `upstream-reconciliation.md` step 4 takes `--drift`'s `[referenced here]` / `[cited in prose xN]` marks as the "only items this file traces or covers" filter, and step 6 covers the `re-stamp only` verdict
+
+Ledger IMP-147 (aicf LSN-084): the canonical step 4 prescribed a filter the
+helper never computed, so every consumer re-derived it by hand and a prose
+cite was invisible to it. Path: `references/upstream-reconciliation.md`
+(steps 4 and 6). Pinned by setup's `_smoke/index_selftest.py` section 12d.
+
+## 1.16 (2026-09-15) — Phase 2's validator stop honours accepted deviance (`doctor.py --artifact`); a typed deferral with a malformed WRN id warns; `docs_index.py` calls run the copy `helper-resolution.md` picks
+
+Ledger IMP-104, IMP-108, IMP-109 (2026-09-15 retro). The `metadata.status` stop stays unconditional.
+
 ## 1.15 (2026-09-15) — `upstream-reconciliation.md`: a delegating upstream item goes through the discovery step and a void delegation becomes a finding, never "the upstream is wrong"; a resolved finding the delta cites leads its card as the decision; Phase 7 stamps through the helper
 
 Ledger IMP-100 (aicf LSN-081): Step 4 read a changed-in-body item as a contradiction or an

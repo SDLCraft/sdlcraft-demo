@@ -159,9 +159,23 @@ lesson_notes: []             # mid-run lesson scratch (CLAUDE.md 15): noted, nev
                              # acted on mid-run; drained by the Phase-6 self-review
 ```
 
-On resume, reconcile before continuing: for every finding left `triaged` with a
-partial `artifacts_touched` list, re-verify those artifacts against disk. The
-common failure mode here is re-applying an edit that already landed.
+On resume, reconcile before continuing. An interrupted run leaves one of two
+shapes, and both name the artifacts it had already edited: a `triaged`
+re-invoke carries them in its resolution block's `artifacts_touched`, and a
+surgical fix whose verification never ran leaves the finding `open` with one
+evidence line naming them (Phase 6 — an `open` finding carries no resolution
+block at all, and a `triaged` one only while a re-invoke is in progress).
+Re-verify every artifact so named against disk before touching it. The common
+failure mode here is re-applying an edit that already landed.
+
+**The queue is re-read after every finding closes.** A finding minted mid-run
+(`--raised-by sdlc-repair`, Phase 4: a defect the walk surfaced beside the one
+being fixed, whose decision this run can obtain) is `open` in the queue this
+run owns, so the loop picks it up next — its Phase 2 walk is short (the
+finding that minted it is the localization), its Phase 3 gate offers *decide
+it now* at position 1, and it lands in `findings_worked` like any other. A run
+invoked with named findings (`/sdlc:repair FND-003`) works the ones it minted
+too; they are not "other findings" (ledger IMP-153).
 
 **`EXIT`** (any free-text field, any phase): persist the state file with
 `status: aborted`, confirm which artifacts were already edited, run
@@ -209,8 +223,8 @@ propagation hop with no `verified_at` — so the failure is that finding's
 pending hop, not a new defect: the doctor keeps it red (the artifact is not
 consumable) but records nothing for it, and when every failure is owed its
 `NEXT:` names the owed command instead of this skill. Do not localize such a
-row again; count it on the close card under `triaged (awaiting
-re-invocation)`. Before this label existed, every sweep between two hops
+row again; the close card counts it as work that finding still owes (Phase 6,
+"The `Findings:` and `Status:` rows"). Before this label existed, every sweep between two hops
 minted the same failure afresh, because its first defect line moved with each
 hop while the cause did not (ledger IMP-077). Skipped checks (artifact absent,
 tool absent) are reported as skipped and never become findings.
@@ -232,9 +246,14 @@ the work:
   whose content is wrong; a finding raised by an interview skill usually
   surfaced one stage *downstream* of its source (the raiser read the wrong
   thing, it did not write it);
-- never localize to `code` (generated output is never a source; the validator
-  rejects `located_stage: code` at queue version 2) and never to a task
-  **embed** (CLAUDE.md §9 — the artifact it was copied from is the source);
+- never localize to `code` UNLESS the owner table (`back-propagation.md` Step
+  2) shows every upstream contract already states the fact correctly and the
+  generated code alone diverges — then it is mis-raised: close `wontfix` with
+  `located_stage: code` (the validator rejects that value at queue version 2
+  on every OTHER status) and name the owning task(s) in `stale_tasks`, which
+  `/sdlc:code`'s own plan gate reads to schedule the rebuild; never localize
+  to a task **embed** (CLAUDE.md §9 — the artifact it was copied from is the
+  source);
 - read the upstream slice an embed was copied from and compare: same wrong thing
   → upstream is the source; different → the embed is merely stale;
 - a finding stamped `recurrence_of: FND-NNN` was **repaired before**: say so at
@@ -247,6 +266,11 @@ Phase-4 fix must tick off (edited / re-sliced / unaffected):
 ```bash
 python .claude/sdlc/docs_index.py --refs <symbol>
 ```
+
+Every `python .claude/sdlc/docs_index.py …` in this file runs the copy
+`${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once per
+run: an installed copy older than the plugin's counts as absent. The bare
+regenerate in Phase 5 is the exception that file names.
 
 **Retired-token sweep.** A fix that REMOVES or RENAMES a named token (an input
 parameter, a CLI flag, a field, an enum member, a literal) has sites `--refs`
@@ -306,7 +330,21 @@ in its top-level `deferrals: [{id, reason}]` list — never a `WRN` prose note) 
 *accept as-is* (status `wontfix` with `expected_count: N` in the summary when
 the finding is a validator count the project lives with) / *wontfix* / *it's
 the skill, not the doc* (record the lesson per Phase 2 Step 0, cross-linked
-`--related FND-NNN`, and close the finding `wontfix`).
+`--related FND-NNN`, and close the finding `wontfix`) / *it's the generated
+code, not the spec* (`back-propagation.md`'s Step 2 owner table showed every
+upstream contract already correct; close `wontfix` with
+`resolution.located_stage: code` and name the owning qualified task id(s) in
+`resolution.stale_tasks` — `/sdlc:code`'s own plan gate reads that field
+regardless of status and schedules the rebuild; repair still never edits
+code itself).
+
+**When both rules claim position 1** — the finding is a recurrence *and* its fix
+meets the four-part additive criterion — *fix fully* takes position 1. The
+recurrence default changes which mode leads, never which modes are offered
+(`references/forward-propagation.md` says exactly that: "never a refusal of the
+in-run modes, just a changed default"), while the additive rule rests on a
+measured cost — routing a fully-determined item to `re-invoke` costs the user
+two interviews and discards the walk (aicf LSN-019 / LSN-040).
 
 `references/back-propagation.md` names when to **ask rather than decide**:
 `missing_requirement` findings, two equally defensible stages, any fix that
@@ -340,7 +378,11 @@ walk cold, with no guarantee of the same reading (aicf LSN-019 / LSN-040).
      (version bump + changelog line in one write; it refuses an out-of-order
      changelog — fix the changelog, do not `--force` blindly). A TASKS source
      takes `--patch`: its minor version gates task checks, and a minor bump
-     would switch them on for tasks this fix never touched;
+     would switch them on for tasks this fix never touched. A `brief` source
+     — the walk ended outside the pipeline, at a hand-written document no
+     skill owns — carries no `metadata` block, so this step **does not
+     apply**: edit the brief, then propagate into every artifact that reads it
+     and name each one in `artifacts_touched`;
   3. re-derive any prose the change invalidated (CLAUDE.md §8);
   4. walk the rest of the checklist by hand — every inbound site that is not a
      task embed is edited (with its own bump) or explicitly marked unaffected.
@@ -349,22 +391,37 @@ walk cold, with no guarantee of the same reading (aicf LSN-019 / LSN-040).
      symbol-only `--find`) and add every hit: the sibling test in the file you
      just edited is the
      typical miss (Phase 2, "Retired-token sweep");
-  5. `python .claude/sdlc/docs_index.py --stamp docs/<artifact> --upstream docs/<upstream-1> --upstream docs/<upstream-2>`
-     (one `--upstream` flag per upstream; the flag takes exactly one file)
-     for every artifact reconciled by hand, upstream-first — a stamp moves the
-     stamped file's own hash, and it must land BEFORE the re-slice, which
-     stamps the shard against the upstream bytes it sees (the plugin's
-     `"${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs` form when
-     the project has no copy; ledger IMP-088). **Only for a pair that was
-     fresh before this run's first write.** A stamp claims that EVERY delta
-     between the recorded upstream and the current one was reviewed, and
-     this run reviewed one finding's change; a pair the Phase 2 snapshot
-     (`sdlc-repair.doctor.json`, `provenance.stale`) already listed owes an
-     older, unreviewed delta to `/sdlc:<skill> … --reconcile`, and stamping
-     it now forges that review. Leave the row, name the pair on the close
-     card's `Attention:` row as pre-existing, and route the owed reconcile in
-     `Next:` (ledger IMP-099, aicf LSN-080; `forward-propagation.md`, "What a
-     stamp claims");
+  5. `python .claude/sdlc/docs_index.py --stamp docs/<artifact> --upstream docs/<reviewed-upstream> --hold-upstream docs/<other-recorded-upstream>`
+     (one flag per file; each flag takes exactly one) for every artifact
+     reconciled by hand, upstream-first — a stamp moves the stamped file's own
+     hash, and it must land BEFORE the re-slice, which stamps the shard
+     against the upstream bytes it sees. Run it through the copy
+     `${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks:
+     `--hold-upstream` needs `docs_index.py` capability 6, and an older
+     install rejects it with exit 2 (the plugin's form is
+     `"${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs`; ledger
+     IMP-088, IMP-108). **`--upstream` only for a pair that was fresh before
+     this run's first write.** A stamp claims that EVERY delta between the
+     recorded upstream and the current one was reviewed, and this run
+     reviewed one finding's change. It also re-hashes EVERY upstream the
+     artifact already records, not only the ones named, so every other entry
+     in its `metadata.upstream_provenance` takes `--hold-upstream`, which
+     leaves that entry byte-identical: an upstream this run did not review,
+     and a pair the Phase 2 snapshot (`sdlc-repair.doctor.json`,
+     `provenance.stale`) already listed. Such a pair owes an older, unreviewed
+     delta to `/sdlc:<skill> … --reconcile`, and stamping it now would forge
+     that review. An artifact with no fresh reviewed pair is not stamped at
+     all. Name each held pre-existing pair on the close card's `Attention:`
+     row and route the owed reconcile in `Next:` (ledger IMP-099, IMP-106,
+     aicf LSN-080). **Then read what the stamp printed:** a `re-stamped
+     <upstream>: … since the last stamp - reviewed by this run?` line names
+     an upstream it re-hashed that had moved. For an upstream this run
+     reviewed that is expected; for any other a hold is missing, so restore
+     the artifact's old record of that upstream from git (`git diff
+     docs/<artifact>` shows the old lines), confirm `--drift docs/<artifact>`
+     names that upstream again, and stamp again with the hold. The printout
+     catches a missing hold after the fact; the holds are what prevent the
+     forgery (`forward-propagation.md`, "What a stamp claims");
   6. `python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --symbol <cid>/<component>/<work_unit>`
      (or `--tst TST-NNN` / `--entity <Name>` / `--operation <operation_id>`)
      — LAST, so the shard is stamped against the final upstream bytes;
@@ -413,19 +470,42 @@ walk cold, with no guarantee of the same reading (aicf LSN-019 / LSN-040).
   `interface_contract`) is *copied* from the source slice and proven
   byte-identical by `reslice_embeds.py --check` — the hard boundary on
   embeds forbids *patching* a copy to a third value, not copying a corrected
-  source. `bump_artifact.py` every touched artifact; refresh the index; verify
+  source. `bump_artifact.py` every touched artifact; then **stamp, exactly as
+  `surgical` step 5 prescribes** — `docs_index.py --stamp` each artifact this mode
+  authored into, against the upstream it authored from, upstream-first (the
+  source before the shard that copies it; other additive shapes stamp a whole
+  chain), `--hold-upstream` for every other recorded upstream, then read the
+  `re-stamped …` printout. This mode may claim that pair because it WROTE the
+  whole delta between the recorded upstream and the current one — but step 5's
+  other rules still bind: a pair the Phase 2 snapshot already listed owed an
+  older, unreviewed delta, so it stays held and named on the close card, never
+  stamped. Then refresh the index; verify
   (Phase 5). The new task is simply `pending` to `topo_order.py` — no ledger
   edit. Close `resolved` with `mode: additive`, `artifacts_touched` naming
   every file, one `source` hop and one `downstream` hop per authored item,
-  and `downstream_rerun: []` — nothing is owed downstream; if something is,
-  the mode was `re-invoke`.
+  and `downstream_rerun: []` — nothing is owed downstream (a stamp records a
+  review, it is not a re-run); if something is, the mode was `re-invoke`.
 
   A finding that splits into a **mechanical half and a modelling half** is
   fixed in one run when the modelling half passes 1–4: `surgical` on the
-  first, `additive` on the second, one resolution block naming both. When it
-  does not pass, fix the mechanical half here and mint the modelling half as
-  a sibling finding (`findings.py add … --related FND-NNN`) — never
-  under-deliver silently.
+  first, `additive` on the second, one resolution block naming both. When the
+  modelling half fails 2 only for want of a decision this run CAN obtain (a
+  choice inside the located artifact — which of two contradictory values is
+  right, which component owns a unit, what it is called), it does not leave
+  this run: mint it (`findings.py add … --related FND-NNN --raised-by
+  sdlc-repair`) so the audit trail has it, and it joins THIS run's queue —
+  Phase 1 re-reads the queue after each finding closes and works it through
+  the same Phase 3 gate, *decide it now* at position 1, the answer recorded
+  in that finding's `resolution.summary`. Only a half whose decision is not
+  this run's to take (`references/back-propagation.md`, "ask — do not decide
+  alone": a `missing_requirement`, a product-behaviour change, a walk ending
+  at PRD) becomes a sibling finding for a later run, and the close card says
+  so. The same holds for any defect the walk surfaces BESIDE the one being
+  fixed (ledger IMP-153, aicf LSN-086: an adjacent contradiction was routed to
+  "file a new finding" with the walk loaded and the user at the gate). Never
+  under-deliver silently, and never interleave two findings' surgical
+  sequences: the second starts after the first's Phase 5, so each stamp
+  claims only what its own run reviewed.
 - **`re-invoke`** (set, not determined) — changes to the *set* of downstream
   items that fail the additive criterion: a removed/renamed component,
   work_unit, entity, operation, surface, TST or task; a restructured boundary;
@@ -501,8 +581,10 @@ python "${CLAUDE_SKILL_DIR}/../task/crosscheck_artifacts.py" --docs-dir docs
 python .claude/sdlc/docs_index.py                 # regenerate the index - the PROJECT's copy only
 python .claude/sdlc/docs_index.py --check         # dangling-reference gate
 python .claude/sdlc/docs_index.py --stale         # must list nothing this run reconciled - a row here is a missed stamp,
-                                                  # unless the Phase 2 snapshot already held it (a pre-existing pair,
-                                                  # owed to its own --reconcile: name it on the close card, never stamp it)
+                                                  # the `re-stamp only` rows included (nothing the shard cites changed, so
+                                                  # the review is cheap - but the stamp is still owed), unless the Phase 2
+                                                  # snapshot already held it (a pre-existing pair, owed to its own
+                                                  # --reconcile: name it on the close card, never stamp it)
 ```
 
 The `test` and `task` lines run only where those skills ship; in the demo
@@ -540,11 +622,21 @@ propagation:
   - {hop: embed,  target: "docs/TASKS__demo-api.json#TSK-004.interface_contract", verified_at: <now>, how: "reslice_embeds.py --check exit 0"}
 ```
 
-`resolved` requires every listed hop verified (queue version 2); a hop you
-could not verify keeps the finding `triaged`. Set the queue's `last_updated`
-and re-validate it with `validate_findings.py`.
+`resolved` requires every listed hop verified (queue version 2). A hop you
+could not verify means the finding does not close, and where it waits depends
+on the mode: a `re-invoke` keeps its block and stays `triaged`, while a
+`surgical` fix leaves the finding `open` with no resolution block at all —
+only a re-invoke in progress may record partial progress on a triaged finding,
+and `validate_findings.py` makes that an error at *every* queue version, so
+parking a surgical fix there is a rejected write, not a park. Record what did
+land as one evidence line on the finding itself (`evidence` holds at most five
+lines — fold it into the last one when the list is full): the artifacts already
+edited, and the check that could not run. That line is what the next run
+re-verifies against disk (Phase 1) and what the statusboard prints under the
+still-open finding. Set the queue's `last_updated` and re-validate it with
+`validate_findings.py`.
 
-**Write it right the first time** — the queue's validator enforces four rules
+**Write it right the first time** — the queue's validator enforces rules
 the example above does not show, and each one costs a rejected round-trip
 when learned by trial (canonical: `FINDINGS.schema.yaml`):
 
@@ -560,8 +652,10 @@ when learned by trial (canonical: `FINDINGS.schema.yaml`):
   (`deferred` with a `reason`).
 - `mode: additive` carries `downstream_rerun: []`, at least one
   `hop: downstream` (the item it authored), and every artifact it wrote into
-  in `artifacts_touched`; the validator (queue version 2) warns when an
-  additive resolution owes a re-run or records no downstream hop.
+  in `artifacts_touched`. An additive resolution that owes a re-run, or that
+  records no downstream hop, is refused from `findings_file_version: "2"`;
+  below that version the validator states the gate in its own note ("it blocks
+  from findings_file_version 2") rather than failing the file.
 - `mode: re-invoke` names its command sequence in `downstream_rerun`; empty
   means the propagation never happened, which is not a resolution. **This
   skill never closes a re-invoke finding `resolved` with an empty
@@ -569,9 +663,12 @@ when learned by trial (canonical: `FINDINGS.schema.yaml`):
   from `findings_file_version: "2"` (CLAUDE.md §10 keeps a legacy queue from
   turning red on upgrade), so on a version-1 queue the warning scrolls past
   unread — one project closed ten such findings and four of them hid real
-  unpropagated defects, one for three weeks. Leave the finding `triaged`,
-  and count it on the close card's `Findings:` row as
-  `re-invoke awaiting downstream_rerun` (ledger IMP-054).
+  unpropagated defects, one for three weeks. So compute the sequence in Phase
+  4 and fill `downstream_rerun` in this same write, then keep the finding
+  `triaged` until the user reports those runs done. A re-invoke whose sequence
+  you cannot compute carries no resolution block at all — an empty one is the
+  state that hid those defects. What is still owed is reported by the row
+  table below (ledger IMP-054).
 - `handoff` (re-invoke only) is a list of `{artifact: docs/<file>, key, note,
   basis}`,
   and `artifact` must be a file an owed `downstream_rerun` command rewrites —
@@ -597,15 +694,47 @@ Close with the report:
 
 ```
 ── /sdlc:repair — what changed ────────────────────────────
-Findings:  2 resolved · 1 triaged (awaiting re-invocation) · 1 deferred · 1 re-invoke awaiting downstream_rerun
+Findings:  2 fixed and closed (FND-001, FND-002) · 1 fixed at its source, still owes 2 re-runs (FND-004) · 1 parked (FND-005)
 Located:   FND-001 → arch (suspected: task)  ·  FND-002 → api (suspected: test)
 Edited:    docs/ARCH__demo-api.yaml, docs/TASKS__demo-api.json (2 embeds re-sliced)
 Verified:  arch exit 0 · task exit 0 · reslice --check exit 0 · crosscheck exit 0 · index exit 0
 Stale:     demo-api/TSK-004, demo-api/TSK-006 will be offered for regeneration
+Status:    {computed - e.g. repair's edits are done; FND-004 closes when its 2 re-runs finish, and you run them, one per new session}
 Next:      {the computed next invocation}   ← in a NEW session
 Why new:   the artifacts and state files on disk are the handoff, not this
            transcript.
 ```
+
+**The `Findings:` and `Status:` rows** answer "is repair done, what is still
+owed, and who runs it" — the question a user asked when a card printed the
+queue's own words beside a `Next:` naming another skill (ledger IMP-154). The
+queue's state names and field names are input to these rows, never their text
+(`prd/references/reporting-to-the-user.md`, "translates; it never pastes"):
+
+| The finding in the queue | What the `Findings:` row says |
+|---|---|
+| `resolved` | `fixed and closed` |
+| `triaged`, `mode: re-invoke`, commands recorded | `fixed at its source, still owes N re-run(s)` — N is the length of its `resolution.downstream_rerun`; the same owed work `doctor.py` labels `awaiting re-invocation per FND-NNN` |
+| `triaged`, `mode: re-invoke`, no commands recorded (IMP-054) | `not closable - its re-runs were never recorded` |
+| `open`, a surgical fix whose hop this run could not verify | `fixed, not verified - <the check that could not run>` |
+| `deferred` / `wontfix` / `duplicate` | `parked (<reason>)` / `left as is (accepted)` / `same defect as FND-NNN` |
+
+Collapse same-state findings into one phrase listing their ids. Keep "closed"
+and "still owes" apart: a finding whose source is fixed but whose copies are
+not has not closed, and saying "fixed" alone is how a card reads as done when
+it is not — or as unfinished when it is.
+
+`Status:` — first match wins, always printed:
+
+1. **A finding is not closable or not verified** → `not finished - <FND-NNN>
+   <what is missing>`; `Next:` re-invokes this skill naming it (the shared
+   procedure's rule 1).
+2. **A finding still owes re-runs** → `repair's edits are done; <FND-NNN>
+   closes when its N re-run(s) finish - you run them, one per new session,
+   starting with Next:`. This skill never runs them (Phase 4).
+3. **Every finding worked is closed or parked** → `done - <the stage that was
+   blocked> can run` (or `done - nothing is blocked` when no stage was).
+4. **`--check`** → `health check only - nothing under docs/ was edited`.
 
 **Compute the `Next:` row; never copy the example literals.** Procedure and
 successor map: `sdlc/skills/prd/references/reporting-to-the-user.md`
@@ -613,9 +742,12 @@ successor map: `sdlc/skills/prd/references/reporting-to-the-user.md`
 position** (the located stage) while work remains, and the pipeline position
 once the run is done — print both as they apply:
 
-- **Findings remain `triaged` awaiting re-invocation** → the FIRST command of
-  the re-invoke sequence, e.g.
-  `/sdlc:test demo-api --reconcile   (for FND-004 - each reconcile names the next; the last routes back here to close it)`.
+- **A finding is not closable or not verified** → `/sdlc:repair FND-NNN`, after
+  saying what it lacks.
+- **A finding still owes re-runs** → the FIRST command of its sequence, with
+  its position and the terminus in words — one command on the row, never the
+  chain, e.g.
+  `/sdlc:test demo-api --reconcile   (1 of 2 owed for FND-004 - each prints the next; the last routes back here to close it)`.
 - **All findings resolved** → `/sdlc:code <container>`, the stage that was
   blocked; add the one-line consequence (`2 tasks are now stale and will be
   offered for regeneration`).
@@ -714,4 +846,4 @@ context that codegen is trying to conserve.
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.12"
+skill_version: "1.19"

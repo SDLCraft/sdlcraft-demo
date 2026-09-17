@@ -77,7 +77,6 @@ Runtime files (NOT inside this skill directory):
 | `docs/UX.yaml` (project root) | Global UX contract consumed by downstream agents. |
 | `docs/UX__<surface>.yaml` (project root) | One file per UI surface. `<surface>` is kebab-case. |
 | `.claude/skills-state/sdlc-ux.state.yaml` | Session state for resumability. |
-| `CLAUDE.md` (project root) | Pointer bullet injected on completion. |
 
 ## Reserved EXIT command
 
@@ -116,9 +115,19 @@ Before doing anything else, check for
   > "I found an unfinished UX session from `<last_updated>`. Would you
   > like to **resume**, **restart** (discard previous answers), or
   > **discard** (delete state and exit)?"
-- If `status: complete` or `status: aborted` and `docs/UX.yaml` exists,
-  treat this as an update flow — see `references/merge-validate.md`.
+- If `status: complete` or `aborted` and `docs/UX.yaml` exists, scope the
+  update — see `references/upstream-reconciliation.md`'s REFINE row (open
+  only the named themes, the §7 delta items, and the non-confirmed set;
+  confirm the rest in one summary) — then `references/merge-validate.md`.
+- If `status: complete` or `aborted` and `docs/UX.yaml` is ABSENT, only
+  `partial_answers` survives: offer restart-from-partial_answers or
+  discard — never resume.
 - If no state file, continue to Phase 2.
+- If the state file's `skill_version` is older than this file's footer: run
+  the canonical recipe
+  (`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` → "Resume with
+  stale state" — migrate additively, reconcile the theme lists and
+  `last_ids`, then offer resume at position 1).
 
 ### Phase 2 — Scan inputs
 
@@ -130,6 +139,10 @@ or a top-level section up in `INDEX.yaml` (or `python .claude/sdlc/docs_index.py
 --show <symbol>`) and `Read` only its `[start, end]` range, rather than loading
 the whole PRD to pull a handful of workflows/features. Fall back to whole-file
 reads when `INDEX.yaml` is absent. Protocol: `.claude/rules/sdlc-docs-access.md`.
+Every `python .claude/sdlc/docs_index.py …` in this file runs the copy
+`${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once per
+run: an installed copy older than the plugin's counts as absent, and every
+fallback this file gives for a missing `docs_index.py` applies to it.
 
 Read these files at startup:
 
@@ -141,7 +154,11 @@ Read these files at startup:
 
    - If exit code ≠ 0 or `metadata.status != "complete"` → stop. Print
      a clear warning telling the user to complete the PRD first
-     (`/sdlc:prd`). Do not proceed.
+     (`/sdlc:prd`). Do not proceed. One exception, for the exit code only:
+     when `python "${CLAUDE_SKILL_DIR}/../repair/doctor.py" --docs-dir docs --artifact docs/PRD.yaml`
+     reports the check `accepted (N, unchanged)`, the project accepted that
+     deviance — proceed (never `--quick`; rule:
+     `sdlc/skills/repair/references/accepted-deviance.md`).
    - If valid and complete → extract the fields the UX skill needs:
      - `technical_constraints.runtime_platform` → preliminary `surface_family`
        (a LIST as of PRD 1.1, e.g. `[mobile_ios, mobile_android]`; a bare
@@ -235,7 +252,9 @@ input. **Every added FR / ENT goes through `references/surface-discovery.md`
 Step 1b/1c before its incorporate / ignore / defer prompt** — its text may
 name a `<root_command> <verb>` or a screen, and that candidate is the prompt's
 position-1 option; a `defer` for such an item needs a reason that names the
-command (the validator warns `[FR names a command]` otherwise).
+command, and an `incorporate` needs a surface that actually runs it — folding
+the FR into a surface that runs some other command silences the command just
+as a deferral does (the validator warns `[FR names a command]` for either).
 Exit 0 means PRD is unchanged: an ordinary refine — proceed to the merge flow
 without a delta-review. Helper absent (the project generates its index with
 its own tool): run the plugin's copy,
@@ -794,4 +813,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.15"
+skill_version: "1.21"

@@ -26,9 +26,11 @@ Usage:
 
 Exit codes:
     0 — bumped (or, with --dry-run, would bump) and the changelog line is in place.
-    1 — refused: the on-disk version is already above the version in the newest
-        changelog line (a bump without a line, or lines out of order). Fix the
-        changelog by hand or pass --force.
+    1 — refused: the on-disk version is above EVERY version the changelog names,
+        so a bump happened without a line. Fix the changelog by hand or pass
+        --force. A changelog that merely lists its lines oldest-first is not
+        refused: the new line is prepended and the order is reported (ledger
+        IMP-140).
     2 — could not read or parse the file, or it carries no metadata.<name>_version.
     3 — required dependency missing (pyyaml).
 """
@@ -100,14 +102,49 @@ def changelog_line(version: str, summary: str, by: Optional[str]) -> str:
     return f"{version} ({_today()}): {text}"
 
 
-def refusal(current: Tuple[int, ...], newest_entry: Optional[Tuple[int, ...]], key: str,
+def entry_versions(entries: List[str]) -> List[Optional[Tuple[int, ...]]]:
+    """The version each changelog line names, in file order (None where a line
+    carries none - an `initial.` entry is allowed and dates nothing)."""
+    out: List[Optional[Tuple[int, ...]]] = []
+    for raw in entries:
+        m = ENTRY_VERSION_RE.match(str(raw))
+        out.append(parse_version(m.group(1)) if m else None)
+    return out
+
+
+def refusal(current: Tuple[int, ...], versions: List[Optional[Tuple[int, ...]]], key: str,
             file: str) -> Optional[str]:
-    if newest_entry is None or current <= newest_entry:
+    """Refuse only when the artifact's version is above EVERY version its
+    changelog names - a bump that never got its line. Reading only the FIRST
+    line (what this did until ledger IMP-140) could not tell that apart from a
+    list written oldest-first, which is a nuisance, not a missing line: the
+    reported case had its current line present, at the end. That refusal made
+    the first surgical /sdlc:repair on such a file fail while every validator
+    called the file green."""
+    known = [v for v in versions if v is not None]
+    if not known or current <= max(known):
         return None
-    return (f"[FAIL] {file}: metadata.{key} is {'.'.join(map(str, current))} but the newest "
-            f"changelog line says {'.'.join(map(str, newest_entry))} - a version was bumped "
-            f"without a changelog line, or the lines are out of order. Add the missing line "
-            f"(newest first) or re-run with --force to layer the new line on top anyway.")
+    return (f"[FAIL] {file}: metadata.{key} is {'.'.join(map(str, current))} but no "
+            f"changelog line names it - the newest one says "
+            f"{'.'.join(map(str, max(known)))}, so a version was bumped without a "
+            f"line. Add the missing line (newest first) or re-run with --force to "
+            f"layer the new line on top anyway.")
+
+
+def order_note(versions: List[Optional[Tuple[int, ...]]], key: str) -> Optional[str]:
+    """One line when the changelog is not newest-first. Never blocks: the new
+    line still goes on top, and the list is then one entry closer to sorted."""
+    known = [(i, v) for i, v in enumerate(versions) if v is not None]
+    if len(known) < 2:
+        return None
+    top, newest = known[0], max(known, key=lambda iv: iv[1])
+    if top[1] >= newest[1]:
+        return None
+    return (f"metadata.changelog is not newest-first: its first line says "
+            f"{'.'.join(map(str, top[1]))} while entry {newest[0] + 1} says "
+            f"{'.'.join(map(str, newest[1]))}. The new line went on top anyway; "
+            f"put the rest in order (CLAUDE.md section 1) when you next edit "
+            f"metadata.{key}.")
 
 
 # --------------------------------------------------------------------------
@@ -171,7 +208,7 @@ def bump_yaml(text: str, summary: str, by: Optional[str], patch: bool, force: bo
         if CHANGELOG_KEY_RE.match(lines[i]):
             cl_idx = i
             break
-    newest: Optional[Tuple[int, ...]] = None
+    versions: List[Optional[Tuple[int, ...]]] = []
     items_start = None
     item_indent = indent + "  "
     inline_items: Optional[List[str]] = None
@@ -187,9 +224,7 @@ def bump_yaml(text: str, summary: str, by: Optional[str], patch: bool, force: bo
             if not isinstance(loaded, list):
                 return None, f"[FAIL] {file}: metadata.changelog is not a list - cannot prepend.", 2
             inline_items = [str(x) for x in loaded]
-            if inline_items:
-                em = ENTRY_VERSION_RE.match(inline_items[0])
-                newest = parse_version(em.group(1)) if em else None
+            versions = entry_versions(inline_items)
         elif not inline:
             j = cl_idx + 1
             while j < end and (lines[j].strip() == "" or lines[j].lstrip().startswith("#")):
@@ -197,12 +232,16 @@ def bump_yaml(text: str, summary: str, by: Optional[str], patch: bool, force: bo
             if j < end and re.match(r"^\s+-\s", lines[j]):
                 items_start = j
                 item_indent = re.match(r"^(\s+)-", lines[j]).group(1)  # type: ignore[union-attr]
-                first = lines[j].split("-", 1)[1].strip().strip("\"'")
-                em = ENTRY_VERSION_RE.match(first)
-                newest = parse_version(em.group(1)) if em else None
-    problem = refusal(current, newest, key, file)
+                entries: List[str] = []
+                k = j
+                while k < end and re.match(r"^\s+-\s", lines[k]):
+                    entries.append(lines[k].split("-", 1)[1].strip().strip("\"'"))
+                    k += 1
+                versions = entry_versions(entries)
+    problem = refusal(current, versions, key, file)
     if problem and not force:
         return None, problem, 1
+    note = order_note(versions, key)
 
     entry = changelog_line(new_version, summary, by)
     entry_line = f"{item_indent}- {json.dumps(entry)}"
@@ -243,7 +282,9 @@ def bump_yaml(text: str, summary: str, by: Optional[str], patch: bool, force: bo
         return None, f"[FAIL] {file}: the edit did not land where expected; nothing written.", 2
     msg = f"{key} {'.'.join(map(str, current))} -> {new_version}; changelog line added: {entry}"
     if problem:
-        msg += "  (forced over an out-of-order changelog)"
+        msg += "  (forced over a changelog with no line for the current version)"
+    if note:
+        msg += f"\n       {note}"
     return new_text, msg, 0
 
 
@@ -273,13 +314,11 @@ def bump_json(text: str, summary: str, by: Optional[str], patch: bool, force: bo
         changelog = []
     if not isinstance(changelog, list):
         return None, f"[FAIL] {file}: metadata.changelog is not a list - cannot prepend.", 2
-    newest = None
-    if changelog:
-        em = ENTRY_VERSION_RE.match(str(changelog[0]))
-        newest = parse_version(em.group(1)) if em else None
-    problem = refusal(current, newest, key, file)
+    versions = entry_versions([str(x) for x in changelog])
+    problem = refusal(current, versions, key, file)
     if problem and not force:
         return None, problem, 1
+    note = order_note(versions, key)
     entry = changelog_line(new_version, summary, by)
     meta[key] = new_version
     meta["changelog"] = [entry] + [str(x) for x in changelog]
@@ -291,7 +330,9 @@ def bump_json(text: str, summary: str, by: Optional[str], patch: bool, force: bo
     out = out.replace("\n", nl) if nl != "\n" else out
     msg = f"{key} {'.'.join(map(str, current))} -> {new_version}; changelog line added: {entry}"
     if problem:
-        msg += "  (forced over an out-of-order changelog)"
+        msg += "  (forced over a changelog with no line for the current version)"
+    if note:
+        msg += f"\n       {note}"
     return out, msg, 0
 
 

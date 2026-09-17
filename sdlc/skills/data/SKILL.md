@@ -95,7 +95,6 @@ Runtime files (NOT inside this skill directory):
 |---|---|
 | `docs/DATA-MODEL.yaml` (project root) | Output artifact consumed by downstream agents. |
 | `.claude/skills-state/sdlc-data.state.yaml` | Session state for resumability. |
-| `CLAUDE.md` (project root) | Pointer block injected on completion. |
 
 ## Reserved EXIT command
 
@@ -134,9 +133,20 @@ Before doing anything else, check for `.claude/skills-state/sdlc-data.state.yaml
   > "I found an unfinished `sdlc:data` session from `<last_updated>`. Would
   > you like to **resume**, **restart** (discard previous answers), or
   > **discard** (delete state and exit)?"
-- If `status: complete` or `status: aborted` and `docs/DATA-MODEL.yaml`
-  exists, treat this as an update flow — see Phase 7's *merge* behavior.
+- If `status: complete` or `aborted` and `docs/DATA-MODEL.yaml` exists,
+  scope the update — see
+  `sdlc/skills/ux/references/upstream-reconciliation.md`'s REFINE row (open
+  only the named themes, the §7 delta items, and the non-confirmed set;
+  confirm the rest in one summary) — then Phase 7's *merge* behavior.
+- If `status: complete` or `aborted` and `docs/DATA-MODEL.yaml` is ABSENT,
+  only `partial_answers` survives: offer restart-from-partial_answers or
+  discard — never resume.
 - If no state file, continue to Phase 2.
+- If the state file's `skill_version` is older than this file's footer: run
+  the canonical recipe
+  (`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` → "Resume with
+  stale state" — migrate additively, reconcile the theme lists and
+  `last_ids`, then offer resume at position 1).
 
 ### Phase 2 — Scan inputs
 
@@ -149,6 +159,10 @@ bootstrapped by `/sdlc:setup`. Use it to read large upstream docs by slice:
 `sections.<file>.<key>` range. This keeps the scan within budget on big
 projects — exactly the case this skill produces. Fall back to whole-file reads
 when `INDEX.yaml` is absent. Protocol: `.claude/rules/sdlc-docs-access.md`.
+Every `python .claude/sdlc/docs_index.py …` in this file runs the copy
+`${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once per
+run: an installed copy older than the plugin's counts as absent, and every
+fallback this file gives for a missing `docs_index.py` applies to it.
 
 Required upstream artifacts:
 
@@ -942,4 +956,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.12"
+skill_version: "1.18"

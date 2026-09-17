@@ -81,7 +81,7 @@ deep-dive**, so the user can `EXIT` at any time without losing progress.
 | `references/pattern-selection.yaml` | Trimmed matrix: pattern × {best-when, tradeoffs, disqualifiers, ai-builder-considerations}. |
 | `references/container-taxonomy.yaml` | Container archetypes × {aliases, common-responsibilities, suggested-components}. |
 | `references/component-taxonomy.yaml` | Component archetypes × {aliases, typical-responsibilities, typical-edges}. |
-| `references/merge-validate.md` | Merge logic for existing artifacts, the 4 cross-checks, and the rule that this skill never writes CLAUDE.md. Read on entering Phase 7. |
+| `references/merge-validate.md` | Merge logic for existing artifacts, the canonical numbered cross-check table (what each `[cross-check N]` asserts, block vs. warn), and the rule that this skill never writes CLAUDE.md. Read on entering Phase 7. |
 | `references/edge-cases.md` | Unusual situations and their handling. |
 
 Runtime files (NOT inside this skill directory):
@@ -92,7 +92,6 @@ Runtime files (NOT inside this skill directory):
 | `docs/ARCH__<container>.yaml` (project root) | Per-container output artifact. |
 | `.claude/skills-state/sdlc-arch.state.yaml` | Session state for resumability. |
 | `.claude/skills-state/sdlc-arch.derivation-report-<ISO8601>.yaml` | Optional report after a -d run. |
-| `CLAUDE.md` (project root) | Pointer bullet injected on completion. |
 
 ## Reserved EXIT command
 
@@ -318,15 +317,26 @@ Check for `.claude/skills-state/sdlc-arch.state.yaml`:
   warn the user and offer to start a new session alongside the existing one.
   The state file holds a `sessions:` map keyed by `mode|container_id` —
   multiple modes can live in the same file (see "Session state file").
-- If `status: complete` or `aborted` and the target output yaml exists, treat
-  this as an update flow — see `references/merge-validate.md`. In container mode,
-  re-validate the existing `docs/ARCH__<cid>.yaml` first: if it is on-disk
-  `complete` but the validator flags a work_unit (#21), FR→work_unit (#22),
-  interface-contract (#23), or edge roll-up (#24)
+- If `status: complete` or `aborted` and the target output yaml exists,
+  scope the update — see
+  `sdlc/skills/ux/references/upstream-reconciliation.md`'s REFINE row (open
+  only the named themes, the §7 delta items, and the non-confirmed set;
+  confirm the rest in one summary) — then `references/merge-validate.md`.
+  In container mode, re-validate the existing `docs/ARCH__<cid>.yaml` first:
+  if it is on-disk `complete` but the validator flags a work_unit (#21),
+  FR→work_unit (#22), interface-contract (#23), or edge roll-up (#24)
   error, it is **drilled but incomplete** — say so and resume the deep-dive
   (fill the missing `work_units` / push each FR to a callable / record a
   `work_units_waiver`) rather than treating it as finished.
+- If `status: complete` or `aborted` and the target output yaml is ABSENT,
+  only `partial_answers` survives: offer restart-from-partial_answers or
+  discard — never resume.
 - If no state file, continue to Phase 2.
+- If the state file's `skill_version` is older than this file's footer: run
+  the canonical recipe
+  (`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` → "Resume with
+  stale state" — migrate additively, reconcile the theme lists and
+  `last_ids`, then offer resume at position 1).
 
 ### Phase 2 — Scan inputs
 
@@ -343,7 +353,11 @@ read these by slice: look an entity/FR/section up in `INDEX.yaml` (or
 range. Validate each upstream file with its validator (below), then pull only
 the slices you actually need — do not load `DATA-MODEL.yaml` whole to find a few
 store ids or entity names. Fall back to whole-file reads when `INDEX.yaml` is
-absent. Protocol: `.claude/rules/sdlc-docs-access.md`.
+absent. Protocol: `.claude/rules/sdlc-docs-access.md`. Every `python
+.claude/sdlc/docs_index.py …` in this file runs the copy
+`${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once per
+run: an installed copy older than the plugin's counts as absent, and every
+fallback this file gives for a missing `docs_index.py` applies to it.
 
 Required upstream artifacts (MUST exist with `metadata.status: complete`):
 
@@ -356,22 +370,13 @@ Required **only when `ux_present: true`** (the pre-flight settled this):
 
 If any artifact it read has `metadata.status != complete`, **stop**. A
 validator that exits non-zero stops the run too — **unless the project has
-accepted that exact deviance**: a `wontfix` finding in
-`.claude/skills-state/sdlc-findings.yaml` whose summary carries
-`expected_count: N` for that check and file. The repair doctor already
-honours those, so run
+accepted that exact deviance** (a `wontfix` finding pinning `expected_count: N`
+for that check and file): run
 `python "${CLAUDE_SKILL_DIR}/../repair/doctor.py" --docs-dir docs --artifact docs/<the file whose validator exited non-zero>`
-(one `--artifact` per such file) when it is available and stop only on a
-check it reports red: it re-runs that artifact's validator with the
-accepted-deviance registry applied and reports the check as "accepted (N,
-unchanged) per FND-NNN" or as red. **Not `--quick`** - that depth runs only
-the cross-artifact linter and says nothing about any per-artifact validator,
-accepted or red (ledger IMP-081). Without the doctor, read the queue for the
-wontfix entry and compare the count yourself. Fail only when the count moves.
-Without this clause a project with one permanently accepted validator error
-could never run this skill again (ledger IMP-052 gave it to `test` and
-`task`; IMP-081 to this skill). Print a clear message naming the offending
-file and the upstream skill the user should run. With
+(one `--artifact` per such file, never `--quick`) and stop only on a check it
+reports red. The full rule, including what to do without the doctor:
+`sdlc/skills/repair/references/accepted-deviance.md`. Print a clear message
+naming the offending file and the upstream skill the user should run. With
 `ux_present: false`, skip step 3 entirely — do not validate a file that is
 absent by design, and do not treat its absence as a reason to stop.
 
@@ -812,168 +817,33 @@ python "${CLAUDE_SKILL_DIR}/validate_schema.py" --path docs/ARCH.yaml
 ```
 
 The validator validates `docs/ARCH.yaml` plus every sibling
-`docs/ARCH__*.yaml` and runs the cross-check suite below (all enabled
-in both modes). Coverage, trace, and ID-format failures force
-`metadata.status: draft`; the upstream-status and external-container
-checks emit warnings only.
+`docs/ARCH__*.yaml` and runs the full numbered cross-check suite (printed as
+`[cross-check N]`), in both modes. **The canonical table — what every
+numbered check asserts, which block `status: complete` and which only warn,
+and the version-gating floor (CLAUDE.md §10, `arch_version`/
+`arch_container_version` >= 2.0) — is `references/merge-validate.md` →
+"Validation (Phase 7)". Read it before interpreting validator output or
+writing an `arch_warnings` entry; it is not restated here.**
 
-**Coverage** (block complete):
+In short: coverage (API/UX/DATA-store/PRD-feature/PRD-integration), edge/
+trace integrity, ID-prefix formats, and — in container mode — work_units
+integrity (#21), FR→work_unit coverage (#22), interface contracts (#23), and
+edge roll-up (#24) all block `complete`; everything else (#25-#32,
+provenance staleness, upstream-status awareness) warns only.
 
-1. **API-resource coverage** — every API resource appears in some
-   container's `owns_api_resources`.
-2. **UX-surface coverage** — every data-bearing UX surface appears in
-   some container's `owns_ux_surfaces`.
-3. **DATA-store coverage** — every primary/secondary store in
-   `DATA-MODEL.yaml.persistence.*` appears in some container's
-   `persistence`.
-4. **PRD feature coverage** — every PRD `features` `FR-NNN`
-   appears in some container's `implements_requirements` OR in the
-   top-level `deferrals` list (with a reason; the legacy reason-less
-   `non_container_features` list still counts for one more version and is
-   reported). Skipped if `docs/PRD.yaml` is absent.
-5. **PRD integration coverage** — every PRD `integrations_required`
-   `INT-NNN` appears in some container's `realizes_integrations`, some
-   component's `int_refs`, or `deferrals`. Blocks at `arch_version >= 2.0`,
-   warns below. An external container realizing an INT without an
-   `external_contract` draws a warning.
-
-Every coverage gate reads the top-level `deferrals: [{id, reason}]` list
-first (CLAUDE.md §6) — an entry with no reason defers nothing.
-
-**ID-prefix formats** (block complete):
-
-- `WRN-NNN` on every `arch_warnings` entry (system + each container).
-- `FR-NNN` or `NFR-NNN` on every `implements_requirements`; `FR-NNN` on
-  `non_container_features`.
-- `WKF-NNN` on every `traces_prd_workflows`.
-- PRD-trace existence: every `FR-NNN`/`NFR-NNN` / `WKF-NNN` resolves to a
-  PRD id (FR→functional_requirements, NFR→non_functional_requirements);
-  a component's `implements_requirements` ⊆ its parent container's.
-
-**Edge integrity** (block complete):
-
-4. **Edge endpoint integrity** — every edge `to` resolves to an existing
-   container (system-level edges) or `<container_id>/<component_id>`
-   (container-level external edges) or `<component_id>` (container-level
-   internal edges).
-5. **Edge via_\* resolution** — every `via_resource_id` / `via_unit`
-   (internal edges → a `work_units[].name` on the `to` component) /
-   `via_operation_id` (external edges → an API operation) / `via_channel_id` /
-   `via_entity` (when set) resolves to an upstream artifact. Typos in `via_*`
-   are blocking errors.
-
-**Container/component consistency** (block complete):
-
-6. **Container ↔ system consistency** — `api_surface`, `ux_surface`,
-   `persistence_bindings` ⊆ parent container's `owns_*` / `persistence`.
-7. **Deployment compatibility** — `deployment.shape` is in the allowed
-   set for the parent's `deployment_unit` (see `ARCH__CONTAINER.schema.yaml`).
-8. **Component trace integrity** — every `traces_api_resources`,
-   `traces_api_operations`, `traces_ux_surfaces`, `traces_data_entities`
-   entry on a component resolves to its upstream artifact AND
-   (for api/ux) is contained in the parent container's `owns_*`.
-9. **`file_path` integrity** — every `containers[].file_path` resolves
-   to a file on disk, and every sibling `docs/ARCH__*.yaml` is
-   referenced by some `containers[].file_path`.
-9a. **Component `work_units` integrity & FR coverage (#21/#22 — block
-    `complete`)** — per-unit integrity (unique `name` within the component,
-    non-empty `summary`, `traces_api_operation`/`implements_requirements`/
-    `touches_entities` subsets), PLUS two coverage gates: **#21** — a
-    non-trivial component (non-plumbing archetype carrying
-    `implements_requirements` or a traced contract) with **no** `work_units`
-    and **no** `work_units_waiver` blocks `complete`; **#22** — every FR-NNN in
-    a component's `implements_requirements` must appear in one of that
-    component's `work_units[].implements_requirements` (waivable via
-    `work_units_waiver`). work_units are read by a real YAML parse (block- or
-    flow-style entries both count), never a line-grep.
-9b. **Work_unit DEFER-OR-DECLARE contract (#23 — block `complete`)** — a
-    work_unit with no `traces_api_operation` must declare ALL of `inputs`,
-    `output`, `raises` (explicit empties count: `inputs: []`, `raises: []`,
-    `output: "None"`); a unit that traces an API operation may defer to that
-    schema. Waiver-aware like #21/#22. This is what stops the emitter from
-    filling only trace fields and leaving every interface contract empty.
-    Explicit empties are for genuinely-trivial callables — an emitter that
-    stamps empties across a component (≥3 callable units, ≥80% all-empty)
-    trips the emptiness advisory instead.
-9c. **Container→system edge roll-up (#24 — block `complete`)** — every
-    container file's `external_edges[]` entry must have a corresponding
-    `ARCH.yaml.edges` row ({from: that container, to: target container,
-    same type}). Container mode appends missing rows at Phase 7 (with
-    confirmation); system `-d` proposes them as ADDs (rule S6).
-
-**Non-blocking warnings**:
-
-10. **External-container files** — if an `ARCH__<id>.yaml` exists for a
-    container with `external: true`, the validator warns (file should
-    not exist).
-11. **Upstream status awareness** — if any of `PRD.yaml` / `UX.yaml` /
-    `DATA-MODEL.yaml` / `API.yaml` has `metadata.status != "complete"`,
-    the validator emits a warning. (The skill itself refuses to run in
-    that case, but a downstream agent re-running the validator alone
-    will see the warning.)
-12. **Component `code_location` coverage** — a non-trivial component
-    (non-plumbing archetype, carrying at least one trace) with no
-    `code_location` emits a warning: downstream `task`/codegen will have to
-    infer its file placement. Non-blocking (placement can be deferred), but
-    filling it is what makes autonomous downstream codegen hold.
-13. **Component `work_units` waiver notice** — a non-trivial component that
-    declares no work_units but records a `work_units_waiver` is surfaced as a
-    non-blocking warning (so a reviewer sees the waiver), and the container-level
-    "FR(s) unreachable through any work_unit" roll-up is printed as advisory
-    context. The blocking half of #21/#22 lives in item 9a above. A `calls`
-    internal edge's `via_unit` resolves against a `work_units[].name` on the
-    edge's `to` component; an external edge's `via_operation_id` resolves against
-    an API operation; an external edge's `via_unit` resolves against the
-    `<container>/<component>` target's work_units (sibling-container calls with
-    no API between them).
-14. **FR-named deliverable path coverage (#25, advisory)** — a concrete repo
-    path named as inline code (backticks) in a claimed FR's text that no
-    component's `code_location` covers is warned about: a build-time
-    deliverable (schema layer, `tools/`, `templates/`, shipped content) with no
-    owning component can never be scheduled by `task`. Only backtick-delimited
-    tokens **with path shape** (a trailing `/` or a file extension) are scanned;
-    bare prose slashes and backticked non-paths (`and/or`, `PyPI/npm`, ID-lists
-    like `FR-046/047`, enum listings like `pass/fail`) are ignored, so mark a
-    genuine deliverable path as code (e.g. `` `tools/gen/` ``). A path under
-    one of ARCH.yaml's `output_locations` is what the running system WRITES
-    (a packaged bundle under `dist/`, sidecars under `assets/`, a scaffolded
-    app under an output root), not source it ships — declare such roots there
-    once and the check leaves every path beneath them alone. Asked when a
-    requirement describes what the product produces rather than what it is.
-15. **api_consumers mirror (#26, warning)** — an external `calls` edge with
-    `via_resource_id` not mirrored in the container's `api_consumers[]` is
-    warned about.
-16. **Contract seams (#28, warning)** — an input type no sibling unit
-    produces and no DATA entity defines; an error contract decided nowhere
-    on a pinned `calls` seam; two components overlapping in `code_location`.
-    An input declares a type only in the `name: Type` shorthand (a trailing
-    `(note)` or ` - note` is fine); prose inputs, ALL-CAPS tokens (emphasis,
-    env-var names), a note naming the caller and a module-qualified library
-    type (`click.Context`) declare nothing, and an entity's plural resolves
-    to the entity — so a prose-style contract never turns every capitalized
-    word into a row.
-    The tightened #27 arm also warns when `via_unit` resolves to an
-    `entrypoint` unit but the edge records no `invocation`. #27 never fires
-    for a callee declared external in ARCH.yaml (`external: true` or archetype
-    `external-service`): it has no work_units for `via_unit` to name, so the
-    seam is the callee's `external_contract` or an API resource instead.
-17. **owns_callables uniqueness (#29, warning)** — a callable claimed in two
-    units' `owns_callables` within one container.
-18. **Configuration consistency (#30, warning)** — duplicate
-    `configuration.config_keys`, or `consumed_by` naming no component.
-19. **Store-id resolution + untraced entities (warning)** — `realizes_store`
-    / persistence references that match no DATA store id (a stated no-op
-    when the DATA paradigm is `none`), and — once every buildable container
-    is drilled — DATA entities no component reads or writes.
-20. **Provenance staleness (warning, CLAUDE.md §7)** — a recorded
-    `upstream_provenance` hash that no longer matches its upstream ("built
-    against an older docs/X — run /sdlc:arch to review the delta"), or a
-    complete 2.0+ artifact recording no provenance at all.
-
-**Version gating (CLAUDE.md §10):** checks #21–#24, the INT coverage gate
-and the component-containment gate ERROR at schema version >= 2.0 and WARN
-below it — an artifact stamped complete by an older skill version never
-flips red on upgrade.
+**System-mode update / `--reconcile`, when #25 fires.** #25 (a claimed FR
+names a build-time deliverable path no component owns) can also point at a
+path the running system WRITES rather than ships — a case only system mode
+may record, under `output_locations`, and no interview question asks for it
+today (there is no candidate to pre-fill from). On a system-mode update or
+`--reconcile` run, when the validator's #25 rows are non-empty, ask ONCE:
+"these `<N>` path(s) [list them]: is each one runtime output (record it
+under `output_locations`) or a missing component (name/extend one)?" and
+write the answer. Ask this only when #25 actually fires — a project that
+never trips it is never asked. Container mode never writes
+`output_locations` (see `references/merge-validate.md`'s mode boundary) and
+must not read this step as a system-mode question that already exists
+elsewhere in the interview — it does not.
 
 **Warnings the user leaves standing become durable WRN entries.** For every
 validator WARNING the user chooses not to fix now, append ONE grouped
@@ -1370,4 +1240,4 @@ The architecture interview can be long. Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.17"
+skill_version: "1.21"

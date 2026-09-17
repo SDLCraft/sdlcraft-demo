@@ -13,11 +13,16 @@ skill runs. Behaviour:
 - **Any with `status: draft`** → stop and print
   "Run `/sdlc:<skill>` to complete the artifact before invoking arch."
 - **Any failing its own validator** → stop. Print the validator's
-  stderr verbatim so the user sees the field-level errors.
+  stderr verbatim so the user sees the field-level errors — **unless** the
+  project accepted that exact deviance:
+  `python "${CLAUDE_SKILL_DIR}/../repair/doctor.py" --docs-dir docs --artifact docs/<that file>`
+  reports every failing check as `accepted (N, unchanged)`; then proceed
+  (never `--quick`; rule: `sdlc/skills/repair/references/accepted-deviance.md`).
 
 The skill never partially-runs against a partially-validated upstream
-chain. The risk of polluting a downstream artifact with stale assumptions
-is too high.
+chain (an accepted deviance is not partial validation: its count is pinned
+and re-checked on every run). The risk of polluting a downstream artifact
+with stale assumptions is too high.
 
 ## When an upstream changes after ARCH exists (re-invocation, §7)
 

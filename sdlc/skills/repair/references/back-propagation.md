@@ -41,10 +41,21 @@ Three absolutes:
   `repair/SKILL.md` Phase 2 Step 0): record it via `lessons.py add … --related
   FND-NNN` and close the finding `wontfix`. A validator is never bent to fit
   one project.
-- **Never localize to `code`.** Generated code is an output, never a source. A
-  defect *in* generated code is a `failed` task for `/sdlc:code` to heal, not a
-  finding. If a finding localizes to `code`, it was mis-raised — close it
-  `wontfix` with that reason.
+- **Never localize to `code` without checking Step 2 first.** Generated code
+  is an output, never a source — but "the fact is missing everywhere" and
+  "the fact is stated correctly and only the generated code diverges" are two
+  different findings, and only one of them is mis-raised. Walk the owner
+  table below before concluding either way: if no upstream artifact states
+  the fact at all, that stage is the source (a genuine spec gap silently
+  becomes a code bug otherwise, and loses its own repair path). Only when
+  every upstream contract already states the fact correctly and the
+  generated code alone diverges from it — a `failed` task for `/sdlc:code`
+  to heal, not a spec finding — was the finding mis-raised: close it
+  `wontfix` with `resolution.located_stage: code` (the one status that value
+  is allowed on) and name the owning qualified task id(s) in
+  `resolution.stale_tasks` — the channel `/sdlc:code`'s own plan gate reads,
+  regardless of status, to schedule the rebuild. Repair still never touches
+  code itself; naming the task is the whole fix.
 - **Never localize to an embed.** A task's `interface_contract`, `test_spec`,
   `operation_contract`, `entity_slice`, `design_spec` and `config_keys` are
   *write-time copies* of upstream slices. Per CLAUDE.md §9 an embed is never the
@@ -224,8 +235,15 @@ python .claude/sdlc/docs_index.py --refs <symbol>
   the definer lost it (a bad edit or a rename that didn't propagate). Source is
   the **defining artifact**.
 - **One** dangling reference against an id that was legitimately renamed or
-  retired upstream → source is the **referencing artifact**; it holds a stale
-  copy.
+  retired upstream → two outcomes, and the changelog entry that retired the id
+  decides which: either the **referencing artifact** holds a stale copy (source
+  is that artifact — fix it there), or the citation is deliberate (a changelog
+  line, a rationale that names what was dropped) — then the id is kept and
+  recorded under the durable retired-id channel `--check` offers,
+  `docs/INDEX.allow.yaml` `retired_ids: [{id, reason}]` (or the PRD's
+  `metadata.retired_ids`), which is what the index lists as "cited without a
+  definition on purpose". Never both: a stale copy is not made deliberate by
+  recording it.
 
 This is also the cheapest localization in the set — run it before reasoning.
 
@@ -262,4 +280,6 @@ was never verified (the FND-016 → FND-023 → FND-034 shape). At the gate, say
 position 1** — the owning skill's delta-review reconciles what a surgical edit
 missed last time — and **never refuse `surgical`**: when the earlier resolution
 shows exactly which hop was skipped, a scripted surgical pass that closes that
-hop is the right fix, and the user may pick it.
+hop is the right fix, and the user may pick it. When the fix also meets Phase
+4's four-part additive criterion, `additive` leads instead: the recurrence
+default changes which mode leads, never which modes are offered.

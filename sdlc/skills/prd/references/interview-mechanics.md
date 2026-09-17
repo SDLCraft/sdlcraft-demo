@@ -32,14 +32,12 @@ The user can type any value there, including `EXIT`. Position 4 is the
 last *explicit* option — its description surfaces the remaining menu items
 so the user knows what's available without seeing them as selectable buttons.
 
-### The channel rule — content rides inside the call
+### The channel rule
 
-Content a question depends on must travel INSIDE the `AskUserQuestion` call —
-in the question text, an option's `description`, or an option's `preview`.
-Chat markdown sharing a turn with a tool call may not render for the user and
-is never load-bearing; markdown followed by a typed reply is fine only when
-the turn ENDS with the markdown. Canonical: `importance-flows.md` → "The
-channel rule".
+See AUTHORING §18 and `importance-flows.md` → "The channel rule" (this
+skill's canonical worked examples) — cited here, not restated: content a
+question depends on rides inside the `AskUserQuestion` call, never in
+same-turn chat markdown.
 
 ### Free-text-only questions
 
@@ -109,11 +107,18 @@ After the `AskUserQuestion` call returns:
   to the closest suggested value, read the mapping back in the next batch
   ("I recorded `org_owned` — the org is the controller and volunteers edit a
   narrow slice; right?"), and keep the text in `<field>_rationale` so the
-  nuance is not lost. Count it under `free_text_by_question` all the same —
-  the maintainer reads a high rate there as "the enum keeps not fitting", and
-  that is worth knowing. Never widen the enum from inside a run (a schema
-  change is the maintainer's; record a lesson if the values genuinely never
-  fit, CLAUDE.md §15).
+  nuance is not lost — which the "Why?" follow-up below then skips, since the
+  typed reply already IS the rationale. Count it under `free_text_by_question`
+  all the same — the maintainer reads a high rate there as "the enum keeps not
+  fitting", and that is worth knowing. Never widen the enum from inside a run
+  (a schema change is the maintainer's; record a lesson if the values
+  genuinely never fit, CLAUDE.md §15).
+- **A `free_text_expected: true` question's `suggested_answers`** are
+  templates, not complete answers a user can pick verbatim: each one that is a
+  template carries a literal `<…>` placeholder (e.g. `"Throughput-driven: <N>
+  req/s"`), never prose like "state your number" with nothing to fill in — a
+  suggestion with no placeholder that a user CAN pick as-is defeats the flag's
+  own contract.
 - **`⚠ inferred` option picked without change**: set
   `<field>_confidence: inferred`.
 
@@ -137,7 +142,10 @@ options: [
 ]
 ```
 
-Skippable. Stored at `<schema_path>_rationale`.
+Skippable. Stored at `<schema_path>_rationale`. Skipped entirely when the
+Other-mapping rule above has already filled `<schema_path>_rationale` for
+this question — the typed reply IS the rationale, so a second prompt would
+just ask to repeat it.
 
 ## Type discipline when writing answers
 

@@ -78,7 +78,7 @@
 # metadata — always at top level, present in both single- and multi-product mode
 # -----------------------------------------------------------------------------
 metadata:
-  data_model_version: "1.1"                # schema version this file conforms to
+  data_model_version: "3.0"                # schema version this file conforms to
   last_updated: "2026-05-25T12:00:00Z"     # ISO-8601 UTC timestamp of last write
   generated_by: sdlc-data                  # always literal string "sdlc-data"
   session_id: "00000000-0000-0000-0000-000000000000"  # UUID of the interview session
@@ -156,7 +156,10 @@ metadata:
 # the way a malformed `deferrals` entry defers nothing. A malformed STRING is
 # the blocking error it has always been. New writes emit the mapping at
 # <name>_version >= 2.0 (DATA-MODEL: >= 3.0); `.claude/sdlc/migrate_warnings.py`
-# converts an existing artifact.
+# converts an existing artifact - from any skill but repair, run it as
+# `--by sdlc-<skill> --no-bump` (or bare: it derives both from
+# $CLAUDE_SKILL_DIR), so the changelog credits the skill that ran and the run
+# bumps the version once.
 data_warnings: []                          # list[string] of "WRN-NNN: <msg>" items
 
 # deferrals — the structured DEFER half of trace-or-defer (CLAUDE.md §6).
@@ -321,6 +324,9 @@ id_strategy:
   scheme_rationale: null           # string — why this scheme?
   natural_keys: null               # list[NaturalKey]; each:
                                    #   - entity: PascalCaseEntityName
+                                   #       Must resolve to a key in `entities`.
+                                   #       Errors at data_model_version >= 3.0,
+                                   #       warnings below (ledger IMP-012).
                                    #     fields: [snake_case, ...]   # composite OK
                                    #     reason: string
 
@@ -339,12 +345,34 @@ entities:                          # REQUIRED — dict[<PascalCaseEntityName>, E
                                    # graph / vector.
     # --- paradigm-specific entity attributes (all optional) ---
     # category: stage_artifact     # file_native — discriminator (free string)
-    # composes: [ArtifactBase]     # file_native — Pydantic mixins this extends
     # serialization:               # file_native — on-disk placement
     #   scope: per_stage           #   per_stage | per_project | nested_in:<E> | runtime_only
     #   filename_pattern: "02_product_requirements.yaml"
     # node_label: User             # graph — node label (defaults to entity key)
     # payload_fields: [title, body]# vector — fields stored alongside the vector
+    # --- composition (any paradigm; ledger IMP-138) ---
+    # composes: [ArtifactBase]     # Pydantic mixins this entity extends. Every
+                                   #   field check resolves through the chain,
+                                   #   recursively: a union `discriminator`, a
+                                   #   relationship from_field/to_field, a
+                                   #   `references` target, the pii / regulated
+                                   #   / localized / encrypted lists, and
+                                   #   lifecycle.field — an INHERITED field
+                                   #   counts as present. A mixin need not be a
+                                   #   declared entity (it is often a code base
+                                   #   class); an undeclared one contributes no
+                                   #   fields and is named in a message only
+                                   #   when a check needed a field it was meant
+                                   #   to supply. The entity still needs a
+                                   #   non-empty resolved `fields` set, but an
+                                   #   inherited field counts toward it (ledger
+                                   #   IMP-163) — a union parent (no `fields`
+                                   #   of its own; its variants carry them) and
+                                   #   an entity whose fields come entirely
+                                   #   from a composed mixin (no `fields` of
+                                   #   its own either) are both exempt from
+                                   #   declaring `fields` directly; it is no
+                                   #   longer only the union parent.
     # --- discriminated union (any paradigm; ledger IMP-080) ---
     # one_of: [CardPayload, BankPayload]   # this entity is a UNION PARENT: an
     #                                #   instance is exactly one of these
@@ -647,12 +675,18 @@ indexes_and_queries:               # relational/document: REQUIRED (may be
   access_patterns: null            # list[AccessPattern]; each:
                                    #   - description: string (e.g. "list orders by user, newest first")
                                    #     entity: PascalCaseEntityName
+                                   #       Must resolve to a key in `entities`.
+                                   #       Errors at data_model_version >= 3.0,
+                                   #       warnings below (ledger IMP-012).
                                    #     fields: [snake_case, ...]
                                    #     expected_qps: float | null
                                    #     latency_budget_ms: int | null
                                    #     read_or_write: read | write | both
   expected_indexes: null           # list[Index]; each:
                                    #   - entity: PascalCaseEntityName
+                                   #       Must resolve to a key in `entities`.
+                                   #       Errors at data_model_version >= 3.0,
+                                   #       warnings below (ledger IMP-012).
                                    #     fields: [snake_case, ...]
                                    #     unique: bool
                                    #     type: btree | hash | gin | gist |
@@ -673,10 +707,16 @@ integrity_and_constraints:         # relational: REQUIRED (may be
                                    # restrict surfaces issues at delete time)
   unique_constraints: null         # list[UniqueConstraint]; each:
                                    #   - entity: PascalCaseEntityName
+                                   #       Must resolve to a key in `entities`.
+                                   #       Errors at data_model_version >= 3.0,
+                                   #       warnings below (ledger IMP-012).
                                    #     fields: [snake_case, ...]   # composite OK
                                    #     name: string | null
   check_constraints: null          # list[CheckConstraint]; each:
                                    #   - entity: PascalCaseEntityName
+                                   #       Must resolve to a key in `entities`.
+                                   #       Errors at data_model_version >= 3.0,
+                                   #       warnings below (ledger IMP-012).
                                    #     expression: "amount > 0"     # SQL expr
                                    #     name: string | null
                                    #     comment: string | null

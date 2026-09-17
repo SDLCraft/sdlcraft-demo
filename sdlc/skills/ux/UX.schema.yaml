@@ -83,7 +83,13 @@
 # metadata — always at top level, present in both single- and multi-product mode
 # -----------------------------------------------------------------------------
 metadata:
-  ux_version: "1.1"                        # schema version this file conforms to
+  ux_version: "3.0"                        # schema version this file conforms to.
+                                           # New writes stamp "3.0" (or higher) -
+                                           # see references/merge-validate.md's
+                                           # write-time stamp rule. Below 3.0 the
+                                           # CLI-contract typing and inventory-
+                                           # shard integrity checks (CLAUDE.md
+                                           # section 10) warn instead of blocking.
   last_updated: "2026-05-21T12:00:00Z"     # ISO-8601 UTC timestamp of last write
   generated_by: sdlc-ux                    # always literal string "sdlc-ux"
   session_id: "00000000-0000-0000-0000-000000000000"  # UUID of the interview session
@@ -166,7 +172,10 @@ metadata:
 # the way a malformed `deferrals` entry defers nothing. A malformed STRING is
 # the blocking error it has always been. New writes emit the mapping at
 # <name>_version >= 2.0 (DATA-MODEL: >= 3.0); `.claude/sdlc/migrate_warnings.py`
-# converts an existing artifact.
+# converts an existing artifact - from any skill but repair, run it as
+# `--by sdlc-<skill> --no-bump` (or bare: it derives both from
+# $CLAUDE_SKILL_DIR), so the changelog credits the skill that ran and the run
+# bumps the version once.
 ux_warnings: []                            # list[string] of "WRN-NNN: <msg>" items
 
 # deferrals — the structured DEFER half of the FR-coverage trace-or-defer
@@ -386,6 +395,19 @@ cli:
     location: null              # path/pattern (string|null)
     precedence: null            # e.g. "cli_flag > env > config_file > default" (string)
     env_prefix: null            # e.g. "ACME_" (string|null)
+  # global_flags — flags shared by EVERY command, declared once here instead
+  # of re-specified (and re-typed) inside every cli_command surface's
+  # layout.cli_args. Same CLIArg shape as layout.cli_args (see
+  # UX__SURFACE.schema.yaml): name/kind/type/required/description at
+  # minimum; kind is almost always "flag". At ux_version >= 3.0 an entry
+  # that is not a {name, kind, ...} mapping is rejected (a warning below
+  # that floor) — see validate_schema.py's check_cli_args_shape.
+  #
+  # Example:
+  #   global_flags:
+  #     - {name: json, kind: flag, long: "--json", type: bool, required: false,
+  #        description: "Emit machine-readable JSON instead of table output."}
+  global_flags: null            # Optional[List[CLIArg]]
 
 # =============================================================================
 # MULTI-PRODUCT MODE (monorepo) — uncomment and use *instead of* the top-level

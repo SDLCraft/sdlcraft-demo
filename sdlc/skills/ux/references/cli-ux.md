@@ -17,7 +17,7 @@ directly from the `cli:` block in `UX.yaml` and from each
 here mean every later agent will re-litigate the same decisions or
 silently invent inconsistent ones.
 
-## The 12 fields that go in `UX.yaml.cli`
+## The 13 fields that go in `UX.yaml.cli`
 
 (Mirroring `ux-questions.yaml` theme 10; here are the recommended
 patterns and the trade-offs.)
@@ -167,6 +167,17 @@ Prevents env-var collisions. E.g. `ACME_` so `ACME_API_KEY` ≠ system
 `API_KEY`. Always use the same prefix everywhere; document it in
 `--help` global section.
 
+### 12. `global_flags` — flags shared by every command
+
+Declared ONCE in `UX.yaml.cli.global_flags`, never re-specified (and
+re-typed) inside every `cli_command` surface's `layout.cli_args`. Same
+`CLIArg` shape as `layout.cli_args` below — name/kind/type/required/
+description at minimum; a global flag's `kind` is almost always
+`flag`. At `ux_version >= 3.0` an entry that is not a mapping in this
+shape is rejected (a warning below that floor — CLAUDE.md section 10,
+ledger IMP-009). Answer `none - every flag is per command` when the
+CLI truly has no cross-cutting flags.
+
 ## Per-CLI-command (`cli_command`) surface contents
 
 Each `cli_command` surface yaml fills in these surface fields with
@@ -182,6 +193,23 @@ cli_invocation: "<root> task add <title> [--priority=<n>] [--due=<date>]"
 
 Use angle brackets `<...>` for required values, square brackets `[...]`
 for optional values, `...` for repeatable.
+
+### `exit_conditions`
+
+At `ux_surface_version >= 3.0` each entry is typed, not prose:
+
+```yaml
+exit_conditions:
+  - {code: 0, when: "success"}
+  - {code: 1, when: "generic error"}
+  - {code: 2, when: "misuse (missing title)"}
+```
+
+`code` must be a key of `UX.yaml.cli.exit_codes` — the validator checks
+it exists there, so the code's meaning is recorded once, never
+re-described per surface. A plain-string entry (the pre-3.0 shape) is
+accepted with a warning below the floor and rejected at or above it
+(ledger IMP-009).
 
 ### `layout.cli_args`
 
@@ -303,3 +331,7 @@ parser straight from that embedded slice — it never reads the UX shard. So a
 `cli_args` entry must be complete enough to code a parser from on its own:
 don't leave a required flag's `type` or `description` blank on the assumption a
 later stage will fill it. (Seam: SK-34 — the task-side `cli_contract` field.)
+At `ux_version >= 3.0` the shape is enforced, not just documented: a
+`cli_args` or `global_flags` entry that is not a mapping is rejected by the
+validator (a warning below that floor) before it ever reaches `task`'s embed
+(ledger IMP-009).

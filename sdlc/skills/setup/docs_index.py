@@ -56,13 +56,17 @@ Usage
     python docs_index.py --items <upstream>  # every item the upstream defines
                                              #   with its body hash (what --stamp
                                              #   records; --json for a mapping)
-    python docs_index.py --stamp <artifact> [--upstream <file> ...]
+    python docs_index.py --stamp <artifact> [--upstream <file> ...] [--hold-upstream <file> ...]
                                              # rewrite the artifact's
                                              #   metadata.upstream_provenance:
                                              #   sha256 + per-item hashes of every
                                              #   upstream it consumes, so a later
                                              #   --drift diffs item by item. Writes
-                                             #   ONLY that artifact, never the index
+                                             #   ONLY that artifact, never the index.
+                                             #   Names every recorded upstream it
+                                             #   re-stamped whose items moved;
+                                             #   --hold-upstream keeps that entry
+                                             #   exactly as recorded
 
 Project root is resolved from ``--project-root``, then ``$CLAUDE_PROJECT_DIR``,
 then the current working directory. ``docs/`` is taken relative to that root
@@ -126,10 +130,41 @@ and an LF checkout of the same file hash the same. Every skill that records a
 provenance hash reads it from ``INDEX.yaml`` or calls ``--hash`` — never a raw
 ``sha256(bytes)`` of its own, which differs on CRLF.
 
-Capability version: 5 (``--stale``: every stale artifact in the order to
-reconcile it, with its owning skill's ``--reconcile`` command; ``--stamp``
+Capability version: 9 (ARCH ``failure_modes[].id`` / ``security_concerns[].id``
+- container- and component-level - are indexed, keyed qualified ``<cid>/<id>``
+so a risk id never shares a component id's bare-id namespace; a test's
+``targets_failure_mode`` / ``targets_security_concern`` resolve the bare id
+inside its own shard's container and gain the same dangling check every other
+named reference has; a QUE/SCR/USR/OPR/AST item written as a single-quoted
+id, an ``id:`` that is not the item's first key, or a single-physical-line
+flow mapping (``- {id: QUE-009, question: ..., status: open}`` - the shape
+prd/SKILL.md itself instructs) now resolves under ``--show``/``--refs``
+instead of only being recorded as an honest "cannot address this shape"
+(ledger IMP-160 / IMP-161); and ``--stamp`` records the capability it was
+made with so ``--drift`` can tell a symbol kind newly indexable at this
+version from a genuine document edit and calls the former "index-new -
+re-stamp only" instead of a phantom addition. Version 8 (PRD requirement items are indexed whatever their
+spelling - a single-quoted NFR/WKF/ACR item is a definition rather than a
+dangling reference, and an item's summary carries its continuation lines
+without its closing quote or its trailing comment; ledger IMP-159). Version 7
+added ``--drift``, which marks every changed or removed upstream
+item this artifact references in a structured field or cites in prose -
+``[referenced here]``, ``[cited in prose xN]``, the unit's bare name inside a
+directive string included - and calls an upstream whose changed items it
+neither references nor cites ``re-stamp only``, a verdict ``--stale`` rows
+carry too, so a widely-stamped system file is not a reconcile at every shard
+edit; ``--stamp`` and ``--drift`` warn when the artifact references items an
+earlier-stage file defines that its stamp does not record - ledger IMP-147 /
+IMP-148, aicf LSN-084 / LSN-085). Version 6 added ``--stamp --hold-upstream
+FILE``, which keeps a recorded upstream's entry exactly as it was, so stamping
+the pair a run reviewed no longer forges the review of another recorded
+upstream that moved, and every plain ``--stamp`` names each recorded upstream
+it re-stamped whose items moved - ledger IMP-106; the ``--hook`` filter
+refreshes only for files directly in the project's own docs dir, never for any
+path under a directory named ``docs`` - ledger IMP-034. Version 5 added ``--stale``: every stale artifact in the order
+to reconcile it, with its owning skill's ``--reconcile`` command; ``--stamp``
 records each upstream's version and ``--drift`` prints the changelog lines
-since). Version 4 added per-item provenance (``--items``, ``--stamp``, an exact
+since. Version 4 added per-item provenance (``--items``, ``--stamp``, an exact
 ``--drift``), made a prose mention not a reference, and typed QUE. Version 3
 indexes every ``docs/*__*`` shard — ARCH__ components + work units,
 TEST-STRATEGY tests, API__ operations, DESIGN__assets assets, TASKS__ tasks —
@@ -153,7 +188,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-CAPABILITY_VERSION = 5
+CAPABILITY_VERSION = 9
 
 
 # =============================================================================
@@ -371,14 +406,127 @@ _ALLOWLISTED_IDS: "frozenset[str]" = frozenset()
 #                                                 ``- id: AST-001`` (DESIGN__assets)
 #  - test cases:                                  ``- tst_id: TST-001`` / ``TST-CLI-001``
 _DEF_LISTITEM_RE = re.compile(
-    r'^\s*-\s*"?(?P<id>(?:' + "|".join(_CORPUS_PREFIXES) + r")-\d+):"
+    r'^\s*-\s*["\']?(?P<id>(?:' + "|".join(_CORPUS_PREFIXES) + r")-\d+):"
 )
-_DEF_TYPED_RE = re.compile(r'^\s*-\s*id:\s*"?(?P<id>(?:SCR|USR|OPR|AST|QUE)-\d+)"?(?:\s|$)')
+_DEF_TYPED_RE = re.compile(r'^\s*-\s*id:\s*["\']?(?P<id>(?:SCR|USR|OPR|AST|QUE)-\d+)["\']?(?:\s|$)')
 _DEF_TST_RE = re.compile(r'^\s*-\s*tst_id:\s*"?(?P<id>' + _TST_ID + r')"?(?:\s|$)')
 _DEF_PATTERNS = (_DEF_LISTITEM_RE, _DEF_TYPED_RE, _DEF_TST_RE)
+# The prefixes _DEF_TYPED_RE addresses, for the block/flow generalization below.
+_TYPED_PREFIX_RE = r"(?:SCR|USR|OPR|AST|QUE)-\d+"
 # A retired-id entry: ``- id: FR-058`` / ``- FR-058`` / ``- {id: FR-058, reason: ...}``.
 # Anchored so a ``reason:`` that names another id never retires it too.
 _RETIRED_ITEM_RE = re.compile(r'^\s*-\s*(?:\{\s*)?(?:id:\s*)?"?(?P<id>' + _ID_PATTERN + r')"?')
+
+# Definition-shaped items this scanner ADMITS it cannot address: a flow mapping
+# that does not close on its own physical line, or an ``id:`` that is not the
+# item's first key AND sits in a shape ``_typed_id_in_block`` below does not
+# reach. A single-physical-line flow mapping (``- {id: SCR-009, name: ...}`` —
+# the shape prd/SKILL.md spells for a todo-gate open question and
+# DESIGN.schema.yaml for an asset deferral), a single-quoted id, and an ``id:``
+# that is not the item's first key are now RESOLVED into real symbols for the
+# SCR/USR/OPR/AST/QUE families (ledger IMP-160; see ``_typed_id_in_block`` and
+# ``_tokenize_flow``) — the id is RECORDED here only when a scan genuinely
+# cannot address it (a flow mapping spanning more than one physical line), so
+# calling it undefined is still a false verdict on correct docs (ledger
+# IMP-119). A reference to a recorded id is neither an edge nor dangling;
+# every id in no such item keeps blocking exactly as before, because "I cannot
+# parse this" is the only honest reason to stay silent.
+_UNPARSED_KEY_RE = re.compile(
+    r'^\s*(?:-\s*)?(?:id|tst_id):\s*["\']?(?P<id>' + _ID_PATTERN + r')["\']?\s*(?:#.*)?$'
+)
+_FLOW_ITEM_START_RE = re.compile(r'^\s*-\s*\{')
+_BARE_KEY_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
+def _tokenize_flow(text: str) -> "tuple[dict[str, str], bool]":
+    """Split a YAML flow mapping's ``{...}`` body (from the first ``{`` in
+    ``text`` onward) into ``key: value`` pairs, quote/bracket-aware: a ``,``
+    ``:`` ``{`` ``[`` inside a quoted string or a nested ``{``/``[`` is data,
+    never a delimiter, and a key is only recognised at the mapping's own
+    top level (depth 1), never inside a quoted value.
+
+    This is the one tokenizer both the flow-mapping definition scan and the
+    unaddressable fallback use (ledger IMP-160 red team): the previous
+    ``_UNPARSED_FLOW_RE`` scanned for ``(?:id|tst_id):`` anywhere in the line,
+    so ``{question: "prefer the id: QUE-999 spelling", id: QUE-007, ...}``
+    recorded the PHANTOM id QUE-999 (sitting inside a quoted prose value) as
+    a definition, and a genuine reference to it was then silently admitted
+    instead of reported dangling. A tokenizer that tracks quote state never
+    mistakes prose for a key.
+
+    Returns ``(pairs, closed)``; ``closed`` is True only when the mapping's
+    own ``}`` was found on this physical line — a caller that requires a
+    fully-addressable single-line item checks it and otherwise leaves the
+    line to the caller that only records "defined here, unaddressable".
+    """
+    start = text.find("{")
+    if start < 0:
+        return {}, False
+    depth = 0
+    quote: Optional[str] = None
+    closed = False
+    cur: "list[str]" = []
+    pairs: "dict[str, str]" = {}
+
+    def _flush() -> None:
+        part = "".join(cur).strip()
+        if ":" not in part:
+            return
+        key, _, value = part.partition(":")
+        key = key.strip()
+        if _BARE_KEY_RE.match(key):
+            pairs.setdefault(key, value.strip())
+
+    for ch in text[start:]:
+        if quote is not None:
+            cur.append(ch)
+            if ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            cur.append(ch)
+        elif ch == "{":
+            depth += 1
+            if depth > 1:
+                cur.append(ch)
+        elif ch == "[":
+            depth += 1
+            cur.append(ch)
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                _flush()
+                closed = True
+                break
+            cur.append(ch)
+        elif ch == "]":
+            depth -= 1
+            cur.append(ch)
+        elif ch == "," and depth == 1:
+            _flush()
+            cur = []
+        else:
+            cur.append(ch)
+    return pairs, closed
+
+
+def _typed_id_in_block(
+    lines: "list[str]", start_idx: int, item_end: int, indent: int
+) -> Optional[str]:
+    """The SCR/USR/OPR/AST/QUE id a block-mapping list item defines, wherever
+    ``id:``/``tst_id:`` sits in its block — the dash line itself (the
+    original, still-anchored shape) or a later key at the same child indent
+    (ledger IMP-160: an ``id:`` that is not the item's first key)."""
+    m = _DEF_TYPED_RE.match(lines[start_idx])
+    if m is not None:
+        return m.group("id")
+    child_indent = indent + 2
+    val = _find_child_value(lines, (start_idx + 1, item_end + 1), child_indent, "id")
+    if val is None:
+        return None
+    val = _unquote(re.sub(r"\s+#.*$", "", val).strip())
+    return val if re.fullmatch(_TYPED_PREFIX_RE, val) else None
 
 # The PRD's other single-namespace id list items (NFR/WKF/INT/AIF/OOS/PER/…),
 # defined as ``- "NFR-004: …"`` — the same anchored shape ``_scan_definitions``
@@ -387,7 +535,8 @@ _RETIRED_ITEM_RE = re.compile(r'^\s*-\s*(?:\{\s*)?(?:id:\s*)?"?(?P<id>' + _ID_PA
 # USR is excluded too: its items are typed mappings, not ``- "USR-001: …"`` strings.
 _SYMBOL_ITEM_PREFIXES = tuple(p for p in _CORPUS_PREFIXES if p not in ("FR", "WRN", "USR"))
 _SYMBOL_ITEM_RE = re.compile(
-    r'^\s*-\s*"?(?P<id>(?:' + "|".join(_SYMBOL_ITEM_PREFIXES) + r")-\d+):\s*(?P<rest>.*)")
+    r'^\s*-\s*(?P<q>["\']?)(?P<id>(?:' + "|".join(_SYMBOL_ITEM_PREFIXES)
+    + r")-\d+):\s*(?P<rest>.*)")
 _SYMBOL_ITEM_KINDS = {
     "NFR": "non_functional_requirement", "ENT": "entity_ref", "INT": "integration",
     "AIF": "ai_feature", "PER": "persona", "GOL": "user_goal", "PAN": "user_frustration",
@@ -421,6 +570,10 @@ _NAMED_KEYS_YAML = {
     "entity": "entity",
     "via_unit": "unit", "targets_work_units": "unit", "targets_work_unit": "unit",
     "component_ref": "component",
+    # Capability version 9 (ledger IMP-161): a test's risk-target fields, a
+    # bare kebab-case id resolved against the shard's OWN container (see
+    # ``_NamedDefs.resolve``), never a global namespace.
+    "targets_failure_mode": "failure_mode", "targets_security_concern": "security_concern",
 }
 _NAMED_KEYS_JSON = {
     "touches_entities": "entity", "entity": "entity",
@@ -801,6 +954,29 @@ def _extract_enums(
     return out
 
 
+def _item_text(lines: list[str], start: int, end: int, rest: str,
+               quote: str = "") -> str:
+    """The full text of a ``- "<ID>: …"`` list item, continuation lines included.
+
+    The id and any opening quote sit on the first line; a wrapped scalar carries
+    the remainder on the lines below it, and an unquoted or comment-tailed item
+    carries a ``# …`` that is not part of the statement. Reading the first line
+    alone truncated a wrapped item, and kept both the closing quote and the
+    comment of a commented one, straight into the index summary (ledger IMP-159).
+    """
+    parts = [rest.rstrip()] + [lines[j].strip() for j in range(start + 1, end + 1)]
+    text = " ".join(p for p in parts if p).strip()
+    if quote:
+        cut = text.rfind(quote)
+        if cut > 0:
+            text = text[:cut]
+    else:
+        comment = text.find(" #")
+        if comment > 0:
+            text = text[:comment]
+    return text.strip()
+
+
 def _extract_frs(
     lines: list[str], sections: "dict[str, tuple[int, int]]", filename: str
 ) -> "list[SymbolSlice]":
@@ -815,10 +991,8 @@ def _extract_frs(
             if match is None:
                 continue
             item_end = _block_end(lines, i, _indent(lines[i]), sub_end)
-            rest = match.group("rest").rstrip()
-            quote = match.group("q")
-            if quote and rest.endswith(quote):  # trim the matching closing quote
-                rest = rest[:-1]
+            rest = _item_text(lines, i, item_end, match.group("rest"),
+                              match.group("q"))
             out.append(
                 SymbolSlice(
                     file=filename,
@@ -908,7 +1082,9 @@ def _extract_prd_id_items(
                 end=item_end + 1,
                 kind=_SYMBOL_ITEM_KINDS.get(match.group("id").split("-", 1)[0], "id_item"),
                 context=container,
-                summary=_summarize(match.group("rest")),
+                summary=_summarize(_item_text(lines, i, item_end,
+                                              match.group("rest"),
+                                              match.group("q"))),
                 name=match.group("id"),
             )
         )
@@ -916,12 +1092,16 @@ def _extract_prd_id_items(
 
 
 def _typed_extractor(prefix: str):
-    """An extractor for ``- id: <prefix>-NNN`` inventory items (SCR/USR/OPR/AST).
+    """An extractor for ``- id: <prefix>-NNN`` inventory items (SCR/USR/OPR/AST/QUE).
 
     The symbol path is ``<enclosing top-level section>[<id>]``; ``summary`` is
-    the first present key from ``_TYPED_KINDS``. The typed-mapping shape is the
-    one :func:`_scan_definitions` resolves via ``_DEF_TYPED_RE``, so every such
-    symbol is also a definition the edge graph knows.
+    the first present key from ``_TYPED_KINDS``. Three shapes resolve here
+    (ledger IMP-160), all sanctioned YAML the schemas spell: the anchored
+    ``- id: <ID>`` block-first-key shape (also what :func:`_scan_definitions`
+    resolves via ``_DEF_TYPED_RE``, so every such symbol is also a definition
+    the edge graph knows), an ``id:``/``tst_id:`` that is not the item's first
+    key (:func:`_typed_id_in_block`), and a single-physical-line flow mapping
+    ``- {id: <ID>, ...}`` (:func:`_tokenize_flow`).
     """
     kind, summary_keys = _TYPED_KINDS[prefix]
 
@@ -930,12 +1110,45 @@ def _typed_extractor(prefix: str):
     ) -> "list[SymbolSlice]":
         containers = [(start, end, name) for name, (start, end) in sections.items()]
         out: list[SymbolSlice] = []
+        n = len(lines)
         for i, line in enumerate(lines):
-            match = _DEF_TYPED_RE.match(line)
-            if match is None or not match.group("id").startswith(prefix + "-"):
+            if not line.lstrip().startswith("-"):
                 continue
-            item_end = _block_end(lines, i, _indent(line), len(lines))
-            child_indent = _indent(line) + 2
+            indent = _indent(line)
+            if _FLOW_ITEM_START_RE.match(line):
+                pairs, closed = _tokenize_flow(line)
+                if not closed:
+                    continue  # spans more than one physical line - left unaddressable
+                raw_id = pairs.get("id") or pairs.get("tst_id")
+                if raw_id is None:
+                    continue
+                item_id = _unquote(raw_id.strip())
+                if not item_id.startswith(prefix + "-"):
+                    continue
+                summary = ""
+                for key in summary_keys:
+                    if pairs.get(key):
+                        summary = _summarize(_unquote(pairs[key].strip()))
+                        break
+                section = _locate_container(containers, i + 1) or kind + "s"
+                out.append(
+                    SymbolSlice(
+                        file=filename,
+                        path=f"{section}[{item_id}]",
+                        start=i + 1,
+                        end=i + 1,
+                        kind=kind,
+                        context=None,
+                        summary=summary,
+                        name=item_id,
+                    )
+                )
+                continue
+            item_end = _block_end(lines, i, indent, n)
+            item_id = _typed_id_in_block(lines, i, item_end, indent)
+            if item_id is None or not item_id.startswith(prefix + "-"):
+                continue
+            child_indent = indent + 2
             summary = ""
             for key in summary_keys:
                 val = _find_child_value(lines, (i + 1, item_end + 1), child_indent, key)
@@ -946,13 +1159,13 @@ def _typed_extractor(prefix: str):
             out.append(
                 SymbolSlice(
                     file=filename,
-                    path=f"{section}[{match.group('id')}]",
+                    path=f"{section}[{item_id}]",
                     start=i + 1,
                     end=item_end + 1,
                     kind=kind,
                     context=None,
                     summary=summary,
-                    name=match.group("id"),
+                    name=item_id,
                 )
             )
         return out
@@ -1015,6 +1228,64 @@ def _extract_arch_components(
     return out
 
 
+def _extract_arch_risks(
+    lines: list[str], sections: "dict[str, tuple[int, int]]", filename: str
+) -> "list[SymbolSlice]":
+    """Index an ARCH__<cid> shard's container- and component-level
+    ``failure_modes[].id`` / ``security_concerns[].id`` (ledger IMP-161).
+
+    Both kinds are keyed **qualified** ``<cid>/<id>`` (the work_unit
+    precedent) so a risk id never shares the bare-id symbol namespace a
+    component_id occupies; ``test``'s ``targets_failure_mode`` /
+    ``targets_security_concern`` resolve the bare id against the shard's own
+    container (see ``_NamedDefs.resolve``) — matching
+    ``test/validate_schema.py``'s existing flat, container-scoped pooling of
+    both families. ``context`` is the nearest owner: the container id for a
+    container-level entry, the owning ``component_id`` for one nested inside
+    a component.
+    """
+    cid = _top_scalar(lines, sections, "container_id") or (
+        _shard_slug(filename) if "__" in filename else filename
+    )
+    out: list[SymbolSlice] = []
+
+    def _risks(rng: "tuple[int, int]", kind: str, path_prefix: str, owner: Optional[str]) -> None:
+        for rid, s, e, ind in _list_items(lines, rng, "id"):
+            child = ind + 2
+            body = _find_child_value(lines, (s, e), child, "description")
+            if not body:
+                body = _find_child_value(lines, (s, e), child, "threat")
+            out.append(
+                SymbolSlice(
+                    file=filename,
+                    path=f"{path_prefix}[{rid}]",
+                    start=s,
+                    end=e,
+                    kind=kind,
+                    context=owner,
+                    summary=_summarize(body) if body else "",
+                    name=f"{cid}/{rid}",
+                )
+            )
+
+    fm_range = sections.get("failure_modes")
+    if fm_range is not None:
+        _risks(fm_range, "failure_mode", "failure_modes", cid)
+    sc_range = sections.get("security_concerns")
+    if sc_range is not None:
+        _risks(sc_range, "security_concern", "security_concerns", cid)
+
+    comp_range = sections.get("components")
+    if comp_range is not None:
+        for comp_id, c_start, c_end, c_indent in _list_items(lines, comp_range, "component_id"):
+            kid = c_indent + 2
+            comp_fm_range = _named_range(_child_keys(lines, (c_start, c_end), kid), "failure_modes")
+            if comp_fm_range is not None:
+                _risks(comp_fm_range, "failure_mode", f"components[{comp_id}].failure_modes", comp_id)
+
+    return out
+
+
 def _extract_tests(
     lines: list[str], sections: "dict[str, tuple[int, int]]", filename: str
 ) -> "list[SymbolSlice]":
@@ -1067,7 +1338,7 @@ _EXTRACTORS = {
     "TEST-STRATEGY.yaml": (_extract_tests,),
 }
 _SHARD_EXTRACTORS = {
-    "ARCH.yaml": (_extract_arch_components,),
+    "ARCH.yaml": (_extract_arch_components, _extract_arch_risks),
     "TEST-STRATEGY.yaml": (_extract_tests,),
     "API.yaml": (_typed_extractor("OPR"),),
     "DESIGN.yaml": (_typed_extractor("AST"),),
@@ -1196,6 +1467,39 @@ def _changelog_ranges(
     return []
 
 
+_BLOCK_SCALAR_RE = re.compile(
+    r"^\s*(?:-\s+)?(?P<key>[A-Za-z_][\w.-]*)\s*:\s*[|>][-+0-9]*\s*(?:#.*)?$"
+)
+
+
+def _block_scalar_ranges(lines: "list[str]") -> "list[tuple[int, int]]":
+    """The 1-based line ranges of every ``key: >`` / ``key: |`` scalar BODY.
+
+    Everything inside one is prose — a paragraph the writer wrapped, not a
+    structure — so where the line breaks fall must not decide whether an id in
+    it is a reference. Judging that line-locally made a reflow flip ``--check``
+    (ledger IMP-119, a hole in IMP-072). The body is every line indented deeper
+    than the key, so the first sibling key ends it.
+    """
+    ranges: list[tuple[int, int]] = []
+    i, n = 0, len(lines)
+    while i < n:
+        match = _BLOCK_SCALAR_RE.match(lines[i])
+        if match is None:
+            i += 1
+            continue
+        base = match.start("key")
+        j = i + 1
+        while j < n:
+            if lines[j].strip() and len(lines[j]) - len(lines[j].lstrip()) <= base:
+                break
+            j += 1
+        if j > i + 1:
+            ranges.append((i + 2, j))
+        i = max(j, i + 1)
+    return ranges
+
+
 def _retired_in(lines: "list[str]", rng: "tuple[int, int]") -> "set[str]":
     """Ids listed under a ``retired_ids:`` block (flow or block form)."""
     start, end = rng
@@ -1259,19 +1563,81 @@ def _scan_definitions(
     """Map every corpus id *defined* in this file to its 1-based line number.
 
     A definition is matched by an anchored line shape (list item ``- "FR-001:``,
-    typed ``- id: SCR-001`` / ``USR`` / ``OPR`` / ``AST``, or ``- tst_id:
-    TST-001``) — never an inline mention — so a body that merely cites an id is
-    not mistaken for its source.
+    typed ``- id: SCR-001`` / ``USR`` / ``OPR`` / ``AST`` / ``QUE``, or
+    ``- tst_id: TST-001``) — never an inline mention — so a body that merely
+    cites an id is not mistaken for its source. A typed item whose ``id:`` is
+    not its first key, or written as a single-physical-line flow mapping
+    (``- {id: QUE-009, question: ..., status: open}``), resolves the same way
+    (ledger IMP-160) — both are sanctioned YAML the schemas already spell.
+    """
+    found: dict[str, int] = {}
+    n = len(lines)
+    for i, line in enumerate(lines):
+        if skip and _in_ranges(i + 1, skip):
+            continue
+        matched = False
+        for pattern in _DEF_PATTERNS:
+            match = pattern.match(line)
+            if match is not None:
+                found.setdefault(match.group("id"), i + 1)
+                matched = True
+                break
+        if matched or not line.lstrip().startswith("-"):
+            continue
+        indent = _indent(line)
+        if _FLOW_ITEM_START_RE.match(line):
+            pairs, closed = _tokenize_flow(line)
+            if not closed:
+                continue  # spans more than one physical line - left unaddressable
+            raw_id = pairs.get("id") or pairs.get("tst_id")
+            if raw_id is None:
+                continue
+            item_id = _unquote(raw_id.strip())
+            if re.fullmatch(_TYPED_PREFIX_RE, item_id):
+                found.setdefault(item_id, i + 1)
+            continue
+        item_end = _block_end(lines, i, indent, n)
+        item_id = _typed_id_in_block(lines, i, item_end, indent)
+        if item_id is not None:
+            found.setdefault(item_id, i + 1)
+    return found
+
+
+def _scan_unaddressable(
+    lines: "list[str]", skip: "list[tuple[int, int]]"
+) -> "dict[str, int]":
+    """Map every corpus id carried by a definition-shaped item this scanner
+    still cannot parse to its 1-based line number (ledger IMP-119).
+
+    After IMP-160, a single-physical-line flow mapping and an ``id:`` that is
+    not the item's first key resolve as real definitions
+    (:func:`_scan_definitions`); what is left here is a flow mapping that
+    spans more than one physical line — sanctioned YAML no line-local scan
+    resolves into a symbol. The id is RECORDED, and a reference to a recorded
+    id is neither an edge nor dangling; every id in no such item keeps
+    blocking exactly as before, because "I cannot parse this" is the only
+    honest reason to stay silent.
     """
     found: dict[str, int] = {}
     for i, line in enumerate(lines):
         if skip and _in_ranges(i + 1, skip):
             continue
-        for pattern in _DEF_PATTERNS:
-            match = pattern.match(line)
-            if match is not None:
-                found.setdefault(match.group("id"), i + 1)
-                break
+        if any(pattern.match(line) for pattern in _DEF_PATTERNS):
+            continue  # addressable: a real definition, already scanned
+        if _FLOW_ITEM_START_RE.match(line):
+            pairs, closed = _tokenize_flow(line)
+            raw_id = pairs.get("id") or pairs.get("tst_id")
+            if raw_id is None:
+                continue
+            item_id = _unquote(raw_id.strip())
+            if closed and re.fullmatch(_TYPED_PREFIX_RE, item_id):
+                continue  # a real, addressable definition (_scan_definitions)
+            if _ID_ONLY_RE.match(item_id):
+                found.setdefault(item_id, i + 1)
+            continue
+        match = _UNPARSED_KEY_RE.match(line)
+        if match is not None:
+            found.setdefault(match.group("id"), i + 1)
     return found
 
 
@@ -1499,6 +1865,11 @@ class _NamedDefs:
         self.units: set[str] = set()  # qualified <cid>/<component>/<unit>
         self.units_bare: dict[str, list[str]] = {}
         self.tasks: set[str] = set()  # TSK-NNN (canonical) / <cid>/TSK-NNN
+        # failure_mode / security_concern -> the qualified <cid>/<id> names
+        # defined for that family (ledger IMP-161). Kept separate per kind so
+        # a bare id never resolves a targets_failure_mode reference to a
+        # security_concern of the same name, or vice versa.
+        self.risks: "dict[str, set[str]]" = {"failure_mode": set(), "security_concern": set()}
 
     def resolve(
         self, kind: str, value: str, cid: Optional[str], context: dict
@@ -1508,6 +1879,13 @@ class _NamedDefs:
             return (value if value in self.entities else None), []
         if kind == "component":
             return (value if value in self.components else None), []
+        if kind in ("failure_mode", "security_concern"):
+            # Bare id, resolved INSIDE the citing shard's own container only
+            # (test/validate_schema.py's existing pooling convention) - never
+            # a global namespace, so a same-name risk in another container is
+            # not an accidental match.
+            qualified = f"{cid}/{value}" if cid else value
+            return (qualified if qualified in self.risks[kind] else None), []
         if kind == "task":
             if value.startswith("TASKS/"):
                 target = value.split("/", 1)[1]
@@ -1573,9 +1951,18 @@ def _build_edges(
             else:
                 definitions.setdefault(sym_id, (filename, lineno))
 
+    # Ids the corpus defines in a shape this scan cannot address. Only those it
+    # resolves nowhere else count, so a project that writes one surface as a
+    # flow mapping and the rest canonically still gets the full check.
+    unaddressable: dict[str, tuple[str, int]] = {}
+    for filename, lines in lines_by_file.items():
+        for sym_id, lineno in _scan_unaddressable(lines, skip_by_file.get(filename, [])).items():
+            if sym_id not in definitions:
+                unaddressable.setdefault(sym_id, (filename, lineno))
+
     defs = _NamedDefs()
     for name, sym in named_symbols.items():
-        if sym.kind in ("component", "work_unit", "task") or (
+        if sym.kind in ("component", "work_unit", "task", "failure_mode", "security_concern") or (
             sym.file.startswith("DATA-MODEL") and sym.path.startswith(("entities.", "enums_and_lookups."))
         ):
             definitions.setdefault(name, (sym.file, sym.start))
@@ -1588,6 +1975,8 @@ def _build_edges(
             defs.units_bare.setdefault(name.rsplit("/", 1)[-1], []).append(name)
         elif sym.kind == "task":
             defs.tasks.add(name)
+        elif sym.kind in ("failure_mode", "security_concern"):
+            defs.risks[sym.kind].add(name)
 
     referenced_by: dict[str, set[str]] = {}
     local_referenced_by: dict[str, dict[str, set[str]]] = {}
@@ -1596,6 +1985,7 @@ def _build_edges(
     dangling: list[Reference] = []
     dangling_warnings: list[Reference] = []
     ambiguous: list[str] = []
+    admitted: set[str] = set()  # unaddressable ids a reference actually hit
 
     for filename, lines in lines_by_file.items():
         is_shard = filename in shard_files
@@ -1606,6 +1996,7 @@ def _build_edges(
         )
         owners = _line_owners(ranges, len(lines))
         skip = skip_by_file.get(filename, [])
+        prose_ranges = _block_scalar_ranges(lines)
         my_local = local_defs.get(filename, {})
         file_refs = refs_by_file.setdefault(filename, set())
         cid = _shard_slug(filename) if is_shard else None
@@ -1630,13 +2021,19 @@ def _build_edges(
                     continue  # the token sitting on its own definition line
                 if container == ref_id:
                     continue  # a symbol referencing itself
-                if ref_id not in definitions and not _structured_ref(line, match.start(), match.end()):
-                    continue  # a prose mention is not a reference: never dangling
+                if ref_id not in definitions and (
+                    _in_ranges(lineno, prose_ranges)
+                    or not _structured_ref(line, match.start(), match.end())
+                ):
+                    continue  # prose - a block scalar's body, or mid-sentence - is never dangling
                 file_refs.add((prefix, ref_id))
                 if ref_id in definitions:
                     add_edge(ref_id, container)
                 elif ref_id in retired:
                     continue
+                elif ref_id in unaddressable:
+                    admitted.add(ref_id)
+                    continue  # defined in a shape this scan cannot address
                 elif prefix in _WARN_FIRST_PREFIXES:
                     dangling_warnings.append(Reference(ref_id, filename, lineno, container, False))
                 else:
@@ -1655,7 +2052,10 @@ def _build_edges(
                     comp = _json_scalar_in(lines, (sym.start, sym.end), "component_ref")
                     if comp:
                         context = {"component_ref": comp}
-            family = {"entity": "entity", "unit": "work_unit", "component": "component", "task": "task"}[kind]
+            family = {
+                "entity": "entity", "unit": "work_unit", "component": "component", "task": "task",
+                "failure_mode": "failure_mode", "security_concern": "security_concern",
+            }[kind]
             target, candidates = defs.resolve(kind, value, cid, context)
             file_refs.add((family, target or value))
             if target is not None:
@@ -1671,6 +2071,14 @@ def _build_edges(
             else:
                 dangling_warnings.append(Reference(value, filename, lineno, container, False, key))
 
+    for ref_id in sorted(admitted, key=_id_sort_key):
+        where = unaddressable[ref_id]
+        warnings.append(
+            f"{ref_id} is defined at {where[0]}:{where[1]} in a shape this index cannot "
+            f"address (a flow mapping, a quoted id, or an id that is not the item's first "
+            f"key), so --show {ref_id} does not resolve it and references to it are not "
+            f"checked - write the item with its id on its own line to index it"
+        )
     warnings.extend(ambiguous)
     return EdgeGraph(
         definitions=definitions,
@@ -2028,7 +2436,8 @@ def _render_edges(out: "list[str]", index: DocIndex) -> None:
             out.append(f"  - {_sq(_ref_line(ref))}")
 
     out.append("")
-    out.append("# warnings: files the generator could not index and symbol-name collisions.")
+    out.append("# warnings: files the generator could not index, symbol-name collisions, and")
+    out.append("#   ids defined in a shape this index cannot address (so --show misses them).")
     if not index.warnings:
         out.append("warnings: []")
     else:
@@ -2143,7 +2552,17 @@ def find_symbols(
 # --drift: an artifact's recorded upstream_provenance vs the upstreams now
 # ---------------------------------------------------------------------------
 
-_PROV_KEYS = ("file", "sha256", "session_id", "last_updated", "version")
+_PROV_KEYS = ("file", "sha256", "session_id", "last_updated", "version", "capability")
+# The CAPABILITY_VERSION a symbol kind first became indexable at - so --drift
+# can tell "this item is new to the DOCUMENT" from "this item was always
+# there, but the stamp recording it predates the index capability that can
+# see its kind at all" (ledger IMP-160 / IMP-161: a stamp made at capability
+# 8 never recorded a failure_mode/security_concern item, or a flow-mapping/
+# non-first-key typed item, in its items map - the first --drift after the
+# 8->9 bump must not report every one of those as a phantom addition). A kind
+# absent here predates per-item provenance itself (version 4) and is never
+# suspect.
+_KIND_CAPABILITY: "dict[str, int]" = {"failure_mode": 9, "security_concern": 9}
 # Length of a per-item body hash recorded under upstream_provenance[].items.
 _ITEM_HASH_LEN = 12
 # Fields a change to which is a DECLARATION, not a behaviour change, per
@@ -2440,7 +2859,7 @@ def _render_provenance_yaml(entries: "list[dict]", indent: int) -> "list[str]":
     out = [f"{pad}upstream_provenance:"]
     for e in entries:
         out.append(f"{pad}  - file: {_flow(str(e.get('file', '')))}")
-        for key in ("session_id", "last_updated", "version", "sha256"):
+        for key in ("session_id", "last_updated", "version", "capability", "sha256"):
             if e.get(key) is not None:
                 out.append(f"{pad}    {key}: {_sq(e[key])}")
         items = e.get("items")
@@ -2454,14 +2873,51 @@ def _render_provenance_yaml(entries: "list[dict]", indent: int) -> "list[str]":
     return out
 
 
+def _moved_since_stamp(old: dict, new: dict) -> Optional[dict]:
+    """What moved in one upstream between its recorded entry and the entry
+    about to replace it: ``{changed, added, removed}`` item keys from the
+    recorded items map, or ``{sha_only: True}`` when the old record had no
+    items map but a different hash. None when nothing moved."""
+    old_items = old.get("items")
+    if isinstance(old_items, dict):
+        new_items = new.get("items") or {}
+        changed = sorted((k for k in old_items if k in new_items and old_items[k] != new_items[k]),
+                         key=_id_sort_key)
+        added = sorted((k for k in new_items if k not in old_items), key=_id_sort_key)
+        removed = sorted((k for k in old_items if k not in new_items), key=_id_sort_key)
+        if not (changed or added or removed):
+            return None
+        return {"changed": changed, "added": added, "removed": removed}
+    if old.get("sha256") and old.get("sha256") != new.get("sha256"):
+        return {"sha_only": True}
+    return None
+
+
+def _moved_line(up: str, moved: dict) -> str:
+    """The always-on warning ``--stamp`` prints for a recorded upstream it
+    re-stamped whose items moved (ledger IMP-106) - the lists are whole,
+    because the reader decides per item whether this run reviewed it."""
+    if moved.get("sha_only"):
+        return (f"re-stamped {up}: changed since the last stamp, which recorded no items to name "
+                f"what moved - reviewed by this run?")
+    parts = [f"{', '.join(moved[k])} {k}" for k in ("changed", "added", "removed") if moved.get(k)]
+    return f"re-stamped {up}: {'; '.join(parts)} since the last stamp - reviewed by this run?"
+
+
 def stamp_artifact(docs_dir: Path, artifact: str, extra_upstreams: "list[str]",
-                   as_json: bool = False) -> int:
+                   as_json: bool = False, hold_upstreams: "Optional[list[str]]" = None) -> int:
     """``--stamp``: rewrite one artifact's ``metadata.upstream_provenance`` -
     ``{file, session_id, last_updated, sha256, items}`` per upstream, where
     the upstream set is what the artifact already records plus every
     ``--upstream``. Writes ONLY that artifact (never the index, never an
     upstream), so it is safe on a project that runs its own index generator.
-    Returns the exit code."""
+
+    A recorded upstream is re-stamped whether or not the caller reviewed it,
+    so every one whose items moved since its recorded entry is named in a
+    ``re-stamped <file>: ... - reviewed by this run?`` warning. Each
+    ``--hold-upstream`` keeps that recorded entry exactly as it was (hash and
+    items map), so ``--drift`` still reports its delta to the reconcile that
+    owes it (ledger IMP-106). Returns the exit code."""
     path = _locate(artifact, docs_dir)
     if not path.is_file():
         print(f"[docs-stamp] cannot read {artifact}: no such file (looked in {docs_dir})", file=sys.stderr)
@@ -2476,6 +2932,18 @@ def stamp_artifact(docs_dir: Path, artifact: str, extra_upstreams: "list[str]",
     lines = text.splitlines()
     label = f"docs/{name}"
     existing = _parse_provenance(lines, is_json)
+    recorded = [Path(str(e.get("file", ""))).name for e in existing]
+    held: list[str] = []
+    for f in hold_upstreams or []:
+        base = Path(str(f)).name if f else ""
+        if base and base not in held:
+            held.append(base)
+    both = [h for h in held if h in {Path(str(f)).name for f in extra_upstreams if f}]
+    if both:
+        print(f"[docs-stamp] {', '.join(both)} named with both --upstream and --hold-upstream - "
+              f"stamp it or hold it, not both; nothing written", file=sys.stderr)
+        return 2
+    not_recorded = [h for h in held if h not in recorded]
     wanted: list[str] = []
     for f in [e.get("file", "") for e in existing] + list(extra_upstreams):
         base = Path(str(f)).name if f else ""
@@ -2491,18 +2959,23 @@ def stamp_artifact(docs_dir: Path, artifact: str, extra_upstreams: "list[str]",
     index = build_index(docs_dir)
     missing = [u for u in wanted if not (docs_dir / u).is_file()]
     entries: list[dict] = []
+    moved: "list[tuple[str, dict]]" = []
     for up in wanted:
-        if up in missing:
-            old = next((e for e in existing if Path(str(e.get("file", ""))).name == up), None)
+        old = next((e for e in existing if Path(str(e.get("file", ""))).name == up), None)
+        if up in missing or up in held:
             if old is not None:
-                entries.append(old)  # keep the stale record rather than lose it
+                entries.append(old)  # keep the stale / held record rather than lose it
             continue
         meta = _upstream_meta(docs_dir / up)
         entry: dict = {"file": f"docs/{up}"}
         entry.update(meta)
+        entry["capability"] = str(CAPABILITY_VERSION)
         entry["sha256"] = content_hash(docs_dir / up)
         entry["items"] = items_of(index, docs_dir, up)
         entries.append(entry)
+        delta = _moved_since_stamp(old, entry) if old is not None else None
+        if delta is not None:
+            moved.append((up, delta))
     newline = "\r\n" if "\r\n" in text else "\n"
     if is_json:
         try:
@@ -2540,25 +3013,49 @@ def stamp_artifact(docs_dir: Path, artifact: str, extra_upstreams: "list[str]",
         rendered = "\n".join(new_lines) + "\n"
     with open(path, "w", encoding="utf-8", newline=newline) as fh:
         fh.write(rendered)
-    stamped = [e for e in entries if isinstance(e.get("items"), dict) and Path(str(e.get("file", ""))).name not in missing]
+    kept = [u for u in held if u in recorded and u not in missing]
+    stamped = [e for e in entries if isinstance(e.get("items"), dict)
+               and Path(str(e.get("file", ""))).name not in missing
+               and Path(str(e.get("file", ""))).name not in kept]
+    # What the artifact references that the stamp still does not record: an
+    # earlier-stage file a change to which could never make it stale (IMP-148).
+    gaps = _provenance_gaps(index, name, set(wanted))
     if as_json:
         print(json.dumps({
             "artifact": label,
             "stamped": [{"file": e["file"], "sha256": e.get("sha256"), "items": len(e["items"])} for e in stamped],
             "missing": missing,
+            "held": [f"docs/{u}" for u in kept],
+            "hold_not_recorded": [f"docs/{u}" for u in not_recorded],
+            "moved": [dict({"file": f"docs/{u}"}, **d) for u, d in moved],
+            "provenance_gaps": [{"file": f"docs/{u}", "ids": ids} for u, ids in gaps],
         }, indent=2))
     else:
         summary = ", ".join(f"{Path(e['file']).name} ({len(e['items'])} item(s))" for e in stamped)
         print(f"[OK] {label} now records {len(stamped)} upstream(s) item by item: {summary}.")
-        if missing:
-            print_findings([], [
-                f"{u} is recorded as an upstream but no longer exists in {docs_dir} - its old "
-                f"record was kept unchanged; re-run the skill that owns {label} to reconcile"
-                for u in missing])
+        if kept:
+            print(f"     Held exactly as recorded: {', '.join(kept)} - a later --drift still reports "
+                  f"what moved there.")
+        warnings = [_moved_line(u, d) for u, d in moved]
+        warnings += _gap_warnings(label, gaps)
+        warnings += [
+            f"{u} is recorded as an upstream but no longer exists in {docs_dir} - its old "
+            f"record was kept unchanged; re-run the skill that owns {label} to reconcile"
+            for u in missing]
+        warnings += [
+            f"{u} was named with --hold-upstream but {label} does not record it, so there was "
+            f"nothing to hold (and it was not stamped)"
+            for u in not_recorded]
+        print_findings([], warnings)
+        if moved:
+            print_next("nothing required if this run reviewed every re-stamped change above.",
+                       "For one it did not: restore this file's old record of that upstream from git, "
+                       "then stamp again with --hold-upstream docs/<file>, so --drift still owes the "
+                       "change to its reconcile.",
+                       show_glossary=False)
         else:
-            print_findings([], [])
-        print_next("nothing required - a later --drift on this file diffs item by item.",
-                   show_glossary=False)
+            print_next("nothing required - a later --drift on this file diffs item by item.",
+                       show_glossary=False)
     return 1 if missing else 0
 
 
@@ -2722,6 +3219,11 @@ def _stale_rows(docs_dir: Path) -> "tuple[list[dict], list[str]]":
             continue
         moved: list[str] = []
         missing: list[str] = []
+        # An upstream that moved without touching anything this artifact
+        # references or cites owes a re-stamp, not a review (IMP-147/148) -
+        # decidable only where the stamp recorded an items map.
+        reviewable: list[bool] = []
+        art_skip: "Optional[list[tuple[int, int]]]" = None
         for e in entries:
             up = Path(str(e.get("file") or "")).name
             recorded = (e.get("sha256") or "")[:_SHA_LEN]
@@ -2737,6 +3239,16 @@ def _stale_rows(docs_dir: Path) -> "tuple[list[dict], list[str]]":
                 continue
             if current != recorded:
                 moved.append(up)
+                items = e.get("items")
+                if isinstance(items, dict):
+                    if art_skip is None:
+                        art_skip = _artifact_scan_ranges(lines, name.endswith(".json"))
+                    _lines, relevant = _item_delta_lines(
+                        index, docs_dir, up, items, index.refs_by_file.get(name, set()),
+                        "the stamp", lines, art_skip)
+                    reviewable.append(relevant)
+                else:
+                    reviewable.append(True)  # sha-only: cannot tell, so it is reviewed
         if moved or missing:
             order = (_PIPELINE.index(skill) if skill in _PIPELINE else len(_PIPELINE),
                      1 if "__" in name else 0, name)
@@ -2744,6 +3256,7 @@ def _stale_rows(docs_dir: Path) -> "tuple[list[dict], list[str]]":
                 "artifact": f"docs/{name}",
                 "upstreams_moved": [f"docs/{u}" for u in moved],
                 "upstreams_missing": [f"docs/{u}" for u in missing],
+                "restamp_only": bool(moved) and not missing and not any(reviewable),
                 "command": _reconcile_command(name),
                 "_order": order,
             })
@@ -2822,6 +3335,8 @@ def stale_report(docs_dir: Path, as_json: bool = False) -> int:
             why.append(f"{', '.join(r['upstreams_moved'])} moved")
         if r["upstreams_missing"]:
             why.append(f"{', '.join(r['upstreams_missing'])} no longer exist(s)")
+        if r.get("restamp_only"):
+            why.append("nothing this file references or cites changed - re-stamp only")
         print(f"  - {r['artifact']} ({'; '.join(why)})  ->  {r['command']}")
     print_findings([], warnings)
     print_next(
@@ -2892,19 +3407,94 @@ def _recover_items_from_git(docs_dir: Path, up_name: str, recorded: str):
     return "miss", None, None
 
 
+def _cite_counts(lines: "list[str]", skip: "list[tuple[int, int]]", token: str) -> "tuple[int, int]":
+    """(structured, prose) occurrences of ``token`` - an id or a bare symbol
+    name - in an artifact's lines outside ``skip`` (its metadata block and
+    changelog): a structured position per ``_structured_ref``, or a mention
+    inside prose such as a directive string. A bare name never matches inside
+    a qualified ``<container>/<component>/<unit>`` form."""
+    pattern = re.compile(r"(?<![\w/-])" + re.escape(token) + r"(?![\w-])")
+    structured = prose = 0
+    for i, line in enumerate(lines):
+        if skip and _in_ranges(i + 1, skip):
+            continue
+        for m in pattern.finditer(line):
+            if _structured_ref(line, m.start(), m.end()):
+                structured += 1
+            else:
+                prose += 1
+    return structured, prose
+
+
+def _artifact_scan_ranges(lines: "list[str]", is_json: bool) -> "list[tuple[int, int]]":
+    """Line ranges a cite scan skips: the metadata block (its provenance
+    items map names every upstream item) and every changelog."""
+    sections = _scan_json(lines)[0] if is_json else _top_level_sections(lines)
+    skip = list(_changelog_ranges(lines, sections, is_json))
+    meta = sections.get("metadata")
+    if meta is not None:
+        skip.append(meta)
+    return skip
+
+
 def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
                       old_items: "dict[str, str]", my_refs: "set[tuple[str, str]]",
-                      basis: str) -> "list[str]":
+                      basis: str, art_lines: "Optional[list[str]]" = None,
+                      art_skip: "Optional[list[tuple[int, int]]]" = None,
+                      recorded_capability: Optional[int] = None) -> "tuple[list[str], bool]":
     """The per-family added / removed / changed-in-body lines of one upstream,
     diffed item by item against ``old_items`` (a stamp's items map, or the
-    items of a revision recovered from git); ``basis`` names the old side."""
+    items of a revision recovered from git); ``basis`` names the old side.
+
+    Every removed or changed item this artifact REFERENCES (a structured
+    field) or CITES (a mention in prose, a unit's bare name inside a directive
+    string included) is marked, and each family says how many of its items
+    are - the reconcile's "only items this file traces or covers" filter is
+    computed here, not by the reader (ledger IMP-147, aicf LSN-084: a prose
+    cite at four sites was invisible to a hand filter over structured traces).
+
+    ``recorded_capability`` is the ``capability`` the stamp being compared
+    against was written with (``None`` for an old stamp with no such field -
+    ledger IMP-160 / IMP-161). An "added" key whose symbol kind only became
+    indexable at a LATER capability than that is never a document edit - the
+    stamp's items map could not have carried it either way - so it is pulled
+    out into its own "index-new" line instead of the normal added-upstream
+    count, and never makes the upstream's move "relevant" on its own.
+    Returns ``(lines, relevant)``: ``relevant`` is False when nothing this
+    artifact references or cites was removed or changed, so the upstream's
+    move owes a re-stamp, not a review."""
     out: list[str] = []
     current_items = items_of(index, docs_dir, up_name)
-    added_keys = [k for k in current_items if k not in old_items]
+    added_keys_all = [k for k in current_items if k not in old_items]
+    index_new_keys: "list[str]" = []
+    if recorded_capability is not None:
+        index_new_keys = [
+            k for k in added_keys_all
+            if _KIND_CAPABILITY.get(_item_family(k, index), 0) > recorded_capability
+        ]
+    added_keys = [k for k in added_keys_all if k not in index_new_keys]
     removed_keys = [k for k in old_items if k not in current_items]
     modified_keys = [k for k in old_items
                      if k in current_items and current_items[k] != old_items[k]]
     referenced = {r for _fam, r in my_refs}
+
+    def mark(key: str) -> "tuple[str, bool]":
+        bare = key.rsplit("/", 1)[-1]
+        structured = prose = 0
+        if art_lines is not None:
+            for token in ([key, bare] if bare != key else [key]):
+                s, p = _cite_counts(art_lines, art_skip or [], token)
+                structured += s
+                prose += p
+        # ids: my_refs also holds resolving prose mentions, so the scan decides;
+        # names reach my_refs only through anchored fields, which are structured
+        is_id = _ID_ONLY_RE.match(key) is not None
+        if art_lines is None or not is_id:
+            structured = structured or int(key in referenced or bare in referenced)
+        bits = (["referenced here"] if structured else []) + ([f"cited in prose x{prose}"] if prose else [])
+        return (f"{key} [{', '.join(bits)}]" if bits else key), bool(bits)
+
+    relevant = False
     by_fam: dict[str, dict[str, list[str]]] = {}
     for bucket, keys in (("added", added_keys), ("removed", removed_keys), ("modified", modified_keys)):
         for k in sorted(keys, key=_id_sort_key):
@@ -2917,26 +3507,84 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
     for family in sorted(by_fam):
         bits = []
         buckets = by_fam[family]
+        marked_here = 0
         if buckets.get("added"):
             ks = buckets["added"]
             bits.append(f"{len(ks)} added upstream since this file was written ({join_ids(ks, len(ks))})")
         if buckets.get("removed"):
-            ks = buckets["removed"]
-            stale = [k for k in ks if k in referenced or k.rsplit('/', 1)[-1] in referenced]
-            note = f", {len(stale)} of them referenced here" if stale else ""
-            bits.append(f"{len(ks)} removed upstream ({join_ids(ks, len(ks))}){note}")
+            marked = [mark(k) for k in buckets["removed"]]
+            marked_here += sum(1 for _t, hit in marked if hit)
+            bits.append(f"{len(marked)} removed upstream ({', '.join(t for t, _h in marked)})")
         if buckets.get("modified"):
-            ks = buckets["modified"]
-            bits.append(f"{len(ks)} changed in body ({join_ids(ks, len(ks))})")
+            marked = [mark(k) for k in buckets["modified"]]
+            marked_here += sum(1 for _t, hit in marked if hit)
+            bits.append(f"{len(marked)} changed in body ({', '.join(t for t, _h in marked)})")
+        if buckets.get("removed") or buckets.get("modified"):
+            bits.append(f"{marked_here} of them referenced or cited here" if marked_here
+                        else "none referenced or cited here")
+            relevant = relevant or marked_here > 0
         out.append(f"{family}: " + "; ".join(bits))
-    if not (added_keys or removed_keys or modified_keys):
+    if index_new_keys:
         out.append(
-            "no item was added, removed or changed - the edit touched only text outside "
-            "the indexed items, or declaration-only fields (touches_entities, status)"
+            f"{len(index_new_keys)} item(s) are new to the index, not to the document - "
+            f"re-stamp only ({join_ids(sorted(index_new_keys, key=_id_sort_key), len(index_new_keys))})"
         )
+    if not (added_keys or removed_keys or modified_keys):
+        if not index_new_keys:
+            out.append(
+                "no item was added, removed or changed - the edit touched only text outside "
+                "the indexed items, or declaration-only fields (touches_entities, status)"
+            )
     else:
         out.append(f"compared item by item against {basis}")
-    return out
+    return out, relevant
+
+
+_RESTAMP_ONLY = ("nothing this file references or cites was removed or changed - re-stamp only "
+                 "(the owning skill's --reconcile form re-stamps it with no question)")
+
+
+def _stage_rank(name: str) -> Optional[int]:
+    skill = _STAGE_OF.get(name.split("__", 1)[0].rsplit(".", 1)[0])
+    return _PIPELINE.index(skill) if skill in _PIPELINE else None
+
+
+def _provenance_gaps(index: DocIndex, name: str, recorded: "set[str]") -> "list[tuple[str, list[str]]]":
+    """``[(upstream file, ids)]`` for every EARLIER-stage file whose items this
+    artifact references while its provenance records no entry for that file -
+    a change there can never make the artifact stale (ledger IMP-148, aicf
+    LSN-085: a system test drove a container unit's contract and the shard was
+    never recorded). Same-family shards and later-stage files are peers or
+    consumers, not upstreams; an artifact whose owner has no ``--reconcile``
+    form (CODE-MANIFEST) is never asked."""
+    my_rank = _stage_rank(name)
+    stem = name.split("__", 1)[0].rsplit(".", 1)[0]
+    if my_rank is None or _STAGE_OF.get(stem) not in _RECONCILE_SKILLS:
+        return []
+    by_file: dict[str, set[str]] = {}
+    for _fam, ref in index.refs_by_file.get(name, set()):
+        definition = index.definitions.get(ref)
+        if definition is None:
+            continue
+        def_file = definition[0]
+        if def_file == name or def_file in recorded \
+                or def_file.split("__", 1)[0].rsplit(".", 1)[0] == stem:
+            continue
+        rank = _stage_rank(def_file)
+        if rank is None or rank >= my_rank:
+            continue
+        by_file.setdefault(def_file, set()).add(ref)
+    return [(f, sorted(ids, key=_id_sort_key)) for f, ids in sorted(by_file.items())]
+
+
+def _gap_warnings(label: str, gaps: "list[tuple[str, list[str]]]") -> "list[str]":
+    return [
+        f"{label} references {len(ids)} item(s) defined in docs/{up} ({join_ids(ids, 6)}) but "
+        f"records no provenance entry for it, so a change there can never make this file stale "
+        f"- add --upstream docs/{up} to its stamp at the next write (a re-slice adds it for a "
+        f"task shard)"
+        for up, ids in gaps
+    ]
 
 
 def drift_report(docs_dir: Path, artifact: str) -> int:
@@ -2971,9 +3619,13 @@ def drift_report(docs_dir: Path, artifact: str) -> int:
 
     my_refs = index.refs_by_file.get(name, set())
     deferred = _parse_deferrals(lines, name.endswith(".json"))
+    art_skip = _artifact_scan_ranges(lines, name.endswith(".json"))
     changed: list[tuple[str, list[str]]] = []
     unchanged: list[str] = []
+    restamp_only: list[str] = []
     warnings: list[str] = []
+    recorded_files = {Path(str(e.get("file") or "")).name for e in entries}
+    warnings.extend(_gap_warnings(label, _provenance_gaps(index, name, recorded_files)))
     # A symbol two files define is indexed under the first; items_of still
     # compares each file's own copy, but --show/--refs resolve only the first.
     # Say so for every collision touching this artifact or an upstream of it.
@@ -3018,11 +3670,21 @@ def drift_report(docs_dir: Path, artifact: str) -> int:
         details = [f"recorded {recorded}, now {current}"]
         details.extend(_why_lines(docs_dir, up_name, entry))
         recorded_items = entry.get("items")
+        try:
+            recorded_capability = int(entry["capability"]) if entry.get("capability") is not None else None
+        except (TypeError, ValueError):
+            recorded_capability = None
         if isinstance(recorded_items, dict):
             # Exact: the stamp recorded every item with its body hash, so the
             # delta is item by item - no git, no guessing from references.
-            details.extend(_item_delta_lines(index, docs_dir, up_name, recorded_items, my_refs,
-                                             "the snapshot recorded at the last write"))
+            delta_lines, relevant = _item_delta_lines(
+                index, docs_dir, up_name, recorded_items, my_refs,
+                "the snapshot recorded at the last write", lines, art_skip,
+                recorded_capability)
+            details.extend(delta_lines)
+            if not relevant:
+                details.append(_RESTAMP_ONLY)
+                restamp_only.append(up_name)
             changed.append((up_name, details))
             continue
         # No item snapshot in the stamp. Every recorded sha256 is a text hash a
@@ -3030,10 +3692,14 @@ def drift_report(docs_dir: Path, artifact: str) -> int:
         # first: a hit gives the same exact delta (ledger IMP-083, aicf LSN-065).
         found, rev, old_items = _recover_items_from_git(docs_dir, up_name, recorded)
         if found == "hit" and old_items is not None:
-            details.extend(_item_delta_lines(
+            delta_lines, relevant = _item_delta_lines(
                 index, docs_dir, up_name, old_items, my_refs,
                 f"revision {str(rev)[:8]} of docs/{up_name}, recovered from git (its content "
-                f"matches the hash this stamp recorded)"))
+                f"matches the hash this stamp recorded)", lines, art_skip)
+            details.extend(delta_lines)
+            if not relevant:
+                details.append(_RESTAMP_ONLY)
+                restamp_only.append(up_name)
             details.append("re-stamping this file (docs_index.py --stamp) records the items map, "
                            "so the next reconcile needs no git")
             changed.append((up_name, details))
@@ -3108,10 +3774,16 @@ def drift_report(docs_dir: Path, artifact: str) -> int:
         print_findings([], warnings)
         print_next("nothing required.", show_glossary=not warnings)
         return 0
+    restamp_note = ""
+    if restamp_only:
+        restamp_note = (f" {len(restamp_only)} of the {len(changed)} moved without touching "
+                        f"anything this file references or cites - re-stamp only."
+                        if len(restamp_only) < len(changed) else
+                        " Nothing this file references or cites changed - re-stamp only.")
     print(
         f"[FAIL] {label} was built against older upstreams - {len(changed)} of "
         f"{len(changed) + len(unchanged)} changed since it was written, so what it "
-        f"says about them may be stale."
+        f"says about them may be stale.{restamp_note}"
     )
     print("\nUPSTREAMS THAT MOVED:")
     for up_name, details in changed:
@@ -3163,17 +3835,53 @@ def _edited_path_from_stdin() -> Optional[str]:
     return None
 
 
-def _path_is_relevant(file_path: str) -> bool:
-    """True if ``file_path``'s edit should trigger a regen.
+def _abs_path(p: Path) -> Path:
+    """``p`` made absolute (against the cwd) with symlinks resolved where the
+    platform allows - so two spellings of one directory compare equal."""
+    p = Path(os.path.abspath(str(p)))
+    try:
+        return p.resolve()
+    except (OSError, RuntimeError):
+        return p
 
-    Canonical docs move line ranges; shard writes (``UX__x.yaml``,
-    ``TASKS__cid.json``) move symbols and edges; the allow-list changes the
-    retired set. All refresh.
+
+def _same_dir(a: Path, b: Path) -> bool:
+    return os.path.normcase(str(a)) == os.path.normcase(str(b))
+
+
+def _hook_docs_dir(file_path: str, docs_dir_flag: Optional[str],
+                   project_root_flag: Optional[str]) -> Optional[Path]:
+    """The docs dir whose index ``file_path``'s edit refreshes, or None when the
+    edit is irrelevant (ledger IMP-034).
+
+    Relevant means: a canonical doc, a shard (``UX__x.yaml``,
+    ``TASKS__cid.json``) or the allow-list, lying directly in the project's
+    docs dir - the only files the index reads. That dir is ``--docs-dir`` when
+    given, else ``<--project-root>/docs``, else the ``docs`` directory beside
+    the nearest ancestor ``.claude/`` (the project the hook was wired into).
+    Never "any path component named docs": Claude Code sends absolute paths, so
+    a project checked out under ``~/docs/<proj>`` or holding a ``site/docs/``
+    tree would regenerate on every state-file and config write. A relative
+    path resolves against the project root (``--project-root``, then
+    ``$CLAUDE_PROJECT_DIR``, then the cwd).
     """
-    p = Path(file_path)
-    return "docs" in p.parts and (
-        _is_canonical(p.name) or _is_shard(p.name) or p.name == ALLOW_FILENAME
-    )
+    base = Path(project_root_flag or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    edited = Path(file_path)
+    if not edited.is_absolute():
+        edited = base / edited
+    edited = _abs_path(edited)
+    if not (_is_canonical(edited.name) or _is_shard(edited.name) or edited.name == ALLOW_FILENAME):
+        return None
+    if docs_dir_flag:
+        docs = _abs_path(Path(docs_dir_flag))
+    elif project_root_flag:
+        docs = _abs_path(Path(project_root_flag)) / "docs"
+    else:
+        holder = next((a for a in edited.parents if (a / ".claude").is_dir()), None)
+        if holder is None:
+            return None
+        docs = holder / "docs"
+    return docs if _same_dir(edited.parent, docs) else None
 
 
 def _force_utf8_stdio() -> None:
@@ -3255,6 +3963,7 @@ def main(argv: "Optional[list[str]]" = None) -> int:
     ap.add_argument(
         "--find",
         nargs="+",
+        action="extend",
         metavar="FILTER",
         help="Predicate search over symbols. Filters: kind=, context=, file=, text=, references=, referenced_by=.",
     )
@@ -3285,6 +3994,11 @@ def main(argv: "Optional[list[str]]" = None) -> int:
     ap.add_argument(
         "--upstream", action="append", default=[], metavar="FILE",
         help="With --stamp: an upstream to record (docs/<file>); repeatable.",
+    )
+    ap.add_argument(
+        "--hold-upstream", action="append", default=[], metavar="FILE",
+        help="With --stamp: keep this recorded upstream's entry exactly as it is (its hash and "
+             "items map), so --drift still reports what moved there; repeatable.",
     )
     ap.add_argument(
         "--json", action="store_true",
@@ -3323,7 +4037,8 @@ def main(argv: "Optional[list[str]]" = None) -> int:
         if not docs_dir.is_dir():
             print(f"[docs-stamp] no docs dir: {docs_dir}", file=sys.stderr)
             return 2
-        return stamp_artifact(docs_dir, args.stamp, args.upstream, as_json=args.json)
+        return stamp_artifact(docs_dir, args.stamp, args.upstream, as_json=args.json,
+                              hold_upstreams=args.hold_upstream)
 
     if args.hash:
         path = _locate(args.hash, docs_dir)
@@ -3357,7 +4072,12 @@ def main(argv: "Optional[list[str]]" = None) -> int:
                 warnings,
                 blocking_header="BROKEN REFERENCES",
             )
-            print_next("/sdlc:repair  (works out which document is actually wrong)")
+            print_next(
+                "/sdlc:repair  (works out which document is actually wrong)",
+                "An id a document cites on purpose after it was retired or renamed is not "
+                "a defect: list it in docs/INDEX.allow.yaml under retired_ids (one "
+                "'- id: <ID>' entry with a reason) and this check passes.",
+            )
             return 1
         print("[OK] every id referenced in the documents is defined somewhere.")
         print_findings([], warnings)
@@ -3422,13 +4142,10 @@ def main(argv: "Optional[list[str]]" = None) -> int:
 
     if args.hook:
         edited = _edited_path_from_stdin()
-        if edited is None or not _path_is_relevant(edited):
+        hook_docs = None if edited is None else _hook_docs_dir(edited, args.docs_dir, args.project_root)
+        if hook_docs is None:
             return 0  # unrelated edit (or no event) — silent no-op
-        # Resolve docs dir from the edited path itself when not pinned, so the
-        # hook works regardless of cwd.
-        if not args.docs_dir and not args.project_root:
-            parts = Path(edited).parts
-            docs_dir = Path(*parts[: parts.index("docs") + 1])
+        docs_dir = hook_docs
 
     if not docs_dir.is_dir():
         # Nothing to index yet (docs/ not created) — not an error.

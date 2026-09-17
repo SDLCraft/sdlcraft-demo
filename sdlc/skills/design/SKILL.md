@@ -5,7 +5,7 @@ description: >
   design-system contract — plus docs/DESIGN__tokens.yaml (design tokens) and
   docs/DESIGN__assets.yaml (asset manifest + generation briefs) when they
   apply. Consumes docs/PRD.yaml + docs/UX.yaml; consumed by downstream coding
-  agents (and arch/task) to style every surface and scaffold the asset
+  agents (and task) to style every surface and scaffold the asset
   pipeline. A maintenance form, /sdlc:design --reconcile, reviews only what
   moved in PRD/UX since the file was written, without the interview.
   Trigger only on /sdlc:design or a direct natural-language request
@@ -101,7 +101,6 @@ Runtime files (NOT inside this skill directory):
 | `docs/DESIGN__tokens.yaml` | DTCG token set — iff `token_based_ui` ∈ functional_structure. |
 | `docs/DESIGN__assets.yaml` | Asset manifest — iff `asset_pipeline` ∈ functional_structure OR `requires_custom_assets`. |
 | `.claude/skills-state/sdlc-design.state.yaml` | Session state for resumability. |
-| `CLAUDE.md` (project root) | Pointer bullet injected on completion. |
 
 ## Reserved EXIT command
 
@@ -137,10 +136,21 @@ Before anything else, check `.claude/skills-state/sdlc-design.state.yaml`:
 - `status: in_progress` → ask: *"I found an unfinished design session from
   `<last_updated>`. Resume, restart (discard previous answers), or discard
   (delete state and exit)?"*
-- `status: complete` or `aborted` and `docs/DESIGN.yaml` exists → treat as an
-  update flow (see `references/merge-validate.md`); if an upstream changed,
-  run the §7 delta-review first (Phase 2).
+- `status: complete` or `aborted` and `docs/DESIGN.yaml` exists → scope the
+  update per `sdlc/skills/ux/references/upstream-reconciliation.md`'s
+  REFINE row (open only the named themes, the §7 delta items, and the
+  non-confirmed set; confirm the rest in one summary), then
+  `references/merge-validate.md`; if an upstream changed, run the §7
+  delta-review first (Phase 2).
+- `status: complete` or `aborted` and `docs/DESIGN.yaml` is ABSENT → only
+  `partial_answers` survives: offer restart-from-partial_answers or
+  discard — never resume.
 - No state file → continue to Phase 2.
+- If the state file's `skill_version` is older than this file's footer: run
+  the canonical recipe
+  (`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` → "Resume with
+  stale state" — migrate additively, reconcile the theme lists and
+  `last_ids`, then offer resume at position 1).
 
 ### Phase 2 — Scan inputs
 
@@ -150,7 +160,11 @@ Before anything else, check `.claude/skills-state/sdlc-design.state.yaml`:
 **Slice large docs, don't slurp.** If `docs/INDEX.yaml` exists (the project ran
 `/sdlc:setup`), read `PRD.yaml` / `UX.yaml` by slice via the index (or
 `python .claude/sdlc/docs_index.py --show <symbol>`) rather than whole-file.
-Protocol: `.claude/rules/sdlc-docs-access.md`.
+Protocol: `.claude/rules/sdlc-docs-access.md`. Every `python
+.claude/sdlc/docs_index.py …` in this file runs the copy
+`${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once per
+run: an installed copy older than the plugin's counts as absent, and every
+fallback this file gives for a missing `docs_index.py` applies to it.
 
 Read at startup:
 
@@ -162,7 +176,12 @@ Read at startup:
      python "${CLAUDE_SKILL_DIR}/../ux/validate_schema.py" --path docs/UX.yaml
      ```
      If exit ≠ 0 or `metadata.status != "complete"` → **stop**. Tell the user
-     to finish UX first (`/sdlc:ux`). Do not proceed. If it is valid but
+     to finish UX first (`/sdlc:ux`). Do not proceed. One exception, for the
+     exit code only: when
+     `python "${CLAUDE_SKILL_DIR}/../repair/doctor.py" --docs-dir docs --artifact docs/UX.yaml`
+     reports the check `accepted (N, unchanged)`, the project accepted that
+     deviance — proceed (never `--quick`; rule:
+     `sdlc/skills/repair/references/accepted-deviance.md`). If it is valid but
      `metadata.applicability: not_applicable`, treat it exactly as absent
      (below) and ask nothing.
    - **Absent and `PRD.pipeline_scope.ux.applicable` is `false`** → this
@@ -179,7 +198,8 @@ Read at startup:
      constraint), `surface_inventory` (SCR-NNN ids → `traces_ux_surfaces`).
 2. **`docs/PRD.yaml`** — required. Validate it too
    (`python "${CLAUDE_SKILL_DIR}/../prd/validate_schema.py" --path
-   docs/PRD.yaml`); same stop rule. Extract: `product_identity` (name/one_liner/idea_text → brand +
+   docs/PRD.yaml`); same stop rule, accepted-deviance exception included
+   (`--artifact docs/PRD.yaml`; `sdlc/skills/repair/references/accepted-deviance.md`). Extract: `product_identity` (name/one_liner/idea_text → brand +
    product type), `data_model.key_entities` (ENT-NNN — entities like
    Character/Sprite/Level imply assets), `non_functional_requirements`
    (accessibility/brand/theming NFRs → `implements_requirements`),
@@ -664,4 +684,4 @@ Design is a creative interview — keep it concrete and energetic:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.9"
+skill_version: "1.12"

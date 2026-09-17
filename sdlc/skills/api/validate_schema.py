@@ -70,7 +70,7 @@ import re
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 
 
 # =============================================================================
@@ -81,6 +81,8 @@ from typing import Any, Dict, List, Literal, Optional
 # =============================================================================
 
 GLOSSARY_PATH = ".claude/rules/sdlc-output-glossary.md"
+STALE_NOTE = ("an upstream moved after this file was written; review the delta "
+              "before the next stage reads it")
 
 def join_ids(ids, limit=12):
     """Render a grouped finding's id list. Capped, because a line nobody
@@ -329,6 +331,12 @@ class Events(_ThemeBase):
 
 class ExternalDependency(_ThemeBase):
     name: Optional[str] = None
+    # INT-NNN — the PRD integration this entry realizes (PRD.functional_
+    # requirements.integrations_required). CLAUDE.md §4: api never mints
+    # this id, only resolves against PRD's own family. From api_version
+    # >= 2.0 a missing or dangling integration_ref blocks status: complete
+    # (check_external_dependencies); below 2.0 it only warns.
+    integration_ref: Optional[str] = None
     auth: Optional[str] = None
     rate_limit: Optional[str] = None
     retry_policy: Optional[str] = None
@@ -670,6 +678,8 @@ _FR_PREFIX_RE = re.compile(r"^FR-\d{3,}$", re.IGNORECASE)
 _SCR_PREFIX_RE = re.compile(r"^SCR-\d{3,}$", re.IGNORECASE)
 _WKF_PREFIX_RE = re.compile(r"^WKF-\d{3,}$", re.IGNORECASE)
 _OPR_PREFIX_RE = re.compile(r"^OPR-\d{3,}$", re.IGNORECASE)
+_INT_PREFIX_RE = re.compile(r"^INT-\d{3,}$", re.IGNORECASE)
+_INT_ID_RE = re.compile(r"^INT-\d+", re.IGNORECASE)
 
 
 # --- BEGIN canonical WRN block (CLAUDE.md section 2) — byte-identical everywhere
@@ -956,6 +966,41 @@ def load_prd_features(prd_path: Path) -> List[str]:
     return features
 
 
+def load_prd_int_ids(prd_path: Path) -> Set[str]:
+    """Return INT-NNN ids from PRD functional_requirements.integrations_required
+    (each entry "INT-NNN: <integration target>"). Honors monorepo mode.
+    Mirrors arch/validate_schema.py's loader of the same name exactly —
+    api resolves against PRD's own INT family, never mints one (CLAUDE.md §4)."""
+    ids: Set[str] = set()
+    if not prd_path.exists():
+        return ids
+    try:
+        raw = yaml.safe_load(prd_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError:
+        return ids
+    if not isinstance(raw, dict):
+        return ids
+    metadata = raw.get("metadata") or {}
+    monorepo = bool(metadata.get("monorepo")) if isinstance(metadata, dict) else False
+
+    def _pull(node: dict) -> None:
+        fr = node.get("functional_requirements") or {}
+        if not isinstance(fr, dict):
+            return
+        for item in (fr.get("integrations_required") or []):
+            m = _INT_ID_RE.match(str(item).strip())
+            if m:
+                ids.add(m.group(0).upper())
+
+    if monorepo:
+        for prod in (raw.get("products") or {}).values():
+            if isinstance(prod, dict):
+                _pull(prod)
+    else:
+        _pull(raw)
+    return ids
+
+
 def load_ux_data_bearing_surfaces(docs_dir: Path) -> List[str]:
     """Return list of UX surface SCR-NNN ids whose surface_type is data-bearing.
 
@@ -1133,10 +1178,20 @@ class ApiDeferralIndex:
             _reason = str(_w.get("text") or "").strip()
             if not _reason:
                 continue
-            for _eid in (_w.get("defers") or []):
-                _eid = str(_eid).strip()
-                if _eid:
-                    self.declared.setdefault(_eid.upper(), _reason)
+            _ids = [str(_e).strip() for _e in (_w.get("defers") or []) if str(_e).strip()]
+            for _eid in _ids:
+                self.declared.setdefault(_eid.upper(), _reason)
+            # Warn-first (CLAUDE.md 10, ledger IMP-109): the canonical WRN block
+            # ignores a mapping whose id is not WRN-NNN, yet its deferral still
+            # counts for one more version - say so instead of honouring it silently.
+            _wid = str(_w.get("id") or "").strip()
+            if _ids and not _WRN_ID_RE.match(_wid):
+                self.shape_warnings.append(
+                    f"api_warnings entry '{_wid}' still defers {', '.join(_ids)}, "
+                    f"but that id is not of the form WRN-NNN, so the warning itself is "
+                    f"ignored. The deferral counts for one more version only - give the "
+                    f"warning a WRN-NNN id."
+                )
 
     def is_deferred(self, id_str: str) -> bool:
         return str(id_str).strip().upper() in self.declared
@@ -1163,11 +1218,15 @@ def check_feature_coverage(
     traced_features: List[str],
     non_api_features: Optional[List[str]],
     deferral: Optional[ApiDeferralIndex] = None,
+    at_floor: bool = False,
 ) -> List[str]:
     """Return list of FR-NNN IDs that are neither traced, deferred, nor
     opted out. Structured deferrals are consulted BEFORE the deprecated
-    `non_api_features` fallback; ids that only the fallback saves are
-    recorded on the deferral index for the one-per-run hygiene warning."""
+    `non_api_features` fallback. Below api_version 2.0 (`at_floor=False`,
+    IMP-129) a bare fallback entry still covers the FR for one more version
+    and is recorded on the deferral index for the one-per-run hygiene
+    warning; at/above 2.0 the fallback no longer covers anything and the FR
+    is reported as uncovered like any other untraced id (CLAUDE.md §10)."""
     traced_norm = {
         _FEATURE_ID_RE.match(str(f).strip()).group(0).upper()
         for f in traced_features
@@ -1187,7 +1246,9 @@ def check_feature_coverage(
         if deferral is not None and deferral.is_deferred(up):
             continue
         if up in opt_out:
-            if deferral is not None:
+            if at_floor:
+                uncovered.append(f)
+            elif deferral is not None:
                 deferral.note_fallback(up)
             continue
         uncovered.append(f)
@@ -1227,6 +1288,47 @@ def check_entity_links(
         if ent and ent not in data_set:
             missing.append(ent)
     return missing
+
+
+def check_external_dependencies(
+    deps: List["ExternalDependency"],
+    prd_int_ids: Set[str],
+) -> Tuple[List[str], List[str]]:
+    """Typed provider contracts (CLAUDE.md §4/§10): each external_dependencies
+    entry names the PRD integration it realizes via integration_ref: INT-NNN.
+    Runs regardless of api_kind (an integration-only CLI still calls
+    providers) and is vacuous on an empty/null list.
+
+    Returns (format/missing errors, dangling-ref errors). The caller decides
+    error vs warning by the artifact's api_version (CLAUDE.md §10) — see
+    _version_at_least usage in validate_all.
+    """
+    missing: List[str] = []
+    dangling: List[str] = []
+    for i, dep in enumerate(deps or []):
+        label = (dep.name or "").strip() or f"[{i}]"
+        ref = (dep.integration_ref or "").strip()
+        if not ref:
+            missing.append(
+                f"external_dependencies[{i}]='{label}' has no integration_ref "
+                f"- every provider integration must name the INT-NNN it "
+                f"realizes (add it to PRD.functional_requirements."
+                f"integrations_required if the PRD doesn't list it yet)"
+            )
+            continue
+        vu = ref.upper()
+        if not _INT_PREFIX_RE.match(vu):
+            missing.append(
+                f"external_dependencies[{i}]='{label}'.integration_ref '{ref}' "
+                f"is not an INT-NNN id"
+            )
+        elif prd_int_ids and vu not in prd_int_ids:
+            dangling.append(
+                f"external_dependencies[{i}]='{label}'.integration_ref '{ref}' "
+                f"is not an INT-NNN id in PRD.yaml - add it to "
+                f"functional_requirements.integrations_required, or fix the id"
+            )
+    return missing, dangling
 
 
 # =============================================================================
@@ -1308,8 +1410,8 @@ def check_provenance_freshness(api: "API", docs_dir: Path) -> List[str]:
             continue
         if current != recorded:
             warns.append(
-                f"built against an older {fname} - run /sdlc:api to review "
-                f"the delta"
+                f"built against an older {fname} - run /sdlc:api --reconcile to "
+                f"review the delta"
             )
     return warns
 
@@ -1431,14 +1533,38 @@ def validate_all(api_path: Path) -> int:
             for prod in api.products.values():
                 if prod.non_api_features:
                     non_api.extend(prod.non_api_features)
+        at_v2 = _version_at_least(api.metadata.api_version, 2)
         uncovered_features = check_feature_coverage(
-            prd_features, traced_feats, non_api, deferral)
+            prd_features, traced_feats, non_api, deferral, at_floor=at_v2)
         uncovered_surfaces = check_surface_coverage(
             ux_surfaces, traced_surfs, deferral)
         bad_entities = check_entity_links(primary_ents, data_entities)
 
     status = api.metadata.status
     n_resources = len(resources)
+
+    # ---- external_dependencies contracts (IMP-011) --------------------------
+    # Runs regardless of api_kind: none - an integration-only CLI/library
+    # still calls outbound providers. Vacuous on an empty/null list.
+    ext_deps_all: List[ExternalDependency] = list(api.external_dependencies or [])
+    if api.metadata.monorepo and api.products:
+        for prod in api.products.values():
+            ext_deps_all.extend(prod.external_dependencies or [])
+    prd_int_ids = load_prd_int_ids(prd_path)
+    ext_dep_missing, ext_dep_dangling = check_external_dependencies(
+        ext_deps_all, prd_int_ids)
+    at_int_floor = _version_at_least(api.metadata.api_version, 2)
+    ext_dep_errs: List[str] = []
+    ext_dep_warns: List[str] = []
+    if ext_dep_missing or ext_dep_dangling:
+        msgs = ext_dep_missing + ext_dep_dangling
+        if at_int_floor:
+            ext_dep_errs = msgs
+        else:
+            ext_dep_warns = [
+                f"{m} (blocking from api_version 2.0; this file is older, so "
+                f"it only warns)" for m in msgs
+            ]
 
     # ---- api_kind:none and metadata.applicability must agree ---------------
     # `api_kind: none` is this artifact's own way of saying "no API here" and
@@ -1448,6 +1574,9 @@ def validate_all(api_path: Path) -> int:
     # has no applicability field at all, so that direction only warns
     # (CLAUDE.md section 10); the contradiction direction is an error, because
     # anyone who wrote the new field wrote it deliberately.
+    # not_applicable is valid ONLY when api_kind: none AND external_dependencies
+    # is empty/null (IMP-011 obj 2) - a none-kind file that still calls an
+    # outbound provider found something to model, so it stamps "applicable".
     applicability = api.metadata.applicability
     applicability_errs: List[str] = []
     applicability_warns: List[str] = []
@@ -1465,7 +1594,16 @@ def validate_all(api_path: Path) -> int:
                 "'applicable' - arch and task read these two and cannot act on a "
                 "contradiction."
             )
-    elif is_none_kind:
+        elif ext_deps_all:
+            applicability_errs.append(
+                f"metadata.applicability says this project has no API, but "
+                f"{len(ext_deps_all)} external_dependencies entry(ies) are "
+                f"declared - a product that calls an external provider is not "
+                f"not_applicable even at api_kind: none. Set applicability: "
+                f"applicable, or remove the entries if there is truly no "
+                f"outbound integration either."
+            )
+    elif is_none_kind and not ext_deps_all:
         applicability_warns.append(
             "api_kind is 'none' but metadata.applicability still says 'applicable', "
             "so later skills fall back to guessing from whether docs/API.yaml "
@@ -1476,6 +1614,7 @@ def validate_all(api_path: Path) -> int:
     # 4b) Warnings — none of these block (CLAUDE.md 14).
     warnings_found: List[Any] = []
     warnings_found.extend(applicability_warns)
+    warnings_found.extend(ext_dep_warns)
     warnings_found.extend(deferral.shape_warnings)
     fb = deferral.fallback_warning()
     if fb:
@@ -1510,7 +1649,12 @@ def validate_all(api_path: Path) -> int:
                 "verdict above does not vouch for these:",
                 absent_upstreams,
             ))
-    warnings_found.extend(check_provenance_freshness(api, docs_dir))
+    prov_warnings = check_provenance_freshness(api, docs_dir)
+    warnings_found.extend(prov_warnings)
+    # Ledger IMP-127: while an upstream is stale this file is not something the
+    # next stage may consume, so NEXT names the reconcile form and keeps the
+    # successor as the step after it.
+    stale_upstream = [w for w in prov_warnings if "built against an older" in str(w)]
 
     # 5) Reporting
     def _problems():
@@ -1520,12 +1664,14 @@ def validate_all(api_path: Path) -> int:
         out += applicability_errs
         out += [f"wrong id format in api_warnings - {e_}" for e_ in warning_id_errs]
         out += [f"wrong id format - {e_}" for e_ in id_format_errs]
+        out += ext_dep_errs
         if uncovered_features:
             ids = [str(f).split(":", 1)[0].strip() for f in uncovered_features]
             out.append(
                 f"{len(uncovered_features)} requirement(s) from the PRD are served by "
                 f"no endpoint here: {join_ids(ids)}. Add a resource that traces them, "
-                f"or list them under non_api_features if they need no API.")
+                f"or defer them in the top-level `deferrals` list "
+                f"({{id, reason}}) if they need no API.")
         if uncovered_surfaces:
             ids = [str(s).split(":", 1)[0].strip() for s in uncovered_surfaces]
             out.append(
@@ -1579,7 +1725,11 @@ def validate_all(api_path: Path) -> int:
                   f"{feat_note}; {surf_note}; {data_note}. "
                   f"/sdlc:arch can run it.")
         print_findings([], warnings_found)
-        print_next("/sdlc:arch", show_glossary=bool(warnings_found))
+        if stale_upstream:
+            print_next(f"/sdlc:api --reconcile  ({STALE_NOTE})", "then /sdlc:arch",
+                       show_glossary=bool(warnings_found))
+        else:
+            print_next("/sdlc:arch", show_glossary=bool(warnings_found))
         return 0
 
     # status == "draft"

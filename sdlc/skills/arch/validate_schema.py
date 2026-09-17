@@ -7,88 +7,13 @@ Run from the project root:
     python sdlc/skills/arch/validate_schema.py
     python sdlc/skills/arch/validate_schema.py --path docs/ARCH.yaml
 
-Validates:
-    1. docs/ARCH.yaml (or --path) — system architecture.
-    2. Every docs/ARCH__*.yaml sibling — one per container.
-    3. Required-field checks (status: complete gate).
-    4. ID-prefix formats (cross-skill conventions):
-       - WRN-NNN on every arch_warnings entry (system + each container).
-       - FR-NNN or NFR-NNN on every implements_requirements entry
-         (containers + components); FR-NNN on non_container_features.
-       - WKF-NNN on every traces_prd_workflows entry (containers +
-         components).
-    5. Coverage cross-checks (block status: complete):
-       - API-resource coverage: every API__*.yaml resource_id appears
-         in some container's owns_api_resources.
-       - UX-surface coverage: every UX__*.yaml data-bearing surface_id
-         appears in some container's owns_ux_surfaces.
-       - DATA-store coverage: every store id in
-         DATA-MODEL.yaml.persistence.* appears in some container's
-         persistence.
-       - PRD feature coverage: every PRD FR-NNN (the flat `features` list,
-         or the legacy must/nice union) appears in some container's
-         implements_requirements OR in ARCH.yaml.non_container_features.
-         Skipped if PRD.yaml absent.
-    6. Edge + trace integrity (block status: complete):
-       - Edge endpoint integrity: every edge's `from` / `to` is a valid
-         container_id (system level) or component_id (container level),
-         and external_edges' `to` resolves against the on-disk graph.
-       - Edge via_* resolution against API / DATA upstreams.
-       - Component traces (api/ux/data/work_units) resolve upstream and
-         sit within the parent container's owns_*.
-       - implements_requirements / traces_prd_workflows resolve to PRD
-         FR-NNN/NFR-NNN / WKF-NNN ids; component features ⊆ parent
-         container's.
-    7. Component work_units (block status: complete):
-       - #21 per-unit integrity (unique name, summary, trace subsets) AND
-         — the blocking upgrade — a NON-TRIVIAL component (archetype outside
-         the plumbing set, carrying implements_requirements or a traced
-         contract) that declares no work_units blocks complete unless it
-         records an explicit `work_units_waiver`. work_units are parsed from
-         the YAML (block- or flow-style entries both count) — never grepped.
-       - #22 callable-level FR coverage: for every component that declares
-         work_units, each FR-NNN in its implements_requirements must appear in
-         at least one of its work_units[].implements_requirements (waivable per
-         component). Rolls up to a per-container report of FRs unreachable
-         through any work_unit.
-       - #23 DEFER-OR-DECLARE interface contract: a non-callable work_unit
-         (kind: module | content | tooling — the deliverable is a file) is
-         exempt; otherwise a work_unit that traces NO
-         schema-bearing upstream contract (no traces_api_operation) must
-         DECLARE its interface contract — `inputs`, `output`, and `raises` all
-         present (explicit empties `inputs: []` / `raises: []` / `output:
-         "None"` count as declared). A unit with traces_api_operation may
-         defer to the API schema. FAMILY (opt-in, any project with uniform
-         unit families): if the container declares
-         `work_unit_family_contracts`, a unit belonging to a family inherits
-         that family's shared contract and may omit its own (declare one
-         contract per uniform unit family instead of repeating it per
-         member). Blocking; a component-level `work_units_waiver` downgrades
-         it to a warning. Advisory (SK-21): a component where >= 3 callable
-         DECLARE units are >= 80% all-empty gets one emptiness roll-up
-         warning (an emitter stamping the shape).
-    8. Edge-table consistency (block status: complete):
-       - #24 container→system edge roll-up: every external_edges[] entry in a
-         container file implies a system-level ARCH.yaml.edges row
-         (from=this container, to=the target container, same type). A
-         container-sourced edge that never propagated to the system edge
-         table is an error.
-       - external_edges[].via_unit (when set) resolves to a work_units[].name
-         on the target `<container>/<component>` (the internal-call analogue
-         of via_operation_id for sibling containers with no API between them).
-    9. Advisory warnings (never block):
-       - #25 FR-named deliverable paths: a concrete repo path named as inline
-         code (backticks) in the text of an FR that some container/component
-         claims must fall inside some component's code_location — otherwise
-         downstream `task` can never schedule work that builds it (build-time
-         deliverables: schema layers, repo tools/, templates/, shipped
-         content). Only backtick-delimited tokens with path shape (a trailing
-         '/' or a file extension) are scanned; bare prose slashes and backticked
-         non-paths (and/or, PyPI/npm, ID-lists like FR-046/047, pass/fail) are
-         ignored.
-       - #26 api_consumers mirror: an external `calls` edge with
-         via_resource_id should be mirrored in the container's
-         api_consumers[].
+Validates docs/ARCH.yaml (or --path) plus every sibling docs/ARCH__*.yaml,
+required-field and ID-prefix-format gates, and the full numbered cross-check
+suite this script prints as `[cross-check N]`. The canonical table — what
+each numbered check asserts, which block `status: complete` and which only
+warn, and the version-gating floor (CLAUDE.md §10) — is
+references/merge-validate.md's "Validation (Phase 7)" section; this
+docstring is not a second copy of it.
 
 Exit codes:
     0 — schema valid; status='complete' (with all checks passing) or
@@ -120,6 +45,8 @@ from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 # =============================================================================
 
 GLOSSARY_PATH = ".claude/rules/sdlc-output-glossary.md"
+STALE_NOTE = ("an upstream moved after this file was written; review the delta "
+              "before the next stage reads it")
 
 def join_ids(ids, limit=12):
     """Render a grouped finding's id list. Capped, because a line nobody
@@ -983,16 +910,25 @@ class DeferralIndex:
     A malformed entry never defers anything: an entry without an id, or with
     an id but no reason, is reported and the gate stays armed.
 
-    arch has no prose-mention fallback (its coverage gates never read
-    arch_warnings); the one legacy escape is `non_container_features`
+    Typed channel: an arch_warnings entry {kind: deferral, text, defers: [...]}
+    declares exactly what a `deferrals` entry declares - ARCH.schema.yaml calls
+    `defers` "the structured coverage channel the trace-or-defer gates read",
+    and every sibling validator reads it (ledger IMP-109: arch did not, so the
+    documented shape turned ARCH.yaml red here alone). A typed deferral whose
+    id is not WRN-NNN still defers for one more version (CLAUDE.md 10) and is
+    reported in `id_warnings`.
+
+    arch has no prose-mention fallback (a note that merely NAMES an id never
+    defers it); the one legacy escape is `non_container_features`
     (FR ids, reason-less), which the feature-coverage gate still honours for
     one more schema version — ids that fall through to it are reported via
     `legacy_fallback`.
     """
 
-    def __init__(self, raw_deferrals: Any, raw_alias: Any) -> None:
+    def __init__(self, raw_deferrals: Any, raw_alias: Any, raw_warnings: Any = None) -> None:
         self.declared: Dict[str, str] = {}
         self.shape_warnings: List[str] = []
+        self.id_warnings: List[str] = []
         field = "deferrals"
         raw = raw_deferrals
         if raw is None:
@@ -1017,6 +953,32 @@ class DeferralIndex:
                 )
                 continue
             self.declared[eid.upper()] = reason
+
+        # A typed WRN entry with `kind: deferral` and `defers: [...]` declares
+        # exactly what a `deferrals` entry declares, written where the author
+        # already writes it (CLAUDE.md sections 2 and 6; ledger IMP-109).
+        for _w in (raw_warnings or []):
+            if not isinstance(_w, dict):
+                continue
+            if str(_w.get("kind") or "").strip() != "deferral":
+                continue
+            _reason = str(_w.get("text") or "").strip()
+            if not _reason:
+                continue
+            _ids = [str(_e).strip() for _e in (_w.get("defers") or []) if str(_e).strip()]
+            for _eid in _ids:
+                self.declared.setdefault(_eid.upper(), _reason)
+            # Warn-first (CLAUDE.md 10): the canonical WRN block ignores a
+            # mapping whose id is not WRN-NNN, yet its deferral still counts for
+            # one more version - say so instead of honouring it silently.
+            _wid = str(_w.get("id") or "").strip()
+            if _ids and not _WRN_ID_RE.match(_wid):
+                self.id_warnings.append(
+                    f"arch_warnings entry '{_wid}' still defers {', '.join(_ids)}, "
+                    f"but that id is not of the form WRN-NNN, so the warning itself is "
+                    f"ignored. The deferral counts for one more version only - give the "
+                    f"warning a WRN-NNN id."
+                )
 
     def defer(self, ids: Any) -> Set[str]:
         """The subset of `ids` this file has deferred. Returns the ids as
@@ -2132,6 +2094,16 @@ def check_component_work_units(
         for e in (container.internal_edges or [])
         if e.to and e.from_ and str(e.from_).strip() != str(e.to).strip()
     }
+    # IMP-126 (R3): if some component in this container ALREADY owns a
+    # kind: entrypoint unit, the container's startup is not unowned - Gap-1
+    # must not tell a second, unwired single-file library that "nothing owns
+    # startup" when a root already exists elsewhere. cross-check 32 still
+    # independently flags that library's own unreached units.
+    container_has_entrypoint = any(
+        (u.kind or "").strip() == "entrypoint"
+        for c in (container.components or [])
+        for u in (c.work_units or [])
+    )
     entrypoint_candidates: List[Tuple[str, str, int]] = []
     for i, comp in enumerate(container.components or []):
         cid = comp.component_id
@@ -2270,6 +2242,7 @@ def check_component_work_units(
             and not any((op.kind or "") == "entrypoint" for op in units)
             and not any(op.traces_api_operation for op in units)
             and cid not in imported
+            and not container_has_entrypoint
         ):
             entrypoint_candidates.append((cid, str(locs[0]), len(units)))
     if len(entrypoint_candidates) == 1:
@@ -2832,8 +2805,10 @@ def check_fr_deliverable_paths(
                         f"schema_model/dev_tool/content_asset "
                         f"component or extend an existing code_location) - or, if "
                         f"the path is something the running system WRITES rather "
-                        f"than source it ships, declare that root under ARCH.yaml "
-                        f"output_locations"
+                        f"than source it ships: output_locations is a system-mode "
+                        f"field (container mode may not write it) - the next "
+                        f"/sdlc:arch --system or --reconcile run asks once whether "
+                        f"to record it there"
                     )
     return warns
 
@@ -3261,7 +3236,7 @@ def check_shard_provenance(arch: Any, containers: Dict[str, Any], docs_dir: Path
     return warns
 
 
-def check_provenance_staleness(
+def check_provenance_staleness(  # version-floor-fields: arch_version, arch_container_version
     prov: Optional[List[Dict[str, Any]]],
     status: str,
     version: Tuple[int, int],
@@ -3301,7 +3276,7 @@ def check_provenance_staleness(
         if str(rec)[:16] != cur[:16]:
             warns.append(
                 f"{artifact_label} was built against an older {f} - run "
-                f"{reinvoke_cmd} to review the delta"
+                f"{reinvoke_cmd} --reconcile to review the delta"
             )
     return warns
 
@@ -3691,18 +3666,28 @@ def check_unreachable_work_units(
     it; an API operation routes to it (traces_api_operation); another unit's
     contract text (summary / inputs / output / raises / signature /
     owns_callables) names it; its component's archetype is framework-invoked;
-    its kind is a non-callable deliverable (module / content / tooling); or
-    a top-level `deferrals` entry names it (`<component>/<unit>` or the bare
-    name). Runs only in a container that pins at least one caller (an
-    entrypoint unit or a via_unit edge): where the author never modelled call
-    structure at all, absence says nothing.
+    its kind is a non-callable deliverable (module / content / tooling); a
+    top-level `deferrals` entry names it (`<cid>/<component>/<unit>`,
+    `<component>/<unit>`, or the bare name); OR (IMP-126) an internal `calls`
+    edge with no `via_unit` targets its component AND that component has
+    EXACTLY ONE such candidate unit - the edge is unambiguous. A via_unit-less
+    `depends_on` edge proves only an import (Gap-1's own `imported` set reads
+    it the same way) and never grants reachability. When such an edge targets
+    a component with TWO OR MORE candidate units, which one it reaches is
+    genuinely ambiguous: this collapses to ONE grouped advisory naming the
+    component, never one row per unit. Runs only in a container that pins at
+    least one caller (an entrypoint unit or a via_unit edge): where the
+    author never modelled call structure at all, absence says nothing.
     """
     reached: Set[Tuple[str, str, str]] = set()
+    via_less_calls_targets: Set[Tuple[str, str]] = set()
     for c in containers.values():
         cid = str(c.container_id or "")
         for e in c.internal_edges or []:
             if e.via_unit and e.to:
                 reached.add((cid, str(e.to), str(e.via_unit).strip()))
+            elif e.to and str(e.type.value if e.type else "") == "calls":
+                via_less_calls_targets.add((cid, str(e.to).strip()))
         for e in c.external_edges or []:
             if e.via_unit and e.to and "/" in str(e.to):
                 tcid, tcomp = str(e.to).split("/", 1)
@@ -3730,6 +3715,8 @@ def check_unreachable_work_units(
             archetype = comp.archetype.value if comp.archetype else None
             if archetype in _FRAMEWORK_INVOKED_ARCHETYPES:
                 continue
+            candidate_names: List[str] = []
+            unreached_names: List[str] = []
             for u in comp.work_units or []:
                 name = (u.name or "").strip()
                 if not name:
@@ -3739,22 +3726,45 @@ def check_unreachable_work_units(
                     continue
                 if u.traces_api_operation:
                     continue
+                candidate_names.append(name)
                 if (cid, comp.component_id, name) in reached:
                     continue
-                if dindex.defer([f"{comp.component_id}/{name}", name]):
+                if dindex.defer([
+                    f"{cid}/{comp.component_id}/{name}", f"{comp.component_id}/{name}", name,
+                ]):
                     continue
                 pat = re.compile(r"(?<![\w.])" + re.escape(name) + r"(?![\w])")
                 if any(pat.search(t) for k, t in unit_texts.items()
                        if k != (comp.component_id, name)):
                     continue
+                unreached_names.append(name)
+            if not unreached_names:
+                continue
+            if (cid, comp.component_id) in via_less_calls_targets:
+                if len(candidate_names) <= 1:
+                    # The only candidate unit in the component - a
+                    # via_unit-less `calls` edge into it is unambiguous.
+                    continue
+                out.append(
+                    f"{fname}: component '{comp.component_id}' is reached by a calls "
+                    f"edge that pins no via_unit, so which of its "
+                    f"{len(candidate_names)} functions it actually calls is ambiguous "
+                    f"({', '.join(sorted(unreached_names))}). Pin via_unit on the edge "
+                    f"to name the one it reaches, or give each an edge of its own "
+                    f"[cross-check 32]"
+                )
+                continue
+            for name in unreached_names:
                 out.append(
                     f"{fname}: function '{name}' in component '{comp.component_id}' is "
                     f"called by nothing - it is not kind: entrypoint, no via_unit edge "
                     f"points at it, no API operation routes to it, and no other "
                     f"function's contract names it. The code a task builds for it "
                     f"would never run. Wire its caller (a `calls` edge with via_unit, "
-                    f"or name it in the caller's inputs), mark it kind: entrypoint if a "
-                    f"framework invokes it, or defer it with a reason [cross-check 32]"
+                    f"or name it in the caller's inputs), give its component one of "
+                    f"the framework-invoked archetypes if a framework calls it "
+                    f"(never mark the unit kind: entrypoint for that), or defer it "
+                    f"with a reason [cross-check 32]"
                 )
     return out
 
@@ -3883,7 +3893,7 @@ def validate_all(arch_path: Path) -> int:
         name: _parse_version(c.metadata.arch_container_version)
         for name, c in containers.items()
     }
-    dindex = DeferralIndex(arch.deferrals, arch.deferred_requirements)
+    dindex = DeferralIndex(arch.deferrals, arch.deferred_requirements, arch.arch_warnings)
 
     # 4) Required fields (with new external-container exemption)
     missing_arch = check_arch_required(arch)
@@ -3958,6 +3968,14 @@ def validate_all(arch_path: Path) -> int:
     uncovered_stores = check_store_coverage(arch, data_stores, dindex)
     uncovered_features, feature_legacy_fallback = check_feature_coverage(
         arch, prd_features, dindex)
+    if arch_version >= GATE_FLOOR:
+        # IMP-129: the reason-less non_container_features escape was never
+        # version-gated even though every prose copy has promised "honoured
+        # one more schema version" since api 1.6 / arch's own #25 text. At
+        # or above the floor it no longer counts as coverage - fold it into
+        # the ordinary uncovered-features error instead of the warning.
+        uncovered_features = list(uncovered_features) + list(feature_legacy_fallback)
+        feature_legacy_fallback = []
     prd_trace_errs, containment_gaps = check_prd_trace_existence(
         arch, containers, prd_families["FR"], prd_families["WKF"],
         prd_families.get("NFR"),
@@ -4003,14 +4021,23 @@ def validate_all(arch_path: Path) -> int:
         arch, containers, data_entity_names, data_paradigm, arch_version)
     unreachable_units = check_unreachable_work_units(containers, dindex)
     ext_contract_warns = check_external_contract_presence(arch)
+    # Ledger IMP-127 (the IMP-049 loop, validator half): a file whose upstream
+    # moved is not something /sdlc:test may consume, so NEXT names THAT file's
+    # reconcile form - collected here, where the container id is in hand.
+    stale_cmds: List[str] = []
     prov_warns = check_provenance_staleness(
         arch.metadata.upstream_provenance, arch.metadata.status, arch_version,
         docs_dir, arch_path.name, "/sdlc:arch")
+    if any("built against an older" in w for w in prov_warns):
+        stale_cmds.append("/sdlc:arch --system --reconcile")
     for name, c in containers.items():
-        prov_warns.extend(check_provenance_staleness(
+        c_prov = check_provenance_staleness(
             c.metadata.upstream_provenance, c.metadata.status,
             container_versions.get(name, (0, 0)), docs_dir, name,
-            f"/sdlc:arch {c.container_id}"))
+            f"/sdlc:arch {c.container_id}")
+        if any("built against an older" in w for w in c_prov):
+            stale_cmds.append(f"/sdlc:arch {c.container_id} --reconcile")
+        prov_warns.extend(c_prov)
     shard_prov_warns = check_shard_provenance(arch, containers, docs_dir)
     deferral_shape_warns = dindex.shape_warnings
 
@@ -4042,11 +4069,12 @@ def validate_all(arch_path: Path) -> int:
         ("{n} contract seam(s) reference a type, error, or code location that nothing pins down [cross-check 28]", seam_warns),
         ("{n} callable(s) are claimed by more than one function's owns_callables [cross-check 29]", owns_collision_warns),
         ("{n} function(s) are called by nothing in the architecture, so the code built for them would never run [cross-check 32]", unreachable_units),
-        ("{n} configuration entr(y/ies) need attention", configuration_warns),
+        ("{n} configuration entr(y/ies) need attention [cross-check 30]", configuration_warns),
         ("{n} store reference(s) do not match the DATA-MODEL store ids", store_resolution_warns),
         ("{n} DATA entit(y/ies) are read or written by no component in any container, so no code will ever touch them - trace each from its owning component, or defer it with a reason", untraced_entities),
         ("{n} external container(s) realize a PRD integration without an external_contract", ext_contract_warns),
         ("{n} deferral entr(y/ies) are malformed and defer nothing", deferral_shape_warns),
+        ("{n} deferral warning(s) have an id that is not of the form WRN-NNN - they still defer, for one more version only", dindex.id_warnings),
         ("{n} requirement(s) are excluded from coverage by the reason-less non_container_features list alone - move each to `deferrals` with a reason (this escape is honoured for one more schema version) [deferral hygiene]", feature_legacy_fallback),
         ("{n} artifact(s) may be stale against the upstream documents they were built from", prov_warns),
         ("{n} container file(s) read a UX__ or API__ shard they own but never recorded in upstream_provenance, so edits to that shard are invisible to every drift check [CLAUDE.md 7]", shard_prov_warns),
@@ -4137,7 +4165,11 @@ def validate_all(arch_path: Path) -> int:
               + ("/sdlc:test can run it." if test_ships
                  else "The specification is complete - this is where the demo edition ends."))
         print_findings([], soft)
-        if test_ships:
+        if stale_cmds:
+            cmd = stale_cmds[0] if len(stale_cmds) == 1 else "/sdlc:arch --reconcile"
+            rest = ["then /sdlc:test"] if test_ships else []
+            print_next(f"{cmd}  ({STALE_NOTE})", *rest, show_glossary=bool(soft))
+        elif test_ships:
             print_next("/sdlc:test", show_glossary=bool(soft))
         else:
             url = pro_homepage()

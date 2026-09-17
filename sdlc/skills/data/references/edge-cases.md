@@ -219,7 +219,9 @@ contract (`sdlc/skills/ux/references/upstream-reconciliation.md`):
 1. Run `python .claude/sdlc/docs_index.py --drift docs/DATA-MODEL.yaml`
    (exit 1 = at least one upstream moved; exit 0 = fresh). When the helper is
    absent, compare each recorded `sha256` (in `metadata.upstream_provenance`)
-   to the upstream's current hash by hand. A content hash catches hand-edits
+   to the upstream's current hash by hand. An installed helper older than the
+   plugin's counts as absent, and the plugin's copy runs before any by-hand
+   compare: `${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md`. A content hash catches hand-edits
    that the old `session_id`-only check missed.
 2. For every changed upstream, classify added / removed / modified ids and run
    the **consolidated delta-review before the entity interview**.

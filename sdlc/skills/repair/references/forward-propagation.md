@@ -42,7 +42,9 @@ site, and carry it through Phase 4 as a checklist. A site leaves the list in
 exactly one of three ways — *edited*, *re-sliced* (a task embed moved by
 `reslice_embeds.py`), or *unaffected* with one clause saying why. A site that
 is none of the three at the end of Phase 4 is an incomplete propagation, and
-the finding stays `triaged`.
+the finding does not close — SKILL.md Phase 6 says which state it waits in, per
+mode: a `re-invoke` stays `triaged` carrying its block, a `surgical` fix is
+left `open` with its progress on one evidence line.
 
 ## Three modes
 
@@ -66,6 +68,9 @@ the change feels big (aicf LSN-019 / LSN-040: one fully-determined TST routed
 to re-invoke cost two downstream interviews and discarded the walk). A finding
 stamped `recurrence_of` (repaired before, came back) starts with `re-invoke`
 in position 1 — never a refusal of the in-run modes, just a changed default.
+When such a finding's fix also meets the four-part criterion, `additive` leads
+anyway: the recurrence default changes which mode leads, never which modes are
+offered (SKILL.md Phase 3).
 
 ## Surgical mode — scripted
 
@@ -116,12 +121,17 @@ Nothing in this sequence is a hand edit to a task JSON.
    reads the change you just reviewed as unreviewed drift. Record the review:
 
    ```bash
-   python .claude/sdlc/docs_index.py --stamp docs/<artifact> --upstream docs/<upstream-1> --upstream docs/<upstream-2>
-   # one --upstream flag per upstream the artifact consumed - the flag takes exactly one file
+   python .claude/sdlc/docs_index.py --stamp docs/<artifact> --upstream docs/<reviewed-upstream> --hold-upstream docs/<every-other-recorded-upstream>
+   # one flag per file - each flag takes exactly one: --upstream for what this run reviewed,
+   # --hold-upstream for every other entry in the artifact's metadata.upstream_provenance
    ```
 
-   (the plugin's `"${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs
-   --stamp …` when the project has no installed copy). Order matters twice. A
+   Run it through the copy
+   `${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks:
+   `--hold-upstream` needs `docs_index.py` capability 6, an older install
+   rejects it with exit 2, and the plugin's form is
+   `"${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs --stamp …`
+   (ledger IMP-108). Order matters twice. A
    stamp rewrites the stamped file's metadata and therefore its own hash, so
    stamp in pipeline order (ARCH before TEST-STRATEGY before a task shard) and
    never before the last hand edit to that file. And stamp BEFORE step 6: the
@@ -140,14 +150,38 @@ Nothing in this sequence is a hand edit to a task JSON.
    `doctor.py --provenance --json` (`.claude/skills-state/sdlc-repair.doctor.json`,
    key `provenance.stale`) is that pre-run snapshot. A pair it lists already
    owed an older, unreviewed delta to `/sdlc:<skill> … --reconcile`: stamping
-   it now forges that review, and leaving it is not a missed stamp. Leave the
-   row, name the pair on the close card (`Attention: pre-existing: docs/X vs
-   docs/Y, owed to /sdlc:task <cid> --reconcile`) and route the reconcile in
-   `Next:`. The reconcile skills stamp freely because they review the whole
-   `--drift` delta; that is the difference (ledger IMP-099, aicf LSN-080: a
-   `ci_integration` fix landed in a TASKS.json that already owed a
+   it now forges that review, and leaving it is not a missed stamp. Hold it
+   (`--hold-upstream docs/Y`), name the pair on the close card (`Attention:
+   pre-existing: docs/X vs docs/Y, owed to /sdlc:task <cid> --reconcile`) and
+   route the reconcile in `Next:`. An artifact with no fresh reviewed pair is
+   not stamped at all. The reconcile skills stamp freely because they review
+   the whole `--drift` delta; that is the difference (ledger IMP-099, aicf
+   LSN-080: a `ci_integration` fix landed in a TASKS.json that already owed a
    TEST-STRATEGY reconcile — following the step would have forged it,
-   skipping it drew the "missed stamp" label). The re-slice of step 6 refreshes
+   skipping it drew the "missed stamp" label).
+
+   **Hold every recorded upstream this run did not review.** `--stamp`
+   re-hashes EVERY upstream the artifact already records, not only the ones
+   named: `--upstream` adds to that set, it never narrows it. A stamp for the
+   one pair this run reviewed would otherwise mark every other recorded
+   upstream reviewed too, a pre-existing pair's owed delta included, and
+   `--drift`, `--stale` and the statusboard would stop showing it (ledger
+   IMP-106). `--hold-upstream docs/<file>` keeps that entry byte-identical.
+   So: `--upstream` for each pair this run reviewed that was fresh before its
+   first write, `--hold-upstream` for every other entry in the artifact's
+   `metadata.upstream_provenance`.
+
+   **Read what the stamp printed.** For each upstream it re-hashed that had
+   moved since the last stamp, `--stamp` prints `re-stamped <upstream>: <what
+   moved> since the last stamp - reviewed by this run?`. For an upstream this
+   run reviewed, that is expected. For any other, a hold is missing: restore
+   the artifact's old record of that upstream from git (`git diff
+   docs/<artifact>` shows the old lines), confirm `--drift docs/<artifact>`
+   names that upstream again, and stamp again with the hold. The printout
+   catches a missing hold after the fact; the holds are what prevent the
+   forgery.
+
+   The re-slice of step 6 refreshes
    a shard's stamp the same way, so for such a pair it takes `--hold-stamp
    docs/<upstream>`: the embed moves (a mechanical copy is not a review), the
    stamp stays, the owed reconcile still sees the whole delta.
@@ -218,18 +252,29 @@ exercises, so the strategy is missing one TST:
    contract's `raises` line — then `bump_artifact.py`.
 2. Author the realizing `kind: test` task in `TASKS__<cid>.json`: next `TSK`
    id, `implements_tests: [TST-NNN]`, `test_spec` copied from the TST
-   (tier / directives / acceptance / covers), `depends_on` the subject's impl
+   (tier / targets_work_units / directives / acceptance / covers), `depends_on` the subject's impl
    task and the container's `test_infrastructure` task when one exists
    (checks 27/28), `target_files` under the container's test root, one
    acceptance line; then `bump_artifact.py --patch` the shard. A TASKS file
    always takes a patch bump: its minor version gates checks (check 18 from
    1.4), and a minor bump would switch them on for tasks this edit never
    touched — turning a consumable graph red.
-3. Refresh the index; verify (below): `reslice_embeds.py --docs-dir docs
+3. **Stamp what you authored into, upstream-first**, under the surgical
+   checklist's step 5 rules above — here `docs_index.py --stamp docs/TASKS__<cid>.json --upstream
+   docs/TEST-STRATEGY__<cid>.yaml --hold-upstream docs/<every-other-recorded-upstream>`,
+   the source stamped before the shard that copies it. This mode may claim the
+   pair because it WROTE the whole delta between the recorded upstream and the
+   current one, which is exactly what a stamp asserts; every other recorded
+   upstream still takes `--hold-upstream`, a pair the Phase 2 snapshot already
+   listed is still held and named on the close card, and the `re-stamped …`
+   printout is read exactly as that step 5 says. Skip it and the shard you just
+   authored into is left behind its own upstream, reported as `re-stamp only`
+   and routed to the `/sdlc:task <cid> --reconcile` this mode exists to avoid.
+4. Refresh the index; verify (below): `reslice_embeds.py --docs-dir docs
    --container <cid> --all --check`, both validators, `doctor.py --quick` —
    bare, exit codes captured. `topo_order.py --scope <cid>` now lists the
    new task as pending; the ledger is not touched.
-4. Close `resolved`, `mode: additive`, `artifacts_touched` both files, a
+5. Close `resolved`, `mode: additive`, `artifacts_touched` both files, a
    `source` hop for the strategy and a `downstream` hop for the task shard,
    `downstream_rerun: []`.
 
@@ -252,8 +297,11 @@ and stops, because those skills are interviews and the user owns them.
   interview, the exact item delta, one confirmation card per class of
   change). Name the container on arch/test/task: `downstream_rerun` is matched
   to files by its commands, and a bare sharded `--reconcile` maps to the
-  system file only. The full interview form comes second, as the fallback
-  when a reconcile stops at a structural question.
+  system file only. When the owed file IS the system one, write
+  `/sdlc:task --system --reconcile` rather than the bare form — that is the
+  spelling the skill defines for a single named file, and the bare form means
+  "walk every stale file" (ledger IMP-145). The full interview form comes
+  second, as the fallback when a reconcile stops at a structural question.
 - **Write `resolution.handoff`** — the walk's conclusion per downstream item,
   for a session that never saw the walk:
 
@@ -262,6 +310,10 @@ and stops, because those skills are interviews and the user owns them.
     - artifact: docs/TEST-STRATEGY__demo-api.yaml   # a file an owed command rewrites
       key: demo-api/api/archive-task                # the item as --drift prints it; null = whole file
       note: "now raises NotFound for an unknown id; that branch needs a unit TST covering FR-014"
+      basis: measured                               # REQUIRED per note: measured = read
+                                                    #   off the artifacts it names;
+                                                    #   inferred = the reconcile verifies
+                                                    #   it there before it writes
   ```
 
   Each reconcile reads its notes with `findings.py list --owed-by docs/<file>`
@@ -283,7 +335,9 @@ and stops, because those skills are interviews and the user owns them.
   re-invocations have something correct to reconcile against.
 - **Always** record the sequence in the finding's
   `resolution.downstream_rerun` (the queue validator refuses a `re-invoke`
-  without one), together with the `artifacts_touched` so far, and leave the
+  without one from `findings_file_version: "2"`, and warns below it — so
+  compute the sequence before the write and never park an empty one),
+  together with the `artifacts_touched` so far, and leave the
   finding `triaged` — not `resolved` — until the user reports the
   re-invocations done or `doctor.py --provenance` prints its
   `can be marked resolved` hint for it. A finding marked resolved while its
@@ -316,7 +370,9 @@ python .claude/sdlc/docs_index.py                 # regenerate the index - the P
                                                   # absent -> skip and say so, never the plugin's copy (SKILL.md Phase 5)
 python .claude/sdlc/docs_index.py --check         # dangling-reference gate
 python .claude/sdlc/docs_index.py --stale         # must list nothing this run reconciled - a row here is a missed stamp (step 5),
-                                                  # unless the Phase 2 snapshot already held it: a pre-existing pair, owed to
+                                                  # the `re-stamp only` rows included (nothing the shard cites changed, so the
+                                                  # review is cheap - but the stamp is still owed), unless the Phase 2 snapshot
+                                                  # already held it: a pre-existing pair, owed to
                                                   # its own --reconcile - named on the close card, never stamped
 ```
 

@@ -122,8 +122,12 @@ themes:
     required: false
     description: >
       Outbound third-party APIs the product calls (Stripe, Twilio,
-      GitHub, etc.) with auth, rate limits, retry policy. Pre-filled
-      from PRD.functional_requirements.integrations_required.
+      GitHub, etc.), each traced to the PRD integration it realizes via
+      integration_ref: INT-NNN (from PRD.functional_requirements.
+      integrations_required — never minted here; extend the PRD list if
+      a provider isn't there yet), plus auth, rate limits, retry policy.
+      Asked even at api_kind: none — a CLI/library with no inbound API
+      can still call outbound providers.
 
   - id: sdk_and_clients
     title: "SDKs & Clients"
@@ -726,8 +730,8 @@ questions:
   - theme: external_dependencies
     id: dependencies
     schema_path: external_dependencies
-    question: "Outbound third-party APIs this product calls? (Each: name, auth, rate limit, retry policy, docs URL.)"
-    hint: "Pre-filled from PRD.functional_requirements.integrations_required."
+    question: "Outbound third-party APIs this product calls? (Each: name, integration_ref, auth, rate limit, retry policy, docs URL.)"
+    hint: "Pre-filled from PRD.functional_requirements.integrations_required. Each entry needs integration_ref: INT-NNN naming the PRD integration it realizes - never invent one here; add the provider to that PRD list if it isn't there yet. From api_version 2.0 an entry with no integration_ref, or one that doesn't resolve, blocks status: complete (warns below 2.0). Asked even when api_kind is none."
     suggested_answers: []
     free_text_allowed: true
     required: false

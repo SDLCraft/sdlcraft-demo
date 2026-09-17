@@ -78,8 +78,12 @@ Most questions in `data-questions.yaml` are `med`.
 `indexes_and_queries.access_patterns`, `external_data_sources`):
 
 1. Agent drafts the full list from upstream context.
-2. Show the list, ask: "approve as-is, edit specific items, add more, or
-   remove some?"
+2. Fold the drafted list into the `AskUserQuestion` call itself — the
+   recommended option's `preview`, or the question text when `preview` is
+   unavailable (the channel rule: `../../prd/references/importance-flows.md`,
+   AUTHORING §18) — and ask: "approve as-is, edit specific items, add more,
+   or remove some?" Chat markdown printed the same turn is never
+   load-bearing.
 3. Per-item: one clarifying challenge round each (e.g. "I see `User.ssn`
    in pii_fields — is this actually a US Social Security Number? If not,
    it shouldn't be regulated_fields.").
@@ -121,7 +125,7 @@ list), iterate through the following states:
 ```
    ┌─────────────────────────────────────────────────────────────────────┐
    │                                                                     │
-   │   (a) PROPOSE       Show pre-drafted entity card                    │
+   │   (a) PROPOSE       Entity card rides in the call (§18, see below)  │
    │        │            (description + candidate fields drafted from    │
    │        │            UX forms, schema files, and PRD FR-NNN traces)   │
    │        ▼                                                            │
@@ -147,7 +151,7 @@ list), iterate through the following states:
    │        │            traces_ux_surfaces (SCR-NNN list), and          │
    │        │            traces_prd_workflows (WKF-NNN list, optional).  │
    │        ▼                                                            │
-   │   (g) FINAL APPROVAL Show the full entity card; user confirms or    │
+   │   (g) FINAL APPROVAL Entity card rides in the call; user confirms or│
    │        │             requests revisions (back to any earlier step). │
    │        ▼                                                            │
    │   (h) WRITE STATE    Persist this entity to state.partial_answers   │
@@ -159,6 +163,27 @@ list), iterate through the following states:
    │                                                                     │
    └─────────────────────────────────────────────────────────────────────┘
 ```
+
+### Steps (a) and (g) — the channel rule
+
+The entity card in both PROPOSE and FINAL APPROVAL rides INSIDE the
+`AskUserQuestion` call — the recommended option's `preview`, or the
+question text when `preview` is unavailable — never only as chat markdown
+printed in the same turn as the call (the channel rule:
+`../../prd/references/importance-flows.md`, AUTHORING §18). Worked example
+for step (g):
+
+```
+header: "Approve?"
+question: "Approve `Order` as drafted? (full card in the first option)"
+options:
+  - { label: "Approve — write to state",     description: "Confirm this entity and move to the next.", preview: "<the drafted entity card: description, fields, primary_key, traces>" }
+  - { label: "Iterate — type changes",       description: "Use the text field to describe what to change. The agent will re-draft and return to the relevant step." }
+```
+
+On approve: persist the entity (step h). On iterate: return to the named
+step with the user's revision context. Step (a)'s initial proposal follows
+the same shape with an "Accept as drafted" / "Revise" pair.
 
 ### Step (d) field attributes by paradigm
 

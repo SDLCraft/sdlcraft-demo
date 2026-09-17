@@ -1,7 +1,6 @@
 # Merging, validating, and closing out
 
-Detailed rules for Phase 7 (write & validate) and Phase 8 (CLAUDE.md
-pointer). Read this when entering Phase 7.
+Detailed rules for Phase 7 (write & validate) and Phase 8 (refresh & close). Read this when entering Phase 7.
 
 ## Merging into an existing PRD.yaml
 
@@ -35,6 +34,12 @@ Write `docs/PRD.yaml` with:
 - Inline YAML comments on each top-level key (use `PRD.schema.yaml` as a
   template).
 - Updated `metadata.last_updated` (ISO-8601 UTC) and `metadata.session_id`.
+- `metadata.prd_version`: stamp `"2.0"` (or higher) on new writes — the
+  version-gated blocking checks (the legacy-shape floor, the item-shape
+  floor — CLAUDE.md section 10) arm only at/after 2.0; an older stamp
+  silently degrades both to warnings instead of dead code nothing ever
+  reaches. The update flow on an existing artifact bumps the minor number
+  and never crosses a floor by itself.
 - `metadata.status`:
   - Set to `"complete"` only when **all required fields are filled** and
     the validator passes with `[OK]`.
@@ -53,13 +58,16 @@ Exit codes:
 | Code | Meaning | What the agent does |
 |---|---|---|
 | 0 (`[OK]`) | Complete and valid | ✓ Proceed to Phase 8. |
-| 0 (`[DRAFT]`) | Draft — structurally valid, possibly missing required fields | Inform user and proceed to Phase 8 (pointer still injected). |
-| 1 (`[FAIL]`) | Schema invalid, OR `status: complete` but required fields missing | Show field-level errors verbatim. If required fields are missing, offer via `AskUserQuestion`: fill them in now, or accept `status: draft`. Re-run validation after re-entry. |
+| 0 (`[DRAFT]`) | Draft — structurally valid, possibly missing required fields | Inform user and proceed to Phase 8. |
+| 1 (`[FAIL]`) | Schema invalid, OR `status: complete` but required fields missing | Fold the field-level errors into the `AskUserQuestion` call itself — the question text or each option's `description` (the channel rule, AUTHORING §18: content a question depends on rides inside the `AskUserQuestion` call) — and ask: fill them in now, or accept `status: draft`. The full report may also be printed, never instead. Re-run validation after re-entry. |
 | 2 | Cannot read/parse the file | Surface to user (missing file, bad YAML, permission error). Do not retry silently. |
 | 3 | Missing dependency | Validator prints `pip install` instructions. Do **not** auto-install — ask the user to install and re-run. |
 
 **Downstream-agent contract**: downstream agents MUST reject the PRD if
 `metadata.status != "complete"` OR if `validate_schema.py` exits non-zero.
+The one exception is to the exit code, never to the status: a failure every
+check of which `doctor.py --artifact docs/PRD.yaml` reports as accepted
+deviance does not reject (`sdlc/skills/repair/references/accepted-deviance.md`).
 
 
 ## CLAUDE.md is not this skill's to write (Phase 8)
@@ -92,7 +100,7 @@ Both are harmless no-ops when the project has not run `/sdlc:setup`.
 
 ## Closing the session
 
-After Phase 8's CLAUDE.md write succeeds:
+Once Phase 8's refresh has run:
 
 - Set `status: complete` in the state file.
 - Keep the state file as an audit trail — do **not** delete it.

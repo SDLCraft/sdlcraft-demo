@@ -1,7 +1,7 @@
 {
   "name": "sdlc",
   "description": "SDLCraft Demo: spec-driven development for Claude Code. Structured interviews turn an idea into requirements, UX, design, data, API and architecture specs that AI agents build from.",
-  "version": "0.9.13",
+  "version": "0.9.14",
   "skills": "./skills/",
   "agents": [],
   "author": {

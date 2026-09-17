@@ -227,13 +227,11 @@ filesystem read-only (offer to write to a different path),
 
 ## Resume with stale state
 
-If the state file's `skill_version` is older than the current skill's,
-migrate it **additively** before the resume prompt — bump the version, add
-the missing baseline keys with empty defaults, record a `migrations` entry,
-touch no answer or theme list — then offer resume at position 1. Canonical
-recipe: `prd/references/edge-cases.md` → "Resume with stale state" (CLAUDE.md
-State file contract). Only a state file NEWER than the skill gets "warn and
-offer a clean restart".
+SKILL.md's Phase 1 carries the inline trigger (all four states, plus the
+older-`skill_version` line). The canonical recipe — the additive migration,
+and the theme-list / `last_ids` reconciliation — lives in
+`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` → "Resume with stale
+state". Nothing to add here.
 
 ## Hallucination-guard violation
 

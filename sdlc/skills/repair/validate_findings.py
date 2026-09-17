@@ -21,15 +21,23 @@ Beyond field types it checks the invariants that keep the queue trustworthy:
     re-running the failing command is not evidence, it is a rumour.
   * Version-gated (CLAUDE.md section 10) — files stamped
     findings_file_version >= 2 get an ERROR, older files a WARNING, for:
-    located_stage: code (generated code is never a source), a re-invoke with
-    no downstream_rerun, an artifacts_touched entry outside docs/, a resolved
-    finding whose propagation hops are not all verified, a recurrence_of that
-    names no finding in this file.
+    located_stage: code on anything but a wontfix closure (generated code is
+    never the source of a spec defect; a wontfix may name it as a mis-raised
+    closure, with stale_tasks naming the task(s) code's own plan gate
+    schedules for regeneration), a re-invoke with no downstream_rerun, an
+    artifacts_touched entry outside docs/, a resolved finding whose
+    propagation hops are not all verified, a recurrence_of that names no
+    finding in this file. A wontfix with located_stage: code and no
+    stale_tasks is WARNED (never blocked): the closer named the cause but
+    forgot the task id code needs to schedule the rebuild.
   * Legacy stage spellings ('data-model' -> data, 'test-strategy' -> test)
     are read as their canonical form with a WARNING, never rejected.
   * resolution.handoff (the notes a re-invoke leaves for the reconcile runs it
     owes) is checked as WARNINGS only - its shape, a non-re-invoke mode, and
     a note addressed to a file the finding does not owe.
+  * A finding that pins `expected_count` with no detected_by is WARNED, never
+    rejected: doctor.py accepts a pinned count only from a finding that names
+    its check (references/accepted-deviance.md).
 
 Run from the project root:
 
@@ -126,6 +134,9 @@ FND_RE = re.compile(r"^FND-\d{3,}$")
 RAISED_BY_RE = re.compile(r"^(sdlc-[a-z0-9-]+|user)$")
 MAX_EVIDENCE = 5
 MAX_EVIDENCE_LEN = 300
+# An accepted deviance pins its count in the summary (doctor.py reads the same
+# pattern); it is applied only when detected_by names the check (ledger IMP-104).
+EXPECTED_COUNT_RE = re.compile(r"expected_count:\s*(\d+)")
 
 # The version at which the checks marked "v2" below turn from WARNING into
 # ERROR (CLAUDE.md section 10). Files written before that version keep
@@ -485,15 +496,37 @@ def cross_checks(doc: FindingsFile, version: int) -> Tuple[List[str], List[str]]
             if rel not in known:
                 warnings.append(f"{fid}: related {rel} is not in this file")
 
+        # ---- a pinned count needs its check named (warning only, IMP-104) ---
+        pinned = " ".join(str(x or "") for x in (f.summary, res.reason if res else None,
+                                                  res.summary if res else None))
+        if EXPECTED_COUNT_RE.search(pinned) and not (f.detected_by or "").strip():
+            warnings.append(
+                f"{fid}: summary pins expected_count but detected_by is empty - the health check "
+                f"accepts a pinned count only from a finding that names its check "
+                f"(e.g. detected_by: data/validate_schema)"
+            )
+
         if res is None:
             continue
 
         # ---- resolution content (gated) -------------------------------------
-        if res.located_stage is Stage.code:
+        # Allowed on a wontfix closure only: a mis-raised finding whose walk
+        # found every upstream contract already correct and generated code
+        # alone diverging. Every other status still refuses it - repair never
+        # patches code, so located_stage: code cannot be a fix's destination.
+        if res.located_stage is Stage.code and f.status is not Status.wontfix:
             gated.append(
                 f"{fid}: resolution.located_stage is 'code' - generated code is never the "
                 f"source of a spec defect; localize to the artifact it was built from, or "
                 f"close the finding wontfix as mis-raised{gate_note}"
+            )
+        if (res.located_stage is Stage.code and f.status is Status.wontfix
+                and not res.stale_tasks):
+            warnings.append(
+                f"{fid}: resolution.located_stage is 'code' on a wontfix with no stale_tasks - "
+                f"name the owning qualified task id(s) so code's own plan gate can schedule the "
+                f"rebuild (resolution.stale_tasks), or the mis-raised closure is invisible to "
+                f"/sdlc:code"
             )
         if res.mode is Mode.re_invoke and not res.downstream_rerun:
             gated.append(

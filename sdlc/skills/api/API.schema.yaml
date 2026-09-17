@@ -55,6 +55,13 @@
 #           `traces_prd_workflows`. Use when a resource is the API entry
 #           point for a workflow even though no single FR directly
 #           anchors it.
+#     INT — `PRD.functional_requirements.integrations_required` —
+#           referenced from `external_dependencies[].integration_ref`.
+#           NEVER minted here (CLAUDE.md section 4): a provider the PRD
+#           doesn't list yet is added to that PRD list, not invented on
+#           this side. From `api_version >= 2.0` a missing or dangling
+#           `integration_ref` blocks `status: complete`; below 2.0 it
+#           only warns.
 #
 #   Families this skill CONSUMES from `docs/UX.yaml` (verbatim):
 #     SCR — `UX.surface_inventory[].id` — referenced from
@@ -78,6 +85,10 @@
 #     * WKF-NNN format on every value in optional `traces_prd_workflows`.
 #     Values carrying the wrong prefix are warnings in `status: draft`,
 #     errors in `status: complete`.
+#     * INT-NNN existence on every `external_dependencies[].integration_ref`
+#       against `PRD.functional_requirements.integrations_required` — this
+#       check runs even at `api_kind: none` and is a hard error from
+#       `api_version >= 2.0` (warns below).
 #
 #   In monorepo mode, WRN and OPR counters reset per product
 #   (`state.last_ids_by_product[<slug>].<PREFIX>`). PRD/UX/DATA
@@ -88,7 +99,7 @@
 # metadata — always at top level, present in both single- and multi-product mode
 # -----------------------------------------------------------------------------
 metadata:
-  api_version: "1.1"                       # schema version this file conforms to
+  api_version: "2.0"                       # schema version this file conforms to (new writes stamp 2.0)
   last_updated: "2026-05-25T12:00:00Z"     # ISO-8601 UTC timestamp of last write
   generated_by: sdlc-api                   # always literal string "sdlc-api"
   session_id: "00000000-0000-0000-0000-000000000000"  # UUID of the interview session
@@ -100,23 +111,39 @@ metadata:
                                            #   3) feature coverage passes
                                            #      (every PRD FR-NNN is traced,
                                            #      deferred via the top-level
-                                           #      `deferrals` list, or —
-                                           #      DEPRECATED, one more version
-                                           #      — bare in non_api_features),
+                                           #      `deferrals` list, or — below
+                                           #      api_version 2.0 only — bare
+                                           #      in non_api_features; at/above
+                                           #      2.0 a bare entry no longer
+                                           #      covers anything),
                                            #   4) surface coverage passes
                                            #      (every UX surface with data
                                            #      I/O is traced by ≥1 endpoint
                                            #      via SCR-NNN, or deferred),
                                            #   5) entity-link check passes
                                            #      (every primary_entity exists
-                                           #      in DATA-MODEL).
-                                           # Coverage + entity-link checks are
-                                           # skipped when api_kind: none.
+                                           #      in DATA-MODEL),
+                                           #   6) every external_dependencies
+                                           #      entry names an
+                                           #      integration_ref: INT-NNN
+                                           #      that resolves in PRD.yaml
+                                           #      (from api_version >= 2.0;
+                                           #      warns below).
+                                           # Coverage + entity-link checks
+                                           # (3-5) are skipped when api_kind:
+                                           # none; check 6 is NOT — an
+                                           # integration-only CLI/library
+                                           # still needs typed provider
+                                           # contracts.
   applicability: null                      # OPTIONAL (added 0.8.0). "applicable" (default when
                                            # absent — every legacy artifact is applicable) or
                                            # "not_applicable": this stage RAN and concluded there
                                            # is nothing to model, so the artifact is deliberately
                                            # empty and every coverage gate over it is vacuous.
+                                           # Valid ONLY when api_kind: none AND
+                                           # external_dependencies is empty/null — a none-kind
+                                           # file that still calls an outbound provider found
+                                           # something to model and stamps "applicable" instead.
                                            # Distinct from PRD.pipeline_scope, which says the
                                            # stage need not run AT ALL (no artifact exists).
                                            # Downstream consumers treat not_applicable exactly
@@ -188,7 +215,10 @@ metadata:
 # the way a malformed `deferrals` entry defers nothing. A malformed STRING is
 # the blocking error it has always been. New writes emit the mapping at
 # <name>_version >= 2.0 (DATA-MODEL: >= 3.0); `.claude/sdlc/migrate_warnings.py`
-# converts an existing artifact.
+# converts an existing artifact - from any skill but repair, run it as
+# `--by sdlc-<skill> --no-bump` (or bare: it derives both from
+# $CLAUDE_SKILL_DIR), so the changelog credits the skill that ran and the run
+# bumps the version once.
 api_warnings: []                           # list[string] of "WRN-NNN: <msg>" items
 
 # =============================================================================
@@ -301,10 +331,23 @@ events:
 
 # -----------------------------------------------------------------------------
 # external_dependencies — outbound third-party APIs this product calls.
-# Pre-filled from PRD.functional_requirements.integrations_required.
+# Pre-filled from PRD.functional_requirements.integrations_required. Asked
+# even when api_kind: none (a CLI/library with no inbound API can still call
+# outbound providers) — see metadata.applicability above.
 # -----------------------------------------------------------------------------
 external_dependencies:          # list[ExternalDependency]; each:
                                 #   - name: string (e.g. "Stripe")
+                                #     integration_ref: "INT-NNN" — the PRD
+                                #       integration this entry realizes
+                                #       (PRD.functional_requirements.
+                                #       integrations_required). NEVER minted
+                                #       here (CLAUDE.md section 4): a
+                                #       provider the PRD doesn't list yet is
+                                #       added to that list, not invented on
+                                #       this side. From api_version >= 2.0 a
+                                #       missing or dangling integration_ref
+                                #       blocks status: complete; below 2.0 it
+                                #       only warns.
                                 #     auth: string (e.g. "API key in Authorization")
                                 #     rate_limit: string | null
                                 #     retry_policy: string | null
@@ -399,13 +442,15 @@ deferrals: null                 # list[{id, reason}], e.g.
 
 # -----------------------------------------------------------------------------
 # non_api_features — DEPRECATED fallback for the feature-coverage gate.
-# A bare FR-NNN here still passes the gate for ONE more version, but records
-# no reason, so the validator reports every id that relies on it. New writes
-# put the id in `deferrals` as {id, reason} instead.
+# A bare FR-NNN here passes the gate below api_version 2.0 only, and records
+# no reason, so the validator reports every id that relies on it; at/above
+# 2.0 a bare entry no longer covers anything and the FR blocks status:
+# complete unless it is also in `deferrals`. New writes put the id in
+# `deferrals` as {id, reason} instead.
 # -----------------------------------------------------------------------------
 non_api_features: null          # list[string] of FR-NNN IDs, e.g.
-                                #   - FR-007  # theme switcher — UI only
-                                #   - FR-012  # nightly cleanup job
+                                #   - FR-007  # theme switcher — UI only (pre-2.0 only)
+                                #   - FR-012  # nightly cleanup job (pre-2.0 only)
 
 # =============================================================================
 # MULTI-PRODUCT MODE (monorepo) — uncomment and use *instead of* the top-level

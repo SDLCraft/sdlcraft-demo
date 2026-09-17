@@ -71,7 +71,12 @@ findings:                                  # REQUIRED — list[Finding]; may be 
                                            #   "ux/phase-2", "user/--flag". The dedupe
                                            #   key is (detected_by, summary): the same
                                            #   check reporting the same text twice is
-                                           #   one finding, not two.
+                                           #   one finding, not two. An accepted
+                                           #   deviance (wontfix + `expected_count: N`)
+                                           #   is applied ONLY when this names the
+                                           #   check, e.g. data/validate_schema - a
+                                           #   skill name (sdlc-arch) or null is not
+                                           #   applied (references/accepted-deviance.md)
     session_id: <raiser's session id>      # OPTIONAL — read from the RAISER's state
                                            #   file by findings.py when present
 
@@ -186,9 +191,21 @@ findings:                                  # REQUIRED — list[Finding]; may be 
       #   by: sdlc-repair                  # who resolved it
       #   at: <ISO-8601 UTC>
       #   located_stage: arch              # where the defect ACTUALLY lived.
-      #                                    #   NEVER `code` (v2: error) — generated
-      #                                    #   code is an output; a walk that ends
-      #                                    #   there was mis-raised -> wontfix.
+      #                                    #   `code` is allowed ONLY on status
+      #                                    #   wontfix (v2: error on every other
+      #                                    #   status) — generated code is an
+      #                                    #   output, so a walk that ends there
+      #                                    #   on any other status is refused;
+      #                                    #   on wontfix it means the walk found
+      #                                    #   every upstream contract already
+      #                                    #   correct and the code alone
+      #                                    #   diverges (mis-raised), and
+      #                                    #   `stale_tasks` below must then name
+      #                                    #   the owning task(s) — a wontfix
+      #                                    #   with `located_stage: code` and no
+      #                                    #   `stale_tasks` only WARNS (never
+      #                                    #   blocks): the mis-raised closure is
+      #                                    #   invisible to /sdlc:code without it.
       #                                    #   `brief` when the walk ends OUTSIDE the
       #                                    #   pipeline, at an upstream brief written by
       #                                    #   no skill: the artifact that consumed it is
@@ -243,7 +260,14 @@ findings:                                  # REQUIRED — list[Finding]; may be 
       #                                    #   which (ledger IMP-082, aicf LSN-064).
       #   stale_tasks: ["aicf-cli/TSK-118"]    # tasks whose fingerprint changed —
       #                                    #   /sdlc:code offers these for regeneration
-      #                                    #   (from topo_order.py: stale + --affected)
+      #                                    #   (from topo_order.py: stale + --affected).
+      #                                    #   Also the channel for a `wontfix`
+      #                                    #   closed `located_stage: code`
+      #                                    #   (mis-raised, code-only divergence):
+      #                                    #   name the owning task(s) here so
+      #                                    #   code's plan gate schedules the
+      #                                    #   rebuild even though the finding
+      #                                    #   never reaches resolved/triaged.
       #   fields_changed:                  # OPTIONAL — dotted paths edited at the source
       #     - components[0].work_units[3].output
       #   symbols_changed:                 # OPTIONAL — qualified symbols whose content

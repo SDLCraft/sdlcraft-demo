@@ -85,6 +85,17 @@ After writing, refresh the generated files (Phase 8):
 `python .claude/sdlc/docs_index.py` and `python .claude/sdlc/statusboard.py`.
 Neither mode writes `CLAUDE.md` — see "CLAUDE.md is not this skill's to write".
 
+## Version stamp (new writes)
+
+`metadata.arch_version` (system file) and `metadata.arch_container_version`
+(container files) each stamp `"2.0"` (or higher) on a new write — the
+version-gated blocking checks (cross-checks #21-#24, the reason-less
+`non_container_features` escape — CLAUDE.md section 10, ledger IMP-129) arm
+only at/above 2.0; an older stamp silently degrades every one of them to a
+warning instead of dead code nothing ever reaches. The update flow on an
+existing artifact bumps the version's minor number and never crosses a
+floor by itself.
+
 ## Validation (Phase 7)
 
 Run:
@@ -118,12 +129,15 @@ This validates:
      `persistence`.
    - **PRD feature coverage** — every PRD `features` FR-NNN
      appears in some container's `implements_requirements`, OR in the
-     top-level `deferrals` list with a reason, OR (legacy, honoured one
-     more schema version, reported per id) in
-     `ARCH.yaml.non_container_features`. Skipped when `docs/PRD.yaml` is
+     top-level `deferrals` list with a reason, OR — **below
+     `arch_version` 2.0 only** — in the reason-less legacy
+     `ARCH.yaml.non_container_features` list (IMP-129: at/above the floor
+     that bare escape no longer counts as coverage and blocks like any
+     other uncovered FR; below it, it still warns `[deferral hygiene]`,
+     "honoured one more schema version"). Skipped when `docs/PRD.yaml` is
      absent. This catches operational features (scheduler/worker work
      with no API resource) that would otherwise be untraceable.
-   - **PRD integration coverage** — every PRD
+   - **PRD integration coverage (cross-check #31)** — every PRD
      `integrations_required` INT-NNN appears in some container's
      `realizes_integrations`, some component's `int_refs`, or
      `deferrals`. Blocks at `arch_version >= 2.0`, warns below
@@ -274,15 +288,33 @@ This validates:
     check (a DATA entity no component reads or writes, reported once every
     buildable container is drilled); and provenance staleness (a recorded
     `upstream_provenance` hash that no longer matches the upstream — "built
-    against an older docs/X").
+    against an older docs/X"). **#32** — a work_unit nothing reaches: an
+    internal/external edge's `via_unit`, an `entrypoint`-kind unit, a
+    framework-invoked component archetype, a non-callable kind (module /
+    content / tooling), a sibling unit's contract text naming it, or a
+    top-level `deferrals` entry all count as reached — as does (IMP-126) a
+    via_unit-less `calls` edge into a component with exactly one callable
+    unit (unambiguous); into a component with two or more it collapses to
+    ONE grouped advisory naming the component, never one row per unit. A
+    via_unit-less `depends_on` edge never counts as reached (it proves an
+    import, not an invocation — the same rule Gap-1's own `imported` set
+    already applies).
 
 18. **Version gating (CLAUDE.md §10).** Checks **#21–#24** and the
     component-containment gate ERROR at schema version >= 2.0
     (`arch_version` for #24's system half, `arch_container_version` per
-    container file) and WARN below it; the INT coverage gate errors at
-    `arch_version >= 2.0`. An artifact stamped complete by an older skill
-    version never flips red on upgrade — the findings print under WARNINGS
-    with a note naming the floor.
+    container file) and WARN below it; the INT coverage gate (#31) errors at
+    `arch_version >= 2.0`; the reason-less `non_container_features` escape
+    (IMP-129) errors at the same floor instead of warning. An artifact
+    stamped complete by an older skill version never flips red on upgrade —
+    the findings print under WARNINGS with a note naming the floor.
+
+**Numbering.** Two disjoint sequences share this file: `#1`-`#15` above are
+this document's own system-mode list (never printed with a bracket tag by
+the validator); `#21`-`#32` are the container/suite checks the validator
+prints verbatim as `[cross-check N]` — this section is their one canonical
+table. `SKILL.md`, `ARCH.schema.yaml` and `ARCH__CONTAINER.schema.yaml`
+point here rather than keep their own copy.
 
 ### Exit-code recovery
 
@@ -368,7 +400,10 @@ Document this so test/task/deploy can enforce it:
 
 > **Downstream skills MUST reject `docs/ARCH.yaml` if
 > `metadata.status != "complete"` OR if `validate_schema.py` exits
-> non-zero.**
+> non-zero.** The one exception is to the exit code, never to the status: a
+> failure every check of which `doctor.py --artifact docs/ARCH.yaml` reports as
+> accepted deviance does not reject
+> (`sdlc/skills/repair/references/accepted-deviance.md`).
 
 The same applies to each `docs/ARCH__<container>.yaml`. A draft container
 file means that container has not been confirmed and is not safe to

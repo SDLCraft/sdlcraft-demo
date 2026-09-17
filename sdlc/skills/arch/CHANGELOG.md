@@ -7,6 +7,30 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.21 (2026-09-17) — The write-time stamp is written down, the shared provenance helper declares the version fields it gates, and Phase 1 is the shared four-state trigger
+
+Ledger IMP-178. merge-validate.md gains the one-sentence stamp rule (new writes stamp `arch_version` "2.0" — the schema already did, the reference never said so), and `check_provenance_staleness`'s def line carries `# version-floor-fields: arch_version, arch_container_version`, the declared mapping `lint_version_floors.py` reads for a helper whose bare `version` parameter serves both the system file and every container — declared, never guessed; a floor with neither a traceable field nor an annotation stays red in that lint.
+
+Ledger IMP-112 / IMP-173 / IMP-174 / IMP-016: Phase 1 had no stale-state trigger at all; it is now the five-line shape every interview skill shares — `in_progress`; artifact present → scope the update per ux's upstream-reconciliation.md REFINE row, then merge; artifact ABSENT → restart-from-partial_answers or discard, never resume; no state file; an older `skill_version` → prd's edge-cases.md recipe, which reconciles the theme lists and the `last_ids` counters (`ARCH__*` shards included) before offering resume. Pinned by prd's `_smoke/resume_recipe_lockstep_selftest.py`.
+
+## 1.20 (2026-09-17) — One cross-check table instead of four, reachability that agrees with Gap-1, an honest #25 remedy, and the reason-less non_container_features escape closed at the 2.0 floor
+
+Ledger IMP-013: `references/merge-validate.md` is the one canonical cross-check table (it is what Phase 7 loads); SKILL.md and both schemas point at it instead of restating it, the validator docstring is a pointer too, #30's output gained its `[cross-check 30]` tag, #31/#32 are in the table, the two sequences (#1-#15 system, #21-#32 container/suite) are named, ARCH__CONTAINER.schema.yaml no longer calls #21's no-waiver path non-blocking, and SKILL.md's stale "the 4 cross-checks" is gone. Pinned by `_smoke/crosscheck_table_selftest.py` (the validator's tag set against the canonical section; red at 1.19 on eight counts). The red team dropped the planned generic root lint: only arch prints `[cross-check N]`. Observability siblings: wontfix, deploy's.
+
+Ledger IMP-126: `check_unreachable_work_units` (#32) counts a via_unit-less `calls` edge into a single-callable-unit component as reached (never a `depends_on` edge, which proves an import) and collapses a multi-unit ambiguity into one grouped "pin via_unit" advisory; Gap-1 no longer says "nothing owns startup" when the container already has an entrypoint elsewhere; the deferral probe accepts `<cid>/<component>/<unit>`; the remedy stops telling a framework-invoked unit to become `kind: entrypoint`. Pinned by three new `seam_and_path_selftest.py` arms over fixtures 41-43.
+
+Ledger IMP-128: the #25 remedy (validator string, SKILL.md, component-discovery.md) no longer tells container mode to write `output_locations` or claims an interview question asks for it; system mode's update/`--reconcile` flow gains one conditional ask, only when #25 rows are non-empty. Pinned by two `seam_and_path_selftest.py` assertions.
+
+Ledger IMP-129 (arch half; api's is in api 1.13): `feature_legacy_fallback` is gated by the existing `GATE_FLOOR` — at/above `arch_version` 2.0 a bare `non_container_features` entry no longer counts as coverage and blocks like any uncovered FR; below it warns as before; `evals/grade.py` counts `deferrals[].id` as coverage. Regression: `_smoke/44_legacy_fallback_floor/` (exit 1) / `45_…_below/` (exit 0), built from the passing fixture 16. The task-side reader of the list is IMP-176.
+
+## 1.19 (2026-09-16) — The validator's NEXT names the stale file's own reconcile form instead of `/sdlc:test`
+
+Ledger IMP-127 (aicf LSN-028's other half). IMP-049 gave the auto-advance RESOLVER a provenance arm at 1.14 and left the validator printing `NEXT: /sdlc:test` underneath its own "run /sdlc:arch to review the delta" warning - the same loop, in the output the user reads. NEXT now names `--system --reconcile` or `<container> --reconcile` for whichever file is stale, and the warning tail names the reconcile form too. Regression: `_smoke/provenance_selftest.py` on fixture `31_provenance_stale`.
+
+## 1.18 (2026-09-15) — `DeferralIndex` reads typed `kind: deferral` warnings' `defers` like every sibling; the accepted-deviance clause points at `repair/references/accepted-deviance.md` and edge-cases.md no longer orders an unconditional stop
+
+Ledger IMP-104, IMP-108, IMP-109 (2026-09-15 retro). A typed deferral of an uncovered INT used to turn ARCH.yaml red while six sibling validators accepted it; `_smoke/40_typed_int_deferral` pins exit 0. A malformed-id typed deferral warns. `docs_index.py` calls run the copy `helper-resolution.md` picks.
+
 ## 1.17 (2026-09-15) — Phase 7 stamps every file read through `docs_index.py --stamp`, owned UX__/API__ shards included, and the validator warns on an owned shard the stamp omits
 
 Ledger IMP-102 (aicf LSN-083): Phase 7 enumerated four canonical files for a hand-written

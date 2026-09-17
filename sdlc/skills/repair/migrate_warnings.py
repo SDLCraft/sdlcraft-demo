@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -78,6 +79,20 @@ GLOSSARY_PATH = ".claude/rules/sdlc-output-glossary.md"
 # Credited in the changelog line when no caller says otherwise. `repair`
 # is the usual runner, not the only permitted one - see bump().
 DEFAULT_BY = "sdlc-repair"
+
+
+def derive_by():
+    """The skill that is actually running this, from $CLAUDE_SKILL_DIR.
+
+    Nine schema pointers send an artifact skill here by the bare command, and
+    the bare command used to credit `sdlc-repair` for a run repair never made
+    and then bump a version the caller was about to bump again (ledger
+    IMP-030's residual, IMP-124). Deriving the caller makes the bare command
+    correct; --by still overrides it.
+    """
+    skill_dir = os.environ.get("CLAUDE_SKILL_DIR")
+    name = Path(skill_dir).name if skill_dir else ""
+    return f"sdlc-{name}" if name and name != "repair" else DEFAULT_BY
 
 _FIELD_RE = re.compile(r"^([a-z_]+_warnings):\s*(.*)$")
 _RESOLVED_RE = re.compile(r"^RESOLVED\s+(\d{4}-\d{2}-\d{2})\b")
@@ -228,10 +243,15 @@ def main():
                     help="skip the version + changelog bump - pass this when "
                          "the calling skill writes its own changelog line for "
                          "the same run, so the run bumps the version once")
-    ap.add_argument("--by", default=DEFAULT_BY,
+    ap.add_argument("--by", default=None,
                     help="the skill running this conversion, credited in the "
-                         "changelog line (default: %s)" % DEFAULT_BY)
+                         "changelog line (default: derived from $CLAUDE_SKILL_DIR, "
+                         "else %s)" % DEFAULT_BY)
     args = ap.parse_args()
+    by = args.by or derive_by()
+    # A caller that is not repair writes its own changelog line for the same
+    # run, so bumping here would bump the version twice.
+    no_bump = args.no_bump or (args.by is None and by != DEFAULT_BY)
 
     if not args.path and not args.all:
         ap.error("give --path <file> or --all")
@@ -270,9 +290,14 @@ def main():
         print("[OK] nothing to migrate - every warning is already typed.")
         return 1 if left_alone else 0
 
-    if not args.dry_run and not args.no_bump:
+    if args.by is None and by != DEFAULT_BY:
+        print("  note: crediting %s (the skill this is running inside) and leaving the "
+              "version bump to its own write - pass --by/--no-bump to decide both "
+              "yourself." % by)
+        print("")
+    if not args.dry_run and not no_bump:
         for path, n in files_changed:
-            bump(path, n, args.by)
+            bump(path, n, by)
 
     verb = "would be" if args.dry_run else "were"
     print("[OK] %d warning(s) in %d file(s) %s typed as {kind, status, impact}."

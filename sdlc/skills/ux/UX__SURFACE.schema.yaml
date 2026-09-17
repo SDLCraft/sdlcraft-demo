@@ -93,6 +93,22 @@ exit_conditions: null           # list[string] — what causes the user to leave
                                 # (and where they end up). e.g.
                                 #   ["clicked Save -> dashboard",
                                 #    "pressed Esc -> previous surface"]
+                                # On a cli_command surface, at
+                                # ux_surface_version >= 3.0 (matching the
+                                # parent UX.yaml's ux_version — see
+                                # references/merge-validate.md) each entry is
+                                # TYPED instead of prose: {code: int, when:
+                                # str}. `code` must be a key of
+                                # UX.yaml.cli.exit_codes — the validator
+                                # checks it exists there, so the code's
+                                # meaning is recorded once, never
+                                # re-described per surface. A plain-string
+                                # entry is accepted with a warning below the
+                                # floor, rejected at or above it. Example:
+                                #   exit_conditions:
+                                #     - {code: 0, when: "success"}
+                                #     - {code: 1, when: "generic error"}
+                                #     - {code: 2, when: "misuse (missing title)"}
 
 # -----------------------------------------------------------------------------
 # layout — region tree for graphical surfaces; arg structure for CLI.

@@ -7,6 +7,22 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.12 (2026-09-17) — New writes stamp the version the validator's floors need, the false "arch reads DESIGN" claim is gone, and Phase 1 is the shared four-state trigger
+
+Ledger IMP-019: DESIGN.schema.yaml's example stamped `design_version: "1.0"` against this validator's 2.0 prose-deferral floor and no reference said what a new write stamps, so a freshly authored artifact's "works for one more version" fallback never expired. The example is now "2.0" and merge-validate.md carries a "Version stamp (new writes)" section (data's shape). Pinned by `_smoke/14_prose_deferral_retired/` (exit 1 at 2.0; fixture 08 stays the below-floor twin) and a `deferral_selftest.py` block; `lint_version_floors.py` holds it from here on.
+
+Ledger IMP-010: SKILL.md and merge-validate.md claimed arch consumes DESIGN.yaml — arch has no DESIGN reference; the two words are gone. DESIGN__TOKENS.schema.yaml keeps naming the multi-mode token ambiguity; a `mode_encoding` field is declined until a project reads it (zero consumers). The task-side arms (the design_spec.tokens drift arm, crosscheck X8, the asset-source filter) are in task 1.29.
+
+Ledger IMP-112 / IMP-173 / IMP-174 / IMP-016: Phase 1 is the five-line trigger every interview skill shares — `in_progress`; artifact present → scope the update per ux's upstream-reconciliation.md REFINE row, then merge; artifact ABSENT → restart-from-partial_answers or discard, never resume; no state file; an older `skill_version` → prd's edge-cases.md recipe, which reconciles the theme lists and the `last_ids` counters (`DESIGN__*` shards included) before offering resume. edge-cases.md's stale-state restatement is a pointer to that recipe. Pinned by prd's `_smoke/resume_recipe_lockstep_selftest.py`.
+
+## 1.11 (2026-09-16) — A stale upstream routes NEXT to `/sdlc:design --reconcile`, and the Phase 8 pointer-write prose is gone
+
+Ledger IMP-127 and IMP-111 - the same two defects as ux, in this skill's validator and `merge-validate.md`. Regression: `_smoke/deferral_selftest.py` (fixture 11).
+
+## 1.10 (2026-09-15) — Phase 2's UX and PRD validator stops honour accepted deviance (`doctor.py --artifact`); a typed deferral with a malformed WRN id warns; `docs_index.py` calls run the copy `helper-resolution.md` picks
+
+Ledger IMP-104, IMP-108, IMP-109 (2026-09-15 retro).
+
 ## 1.9 (2026-09-15) — Phase 7 stamps provenance through `docs_index.py --stamp` over every file read, `UX__<surface>.yaml` shards included, instead of a hand-written sha-only snapshot for PRD and UX
 
 Ledger IMP-102 (aicf LSN-083, the arch lesson's sibling sweep): the write bullet asked for a

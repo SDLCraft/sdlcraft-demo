@@ -330,9 +330,12 @@ components:                                # REQUIRED — non-empty
                                            #   behaviour the responsibilities /
                                            #   acceptance_criteria imply (services/use_cases).
                                            #   Addressed as (component, name) — there is NO
-                                           #   id family. The validator emits a non-blocking
-                                           #   WARNING for a non-trivial component that
-                                           #   declares none (cross-check 21).
+                                           #   id family. A NON-TRIVIAL component (non-plumbing
+                                           #   archetype carrying implements_requirements or a
+                                           #   traced contract) that declares none of these
+                                           #   BLOCKS `complete` (cross-check 21) unless it
+                                           #   records a non-empty work_units_waiver — see
+                                           #   references/merge-validate.md's canonical table.
       - name: create_task                  # REQUIRED — the callable's name (method /
                                            #   function / Class.method), e.g. "createTask" or
                                            #   "TasksController.createTask". UNIQUE within
@@ -560,192 +563,13 @@ arch_warnings:                             # OPTIONAL — list of "WRN-NNN: ..."
   - "WRN-001: TODO: address theme observability"
 
 # =============================================================================
-# Required cross-checks (run by validate_schema.py on every write)
+# Cross-check table — see references/merge-validate.md
 # =============================================================================
-# In addition to the checks in ARCH.schema.yaml:
-#
-# 10. owns_api_resources match — every resource_id in `api_surface` must
-#     appear in the parent ARCH.yaml.containers[id].owns_api_resources.
-# 11. owns_ux_surfaces match — every surface_id in `ux_surface` must
-#     appear in the parent ARCH.yaml.containers[id].owns_ux_surfaces.
-# 12. persistence match — every store_id in `persistence_bindings` must
-#     appear in the parent ARCH.yaml.containers[id].persistence.
-# 13. external_edges resolve — every external_edges[].to that references
-#     "<container_id>" or "<container_id>/<component_id>" must resolve
-#     against the on-disk ARCH.yaml / ARCH__<container>.yaml graph.
-# 14. Component trace integrity — for every component:
-#       * traces_api_resources   ⊆ resource_ids in docs/API__*.yaml
-#       * traces_api_operations  ⊆ operation_ids in docs/API__*.yaml endpoints
-#       * traces_ux_surfaces     ⊆ surface_ids in docs/UX__*.yaml
-#       * traces_data_entities   ⊆ entity names in docs/DATA-MODEL.yaml.entities
-#         (entities only — NOT enums_and_lookups.enums value types)
-#     Plus parent containment:
-#       * traces_api_resources   ⊆ parent container's owns_api_resources
-#       * traces_ux_surfaces     ⊆ parent container's owns_ux_surfaces
-#     Cross-check failures force `metadata.status: draft`.
-# 15. Edge via_* resolution — for every edge with a via_* field set:
-#       * via_resource_id  → must resolve to a resource_id in API__*.yaml
-#       * via_operation_id → (external_edges) must resolve to an API operation_id in
-#                            API__*.yaml endpoints — an external call to another
-#                            container's API surface.
-#       * via_unit         → (internal_edges) must resolve to a work_units[].name on the
-#                            edge's `to` component — so an INTERNAL (non-API) call names
-#                            the callee's method.
-#       * via_unit         → (external_edges) must resolve to a work_units[].name on the
-#                            "<container_id>/<component_id>" target component (requires
-#                            that `to` form; skipped when the target container is not
-#                            drilled yet) — a cross-container call into a sibling with
-#                            no API between them names the callee's callable too.
-#       * via_channel_id   → must resolve to API.events.channels[].channel_id
-#       * via_entity       → must resolve to a DATA-MODEL entity name
-# 16. Deployment shape compatibility — `deployment.shape` must be
-#     compatible with the parent container's `deployment_unit` per the map
-#     in the `deployment:` block above.
-# 17. External container has no ARCH__*.yaml — if the parent container
-#     has `external: true`, this file should not exist; if it does, the
-#     validator emits a warning (not a fail).
-# 18. Component PRD-trace integrity — for every component:
-#       * implements_requirements  → FR-NNN/NFR-NNN format + exists in PRD.yaml
-#         (FR resolves against functional_requirements, NFR against
-#         non_functional_requirements) AND ⊆ the parent container's
-#         implements_requirements.
-#       * traces_prd_workflows     → WKF-NNN format + exists in PRD.yaml.
-# 19. WRN-NNN format — every arch_warnings entry matches `^WRN-\d{3,}:\s+.+`.
-# 20. code_location coverage (warning - does not block) — a non-trivial component
-#     (archetype not in {config_loader, serializer, observability_bootstrap,
-#     error_handler} and carrying at least one trace) with an empty/absent
-#     code_location emits a WARNING: downstream `task`/codegen will have to
-#     infer its file placement. Does NOT block status: complete (placement can
-#     legitimately be deferred), but filling it is what makes "mostly
-#     autonomous" downstream codegen actually hold. Also (Gap-6, any archetype):
-#     a code_location entry containing an unresolved template placeholder
-#     (`.../<stack>/...`) emits a WARNING — bind the concrete MVP-variant path
-#     and model other variants as their own components/work_units (or defer via
-#     WRN); a templated path forces codegen to re-derive the binding.
-# 21. Component work_units — for every work_units[] entry on every component:
-#       * name is non-empty and UNIQUE within its owning component (work_units are
-#         addressed as (component, name) — there is NO id family). It is the stable
-#         handle the downstream `task` skill references as a Task.target_symbol.
-#       * summary is non-empty (required per work_unit).
-#       * traces_api_operation       → resolves to an operation_id in API__*.yaml.
-#       * implements_requirements     → FR-NNN/NFR-NNN format + exists in PRD.yaml
-#         AND ⊆ the OWNING component's implements_requirements.
-#       * touches_entities            → ⊆ the owning component's traces_data_entities
-#         (and a DATA-MODEL entity name). The subset law is maintained by
-#         DERIVATION, not by hand: at write time the component's
-#         traces_data_entities is completed to the union of its units'
-#         touches_entities (curated entries may EXCEED the union, never lag
-#         it — Phase 7 derive rule). A warning when the component's key is
-#         missing/empty while its units touch entities (the subset check has
-#         no base to fire against there).
-#     Cross-check failures force `metadata.status: draft`. The work_units LIST is
-#     still OPTIONAL for a trivial/plumbing component, BUT a NON-TRIVIAL component
-#     (same set as #20: non-plumbing archetype carrying implements_requirements or
-#     a traced contract) that declares NO work_units now BLOCKS `complete` —
-#     unless it records a non-empty `work_units_waiver`. This is the blocking
-#     upgrade: without it a container could be "complete" while downstream `task`
-#     silently seeds no implementation task for a third of its components. The
-#     count is taken from a real YAML PARSE (block- and flow-style entries both
-#     count) — never a line-grep, which would miss flow-style units.
-#     Also (Gap-1, warning): in an EXECUTABLE-deliverable container (archetype
-#     cli / other), a SINGLE-FILE component (one file-shaped code_location entry)
-#     with >1 work_units, NO `entrypoint`-kind unit, and no API-routed units
-#     emits a WARNING — its top-level control flow is unowned. Add one
-#     `entrypoint` unit owning arg/mode dispatch + step-sequencing + setup so
-#     downstream `task`/`code` build the composition root. A framework-routed
-#     service/controller is excluded (its web framework owns dispatch).
-# 22. Component FR → work_unit coverage — for every component that declares at
-#     least one work_unit: every FR-NNN in the component's implements_requirements
-#     must appear in at least one of that component's work_units[].implements_
-#     requirements. Containment (#21) only checks the reverse (unit FRs ⊆ component
-#     FRs), so without #22 a component could claim an FR at the seam yet realize it
-#     in NO callable — leaving `task` with no atomic task that builds the feature.
-#     Failures BLOCK `complete`; waivable per component via `work_units_waiver`
-#     (e.g. an FR realized purely by wiring). NFR-NNN are out of scope (frequently
-#     cross-cutting). The validator also prints a per-container warning roll-up of
-#     the FRs unreachable through ANY work_unit.
-# 23. Work_unit DEFER-OR-DECLARE contract — a work_unit with NO
-#     traces_api_operation (no schema-bearing traced contract) must declare ALL
-#     THREE of inputs / output / raises (explicit empties count: `inputs: []`,
-#     `raises: []`, `output: "None"`). A unit WITH traces_api_operation may
-#     defer to the API schema. A unit with a NON-CALLABLE kind (module /
-#     content / tooling) is EXEMPT — its deliverable is a file, not a callable,
-#     so the interface-contract fields don't apply. FAMILY (OPT-IN, any
-#     project with uniform unit families): if the container declares
-#     `work_unit_family_contracts`, a unit belonging to a family INHERITS that
-#     family's shared contract and may omit its own inputs/output/raises. A
-#     container without the block keeps the strict per-unit DECLARE
-#     requirement. Blocks `complete`; the component's work_units_waiver
-#     downgrades its units' gaps to warnings.
-#     This is the lint that catches an emitter which fills only the trace
-#     fields (implements_requirements/touches_entities/…) and leaves every
-#     contract field empty — downstream atomic tasks then re-guess each
-#     signature. `kind` itself is vocabulary-checked in #21. Also (Gap-2,
-#     warning): a DECLARE-dialect unit with output "None" AND no inputs AND no
-#     raises has nothing to emit — it usually captures a policy enforced
-#     EXTERNALLY; #23 WARNS to move it to a security_concern/acceptance_criterion
-#     + a test rather than a phantom codegen task.
-#     Also (SK-21, warning, per component): explicit empties are for
-#     genuinely-trivial callables — when ≥3 of a component's callable
-#     DECLARE units are ≥80% all-empty (inputs: [] + output "None" +
-#     raises: []), ONE roll-up warning fires: that shape is an emitter
-#     filling the fields, not deciding interfaces. Verify each contract or
-#     fold the family into work_unit_family_contracts. (`signature` stays
-#     deliberately optional and UNCHECKED — PLAN2-D1: codegen renders it
-#     from inputs/output + tech stack unless the signature IS the contract.)
-# 24. Container→system edge roll-up — every external_edges[] entry implies a
-#     system-level ARCH.yaml.edges row {from: this container, to: the target
-#     container, type: same}. Missing rows BLOCK `complete`: a container-sourced
-#     edge that lives only in this file silently under-reports the system
-#     topology (test/deploy read ARCH.yaml.edges). Fix by adding the system
-#     edge or re-running `/sdlc:arch -d`.
-# 25. FR-named deliverable path coverage (warning - does not block) — every
-#     concrete repo path named as inline code (backticks) in the text of a
-#     CLAIMED FR (one that appears in some container's/component's
-#     implements_requirements) must fall inside some component's code_location.
-#     Catches build-time deliverables (schema layer, tools/, templates/,
-#     shipped content) that runtime-driven component derivation misses —
-#     without an owning component, `task` can never schedule building them.
-#     Only backtick-delimited tokens WITH path shape (a trailing '/' or a file
-#     extension) are scanned; bare prose slashes and backticked non-paths
-#     (and/or, PyPI/npm, ID-lists like FR-046/047, enum listings like pass/fail)
-#     are ignored, so mark a genuine deliverable path as code (e.g. `tools/gen/`
-#     or `templates/base.html`) to have its coverage verified.
-# 26. api_consumers mirror (warning - does not block) — an external `calls` edge
-#     with via_resource_id should be mirrored in this container's
-#     api_consumers[], so the container header alone tells codegen which
-#     client SDKs it needs.
-# 27. Cross-container invocation seam (warning, non-blocking, Gap-5) — a
-#     cross-container `calls` external_edge with NONE of via_operation_id /
-#     via_resource_id / via_unit set has an unpinned INPUT contract; codegen
-#     must guess the mode selector + parameterization. Point via_unit at the
-#     callee's `entrypoint` work_unit (which pins argv/mode IN ⇄ exit-code/
-#     stdout/stderr OUT for both sides) and record the caller-side binding in
-#     the edge's `invocation`. TIGHTENED arm: an edge whose via_unit resolves
-#     to an `entrypoint` unit but that records no `invocation` also warns —
-#     the callee pins both directions, yet nothing says how THIS caller binds
-#     them.
-# 28. Contract-seam warnings (never block) — the caller/callee seam class that
-#     used to surface only at codegen:
-#       (a) a DECLARE-dialect unit's `inputs` names a type no sibling unit
-#           produces that is also not a DATA entity/enum — codegen would have
-#           to invent it (runs only when a DATA-MODEL exists to resolve
-#           against);
-#       (b) a pinned `calls` seam (via_unit) whose callee legitimately escaped
-#           the DECLARE gate (family contract or waiver) but whose `raises` is
-#           decided nowhere — the caller cannot handle its failures;
-#       (d) two components in one container whose code_location entries
-#           overlap (same path, or a file inside another component's
-#           directory) — two build tasks would collide in one location.
-# 29. owns_callables uniqueness (warning, never blocks) — a callable claimed
-#     in two units' owns_callables within one container would give two build
-#     tasks the same function; keep each symbol in exactly one unit's list.
-# 30. configuration consistency (warning, never blocks) — duplicate
-#     configuration.config_keys entries, and consumed_by names that are not
-#     components of this container.
-#
-# VERSION GATING (CLAUDE.md §10): checks #21, #22, #23 and #24 ERROR at
-# arch_container_version >= 2.0 and WARN below it — an artifact stamped
-# complete by an older skill version never flips red on upgrade. Warning-only
-# checks (#25-#30, provenance staleness) carry no gate.
+# In addition to the system-level checks in ARCH.schema.yaml, this file's
+# fields feed cross-checks #10 (owns_api_resources) through #32 (unreachable
+# work_units). The canonical table — what every numbered check asserts,
+# which block `status: complete` and which only warn, and the version-gating
+# floor (CLAUDE.md §10, arch_container_version >= 2.0) — is
+# references/merge-validate.md -> "Validation (Phase 7)". This file is not a
+# second copy of it; keep field-level comments above in sync with it instead.
 # =============================================================================

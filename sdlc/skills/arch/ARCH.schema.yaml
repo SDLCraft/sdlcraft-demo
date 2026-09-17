@@ -5,8 +5,10 @@
 # lives in sibling docs/ARCH__<container>.yaml files (see
 # ARCH__CONTAINER.schema.yaml).
 #
-# Field-by-field semantics, required vs optional, enum values, and the four
-# cross-checks are all enforced by validate_schema.py (Pydantic v2). This
+# Field-by-field semantics, required vs optional, enum values, and the full
+# numbered cross-check suite are all enforced by validate_schema.py (Pydantic
+# v2) — the canonical table lives in references/merge-validate.md ->
+# "Validation (Phase 7)", not here. This
 # file is the source of truth for *humans and AI agents reading the spec*;
 # validate_schema.py is the source of truth for *machines validating the
 # output*. Keep them in lockstep.
@@ -319,79 +321,22 @@ output_locations:                          # OPTIONAL — list of {path, written
 # the way a malformed `deferrals` entry defers nothing. A malformed STRING is
 # the blocking error it has always been. New writes emit the mapping at
 # <name>_version >= 2.0 (DATA-MODEL: >= 3.0); `.claude/sdlc/migrate_warnings.py`
-# converts an existing artifact.
+# converts an existing artifact - from any skill but repair, run it as
+# `--by sdlc-<skill> --no-bump` (or bare: it derives both from
+# $CLAUDE_SKILL_DIR), so the changelog credits the skill that ran and the run
+# bumps the version once.
 arch_warnings:                             # OPTIONAL — list of "WRN-NNN: ..." strings
   - "WRN-001: Uncovered API resource: payments"
   - "WRN-002: TODO: address theme cross_container_edges"
 
 # =============================================================================
-# Required cross-checks (validate_schema.py)
+# Cross-check table — see references/merge-validate.md
 # =============================================================================
-# 1. API-resource coverage — every resource in API__*.yaml appears in some
-#    container's owns_api_resources.
-# 2. UX-surface coverage — every data-bearing surface in UX__*.yaml appears
-#    in some container's owns_ux_surfaces.
-#    "Data-bearing" surfaces (downstream agents must own the data flow): one
-#    of {screen, page, tab, modal, dialog, drawer, panel, cli_command,
-#    flow_step, other}. Excluded as non-data-bearing: {empty_state, toast,
-#    overlay}.
-# 3. DATA-store coverage — every store in DATA-MODEL.persistence appears
-#    in some container's persistence.
-# 4. PRD feature coverage — every PRD must_have_features FR-NNN appears in
-#    some container's implements_requirements OR in non_container_features.
-#    Skipped when PRD.yaml is absent. Blocks status: complete.
-# 5. Edge endpoint integrity — every edges[].from and edges[].to is a valid
-#    container_id.
-# 6. Edge via_resource_id (when set) resolves to an API__*.yaml resource_id.
-# 7. Edge via_channel_id (when set) resolves to API.yaml events.channels[].channel_id.
-# 8. Edge via_entity (when set) resolves to a DATA-MODEL.yaml entity name.
-# 9. file_path integrity — every containers[].file_path that is set points
-#    to a file that exists on disk; every sibling docs/ARCH__*.yaml is
-#    referenced by some container's file_path.
-# 10. ID-prefix formats — WRN-NNN on every arch_warnings entry; FR-NNN on
-#     every implements_requirements entry and on non_container_features;
-#     WKF-NNN on every traces_prd_workflows entry. Malformed ids block
-#     status: complete.
-# 11. PRD trace existence — every implements_requirements (FR-NNN) and
-#     traces_prd_workflows (WKF-NNN) resolves to an id declared in PRD.yaml.
-#     Skipped when PRD.yaml declares no such family.
-# 12. Upstream metadata.status warning — if any of PRD/UX/DATA/API has
-#     metadata.status != "complete", emit a warning (not a fail); a downstream
-#     agent reading ARCH should know it was built on a partial chain.
-# 13. Container→system edge roll-up (cross-check #24; blocks complete at
-#     version >= 2.0, warns below — CLAUDE.md §10) — every external_edges[]
-#     entry in any drilled ARCH__<container>.yaml must have a corresponding
-#     row in `edges:` above ({from: that container, to: its target container,
-#     type: same}). The system edge table is the roll-up of the per-container
-#     edge tables — a container-sourced edge that never propagated up
-#     under-reports the topology to test/deploy.
-# 14. INT coverage (trace-or-defer; ERROR at arch_version >= 2.0, WARNING
-#     below) — every PRD integrations_required INT-NNN appears in some
-#     container's realizes_integrations, some component's int_refs, or
-#     `deferrals`. Format + existence of INT refs always block when present.
-#     An external container realizing an INT without an external_contract
-#     draws a warning.
-# 15. Deferrals channel — coverage gates (FR / INT / API / UX / store) read
-#     the top-level `deferrals` list first; malformed entries defer nothing
-#     and are reported; ids escaping only via the reason-less
-#     non_container_features list are reported (one more version).
-# 16. Store-id resolution (warning-only, B8) — realizes_store, container
-#     persistence entries, and container-file persistence_bindings resolve
-#     against DATA-MODEL store ids ("primary" + secondary store_id, legacy
-#     names accepted as aliases). Skipped when DATA-MODEL is absent or its
-#     persistence paradigm is "none" (the summary line says so). Also
-#     warning-only: a DATA entity traced by no component in any container
-#     (reported only when every buildable container is drilled).
-# 17. Provenance staleness (warning-only, CLAUDE.md §7) — each recorded
-#     metadata.upstream_provenance sha256 is compared to the upstream's
-#     current hash (docs/INDEX.yaml, else recomputed); a mismatch warns that
-#     the artifact was built against an older upstream. A complete artifact
-#     at version >= 2.0 with no provenance at all also warns.
-#
-# Container-vs-system consistency (see ARCH__CONTAINER.schema.yaml for the
-# remaining checks — owns/api/ux/persistence containment, component traces,
-# component implements_requirements ⊆ parent container's, deployment
-# compatibility, work_unit contract lint #23, deliverable-path coverage #25
-# (keys on backticked paths in FR text; bare prose slashes are ignored),
-# api_consumers mirror #26, and the external-container file warning).
+# This file's fields feed the system-mode checks (an unnumbered 1-15ish
+# sequence local to this document) plus cross-checks #24 (edge roll-up) and
+# #31 (PRD integration coverage), which the validator prints as
+# [cross-check N]. The canonical table — every numbered check, which block
+# `status: complete` and which only warn, and the version-gating floor
+# (CLAUDE.md §10, arch_version >= 2.0) — is references/merge-validate.md ->
+# "Validation (Phase 7)". This file is not a second copy of it.
 # =============================================================================

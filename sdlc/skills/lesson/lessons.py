@@ -541,6 +541,32 @@ def date_from_footer(skill: str, state_version, footer) -> "tuple[str | None, st
     return (str(footer) if footer else (str(state_version) if state_version else None)), None
 
 
+def ambient_ledger_footer_note(skill: str, state_version, footer) -> "tuple[str | None, str | None]":
+    """(footer_skill_version, hint) for an AMBIENT lesson about ANOTHER
+    skill's ledger-shaped state, when it disagrees with that skill's
+    installed footer.
+
+    Unlike `date_from_footer`, this is never "a run known to be inside
+    `skill`" - the caller is a different skill, or no skill at all, so the
+    footer is NOT "the SKILL.md running now" (that phrase would be a lie
+    here). A ledger (code today) records only the version that CREATED it
+    and nothing bumps it between runs, so the state's number is what
+    actually wrote what this ambient observation is about - `skill_version`
+    stays it, unchanged. The footer is kept beside it as
+    `footer_skill_version` so a human reads the skew at triage, and
+    `--delta` - which dates a lesson from the OLDER of the two numbers it
+    finds - can date it from the newer fix that landed since, instead of
+    silently trusting a ledger nothing has re-stamped."""
+    if not (footer and state_version and str(footer) != str(state_version)):
+        return None, None
+    return str(footer), (
+        f"the {skill} ledger says skill_version {state_version} but the installed "
+        f"SKILL.md footer is {footer} (not currently running - skill_version stays "
+        f"{state_version}, the version that wrote what was observed) - footer kept "
+        f"as footer_skill_version {footer}"
+    )
+
+
 def installed_plugin_version(project_root: Path) -> "str | None":
     """What /sdlc:setup last copied into `.claude/sdlc/` - the marker's number.
 
@@ -551,6 +577,55 @@ def installed_plugin_version(project_root: Path) -> "str | None":
     """
     version = read_marker(project_root).get("plugin_version")
     return str(version) if version else None
+
+
+_CAPABILITY_RE = re.compile(r"^CAPABILITY_VERSION\s*=\s*[\"']?(\d+)", re.M)
+
+
+def _version_older(installed, running) -> bool:
+    """True when `installed` is older than `running`. Dotted numbers compare
+    part by part as integers (0.10.0 is newer than 0.9.14); anything that does
+    not parse counts as older when the two differ."""
+    try:
+        return tuple(int(p) for p in str(installed).split(".")) < \
+            tuple(int(p) for p in str(running).split("."))
+    except ValueError:
+        return str(installed) != str(running)
+
+
+def setup_lag(project_root: Path, plugin_version, plugin_root) -> "str | None":
+    """One plain sentence when /sdlc:setup's install lags the running plugin.
+
+    record-run already stored installed_version when the marker and the plugin
+    differed, and printed only [OK]; skills then ran an old docs_index.py that
+    rejected --stale/--stamp with exit 2, and nothing asked for a /sdlc:setup
+    re-run (ledger IMP-108). `plugin_version` is the RUNNING plugin's (None when
+    only the marker named one); `plugin_root` enables the docs_index capability
+    compare, which catches a lag the version numbers do not show.
+    """
+    marker = read_marker(project_root)
+    if not marker:
+        return None
+    reasons = []
+    installed = marker.get("plugin_version")
+    if plugin_version and installed and _version_older(installed, plugin_version):
+        reasons.append(f"installed by plugin {installed}, plugin {plugin_version} is running")
+    installed_cap = (marker.get("helpers") or {}).get("docs_index")
+    if plugin_root and installed_cap is not None:
+        try:
+            text = (Path(plugin_root) / "skills" / "setup" / "docs_index.py").read_text(
+                encoding="utf-8")
+        except OSError:
+            text = ""
+        match = _CAPABILITY_RE.search(text)
+        if match and _version_older(installed_cap, match.group(1)):
+            reasons.append(f"docs_index.py there is capability {installed_cap}, "
+                           f"the plugin's is {match.group(1)}")
+    if not reasons:
+        return None
+    return ("the helper scripts in .claude/sdlc/ are older than this plugin ("
+            + "; ".join(reasons) + ") - run /sdlc:setup once to update them; until "
+            "then skills run the plugin's own copies")
 
 
 # =============================================================================
@@ -669,6 +744,39 @@ def strip_skill_prefix(skill, where_file) -> str:
         if f.startswith(prefix) and len(f) > len(prefix):
             return f[len(prefix):]
     return f
+
+
+def find_prefix_skill(plugin_root, skill, where_file):
+    """The OTHER real skill folder `where_file`'s leading segment names, when
+    the remainder actually exists there - (skill_name, remainder) or None.
+
+    `strip_skill_prefix` only ever tries the lesson's OWN `skill` as a
+    candidate prefix; a where.file legitimately prefixed with a DIFFERENT
+    real skill folder (`arch/validate_schema.py` filed under `--skill test`)
+    fell through every reader to a basename-only search. A cross-skill
+    prefix counts only when `sdlc/skills/<name>/<rest>` EXISTS on disk - a
+    repo's own `test/` directory is not the `test` skill folder, and a
+    same-named subfolder that happens to exist under the WRONG skill must
+    not be mistaken for the real owner (ledger IMP-143).
+    """
+    if not plugin_root:
+        return None
+    f = str(where_file or "").replace("\\", "/")
+    own = str(skill or "")
+    skills_dir = Path(plugin_root) / "skills"
+    try:
+        names = sorted(p.name for p in skills_dir.iterdir() if p.is_dir())
+    except OSError:
+        return None
+    for name in names:
+        if name == own:
+            continue
+        for prefix in (f"sdlc/skills/{name}/", f"skills/{name}/", f"{name}/"):
+            if f.startswith(prefix) and len(f) > len(prefix):
+                rest = f[len(prefix):]
+                if (skills_dir / name / rest).exists():
+                    return name, rest
+    return None
 
 
 def same_subject(a: dict, b: dict) -> bool:
@@ -862,17 +970,23 @@ def lesson_hints(lesson: dict, plugin_root=None, installed_version=None) -> "lis
                     f"relative to {skill}/, so this lesson is about {stripped}; drop the "
                     f"leading {where_file[:len(where_file) - len(stripped)]}")
             elif not (folder / where_file).exists():
-                base = where_file.rsplit("/", 1)[-1]
-                elsewhere = [other.name for other in sorted(skills_dir.iterdir())
-                             if other.is_dir() and other.name != skill
-                             and (other / base).exists()]
                 msg = f"{where_file} is not in {skill}/"
                 if plugin_version:
                     msg += f" at plugin {plugin_version}"
                 msg += f" (it has: {_list_skill_folder(folder)})"
-                if elsewhere:
-                    msg += (f"; {base} lives in {'/'.join(elsewhere)}/ - did you mean "
-                            f"--skill {elsewhere[0]}?")
+                prefix_hit = find_prefix_skill(plugin_root, skill, where_file)
+                if prefix_hit:
+                    prefix_skill, rest = prefix_hit
+                    msg += (f"; {where_file} is {rest} with the {prefix_skill}/ folder "
+                            f"as prefix - did you mean --skill {prefix_skill}?")
+                else:
+                    base = where_file.rsplit("/", 1)[-1]
+                    elsewhere = [other.name for other in sorted(skills_dir.iterdir())
+                                 if other.is_dir() and other.name != skill
+                                 and (other / base).exists()]
+                    if elsewhere:
+                        msg += (f"; {base} lives in {'/'.join(elsewhere)}/ - did you mean "
+                                f"--skill {elsewhere[0]}?")
                 if (installed_version and plugin_version
                         and str(installed_version) != str(plugin_version)):
                     msg += (f"; the helpers installed here are from {installed_version}, "
@@ -1232,8 +1346,12 @@ def write_telemetry(root: Path, updates: dict) -> bool:
         block["project_id"] = project_id_for(root)
     marker["telemetry"] = block
     try:
+        # newline="\n": the marker is generated wholesale by the plugin, so it
+        # is LF on every host. Without it, every consent change rewrote the
+        # whole file in CRLF on Windows - in a file the consumer commits
+        # (ledger IMP-116).
         (Path(root) / MARKER_REL).write_text(
-            json.dumps(marker, indent=2) + "\n", encoding="utf-8"
+            json.dumps(marker, indent=2) + "\n", encoding="utf-8", newline="\n"
         )
     except OSError:
         return False
@@ -1518,12 +1636,32 @@ def cmd_record_run(args) -> int:
     if state_version and skill_version and str(state_version) != str(skill_version):
         run["state_skill_version"] = str(state_version)
     # A migrated interview state names the version the run started under
-    # (CLAUDE.md "State file contract": migrations[{from, to, at, ...}]).
+    # (CLAUDE.md "State file contract": migrations[{from, to, at, ...}]) - but
+    # only a migration that happened DURING this run: a state file reused
+    # across sessions can carry a migration that already finished in an
+    # earlier, unrelated run, which is not "the version this run started
+    # under" (ledger IMP-144). When started_at itself is missing or
+    # unparseable there is no way to score which migration is in-run, so the
+    # earliest listed one is kept - the prior, unscored behaviour.
     migrations = record.get("migrations") or (doc or {}).get("migrations")
-    if isinstance(migrations, list) and migrations and isinstance(migrations[0], dict):
-        started_under = migrations[0].get("from")
-        if started_under and str(started_under) != str(skill_version or ""):
-            run["skill_version_at_start"] = str(started_under)
+    if isinstance(migrations, list) and migrations:
+        started_at_dt = _parse_iso(record.get("started_at"))
+        candidate = None
+        if started_at_dt is None:
+            if isinstance(migrations[0], dict):
+                candidate = migrations[0]
+        else:
+            for m in migrations:
+                if not isinstance(m, dict):
+                    continue
+                at_dt = _parse_iso(m.get("at"))
+                if at_dt is not None and at_dt >= started_at_dt:
+                    candidate = m
+                    break
+        if candidate:
+            started_under = candidate.get("from")
+            if started_under and str(started_under) != str(skill_version or ""):
+                run["skill_version_at_start"] = str(started_under)
     if plugin_version:
         run["plugin_version"] = plugin_version
         run["plugin_version_source"] = plugin_source
@@ -1593,6 +1731,10 @@ def cmd_record_run(args) -> int:
     )
     if version_hint:
         _print_hints([version_hint], written=True)
+    lag = setup_lag(root, plugin_version if plugin_source in ("manifest", "flag") else None,
+                    resolve_plugin_root(args))
+    if lag:
+        print(f"Check: {lag}")
     # A skill close is a flush point. The due-check is a local read that costs
     # nothing when nothing is due, so the network is touched at most once a week
     # per project - and never at all unless this project opted in.
@@ -1674,8 +1816,9 @@ def cmd_add(args) -> int:
     plugin_root = resolve_plugin_root(args)
     session_id = args.session_id
     skill_version = None
+    shape = None
     try:
-        doc, record, _shape = parse_state(root / STATE_REL_TMPL.format(skill=args.skill), None)
+        doc, record, shape = parse_state(root / STATE_REL_TMPL.format(skill=args.skill), None)
         if record and not session_id:
             session_id = record.get("session_id")
         if doc:
@@ -1684,11 +1827,20 @@ def cmd_add(args) -> int:
         pass
     state_version = skill_version
     version_hint = None
+    footer_skill_version = None
     footer = skill_version_from_plugin(plugin_root, args.skill)
     if running_skill() == args.skill:
         # About the skill executing right now: its footer is the version whose
         # behaviour was observed, whatever a never-re-stamped state file says.
         skill_version, version_hint = date_from_footer(args.skill, state_version, footer)
+    elif shape == "ledger" and skill_version and footer and str(skill_version) != str(footer):
+        # About another skill's LEDGER (code today): the ledger records the
+        # version that CREATED it and nothing bumps it between runs, so it
+        # still says what wrote what this run observed - skill_version stays
+        # it. The footer is not "running now" here, so it rides the
+        # ledger-specific note, never date_from_footer's wording.
+        footer_skill_version, version_hint = ambient_ledger_footer_note(
+            args.skill, state_version, footer)
     elif not skill_version:
         # About another skill: its state file says which version wrote what
         # this run observed; the footer is only the fallback when it never ran.
@@ -1730,6 +1882,8 @@ def cmd_add(args) -> int:
         lesson["skill_version"] = str(skill_version)
     if state_version and skill_version and str(state_version) != str(skill_version):
         lesson["state_skill_version"] = str(state_version)
+    if footer_skill_version:
+        lesson["footer_skill_version"] = str(footer_skill_version)
     if plugin_version:
         lesson["plugin_version"] = plugin_version
     if installed and plugin_version and installed != plugin_version:
@@ -1997,7 +2151,7 @@ def _emit_report(text: str, out_path: "str | None") -> int:
     try:
         if path.parent and not path.parent.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text + "\n", encoding="utf-8")
+        path.write_text(text + "\n", encoding="utf-8", newline="\n")
     except OSError as e:
         print(f"[FAIL] cannot write {path}: {e}", file=sys.stderr)
         return 2

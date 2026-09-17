@@ -7,6 +7,32 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.18 (2026-09-17) — The schema template stamps the version the validator's floors need, and Phase 1 is the shared four-state trigger
+
+Ledger IMP-178 (the fourth instance of a floor nothing reached, found by the new repo lint). DATA-MODEL.schema.yaml's example stamped `data_model_version: "1.1"` against `_PARADIGM_GATE_VERSION` (3.0) while merge-validate.md already said new writes stamp 3.0 — the example is now "3.0". `lint_version_floors.py` holds every skill's template and stamp sentence at or above its own floors from here on.
+
+Ledger IMP-112 / IMP-173 / IMP-174 / IMP-016: Phase 1 had no stale-state trigger at all; it is now the five-line shape every interview skill shares — `in_progress`; artifact present → scope the update per ux's upstream-reconciliation.md REFINE row, then merge; artifact ABSENT → restart-from-partial_answers or discard, never resume; no state file; an older `skill_version` → prd's edge-cases.md recipe, which reconciles the theme lists and the `last_ids` counters (max of the state counter and the highest id on disk, shards included) before offering resume. merge-validate.md's counter restatement is a pointer to that recipe. Pinned by prd's `_smoke/resume_recipe_lockstep_selftest.py`.
+
+## 1.17 (2026-09-17) — The critical-tier entity card rides inside the approval question
+
+Ledger IMP-137 (AUTHORING §18). The entity state machine's PROPOSE, list-approve and FINAL-APPROVAL steps showed the drafted card in chat and then asked, in the same turn, for approval — the IMP-003 defect, since same-turn chat markdown may not render. The card now rides in the recommended option's `preview` (a worked example, the shape api's step-e already had), and the reference cites §18. Pinned by prd's `_smoke/channel_rule_selftest.py`. The earlier ledger claim that this skill's restatement was compliant was wrong: it had none.
+
+## 1.16 (2026-09-17) — The five entity-bearing blocks that never resolved their `entity:` name now do (error at data_model_version 3.0, warning below), and an entity nothing is connected to draws an orphan warning
+
+Ledger IMP-012. `check_entity_ref_fields` resolves `id_strategy.natural_keys`, `indexes_and_queries.access_patterns` / `expected_indexes` and `integrity_and_constraints.unique_constraints` / `check_constraints` against `entities` — a typo'd name used to validate clean. `check_orphan_entities` warns on an entity that is CONNECTED to nothing: named by no other block AND owning no `one_of` / `composes` of its own (inbound-only would have flagged every union root — 5 of 21 valid fixtures); guarded by entities ≥ 2 and a non-empty reference-bearing block, else one vacuous-pass line. Regression: `_smoke/40_entity_ref_unresolved_at_floor.yaml` (exit 1) / `41_…_below_floor.yaml` (exit 0) and `_smoke/orphan_selftest.py` (0 of 21 valid fixtures gain the warning). Declined from the same item: the tenancy/SaaS fields and the geometry/abstract/enum_meta taxonomy — zero consumers, no reporting project.
+
+## 1.15 (2026-09-16) — An entity whose fields come entirely from a composed mixin is no longer refused: `check_required`'s own-`fields` gate resolves through the composes-aware helper `check_union_integrity` already used
+
+Ledger IMP-163 (IMP-138's named residual). Regression: `_smoke/38_composes_only_fields.yaml` flipped from `expect: 1` to `expect: 0` - the fixture that pinned the residual now pins the fix. An unresolvable or empty composes chain still resolves to no fields, so nothing is over-relaxed. The task-side half (`embed_sources.py` reads an entity's own fields with no composes resolution) is IMP-170.
+
+## 1.14 (2026-09-16) — A stale upstream routes NEXT to `/sdlc:data --reconcile`, and the Phase 8 pointer-write prose is gone
+
+Ledger IMP-127 and IMP-111. Regression: `_smoke/deferral_selftest.py`, which now also runs fixture `30_provenance_behind` and pins its NEXT line.
+
+## 1.13 (2026-09-15) — The downstream-rejection rule names the accepted-deviance exception; a typed deferral with a malformed WRN id warns; `docs_index.py` calls run the copy `helper-resolution.md` picks
+
+Ledger IMP-104, IMP-108, IMP-109 (2026-09-15 retro).
+
 ## 1.12 (2026-09-15) — Phase 7 stamps provenance through `docs_index.py --stamp` over every file read, `UX__<surface>.yaml` shards included, instead of a hand-written sha-only entry for the two canonicals
 
 Ledger IMP-102 (aicf LSN-083, the arch lesson's sibling sweep): the write paragraph told the

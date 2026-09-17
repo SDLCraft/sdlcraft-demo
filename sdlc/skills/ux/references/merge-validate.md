@@ -1,7 +1,6 @@
 # Merge, validate, and closing out
 
-Detailed rules for Phase 7 (write & validate) and Phase 8 (CLAUDE.md
-pointer). Read this when entering Phase 7.
+Detailed rules for Phase 7 (write & validate) and Phase 8 (refresh & close). Read this when entering Phase 7.
 
 ## What Phase 7 writes
 
@@ -72,6 +71,14 @@ For `UX.yaml`:
 
 - Inline YAML comments on each top-level key (use `UX.schema.yaml` as a
   template).
+- `metadata.ux_version`: stamp `"3.0"` (or higher) on a new write — the
+  version-gated blocking checks (CLI-contract typing, inventory-shard
+  integrity — CLAUDE.md section 10, ledger IMP-009 / IMP-171) arm only
+  at/after 3.0, the same as the existing 2.0 provenance gate; an older
+  stamp silently degrades every one of them to a warning instead of dead
+  code nothing ever reaches. The update flow on an existing artifact bumps
+  the version's minor number and never crosses a floor by itself — moving
+  2.x → 3.0 (or 3.x → 4.0) needs an explicit reason, not an automatic edit.
 - Updated `metadata.last_updated` (ISO-8601 UTC) and
   `metadata.session_id`.
 - `metadata.status`:
@@ -116,7 +123,7 @@ For each `UX__<surface_id>.yaml`:
 python "${CLAUDE_SKILL_DIR}/validate_schema.py" --path docs/UX.yaml
 ```
 
-The validator does four things in one pass:
+The validator does six things in one pass:
 
 1. Schema-validates `docs/UX.yaml`.
 2. Schema-validates every `docs/UX__*.yaml` sibling.
@@ -133,20 +140,32 @@ The validator does four things in one pass:
    `traces_workflows`. Matching is by id only — verbatim text in PRD
    may change freely without breaking the coverage. Uncovered ids are
    surfaced in the output.
+5. CLI-contract typing (blocking at `ux_version >= 3.0`, a warning below
+   — CLAUDE.md section 10, ledger IMP-009): a `layout.cli_args` or
+   `cli.global_flags` entry that is not a mapping, or a `cli_command`
+   surface's `exit_conditions` entry that is a plain string or names a
+   code absent from `cli.exit_codes`.
+6. Inventory-shard integrity (same floor, ledger IMP-171): a
+   `surface_inventory` `file_path` that names no file on disk, or a
+   `UX__*.yaml` on disk that no `surface_inventory` entry names —
+   mirrors `arch`'s `check_file_path_integrity`.
 
 Exit codes:
 
 | Code | Meaning | What the agent does |
 |---|---|---|
 | 0 (`[OK]`) | UX.yaml is complete, all surfaces valid, every PRD flow covered | ✓ Proceed to Phase 8. |
-| 0 (`[DRAFT]`) | Draft — schema valid, possibly missing required fields or coverage | Inform user; proceed to Phase 8 (pointer still injected). |
+| 0 (`[DRAFT]`) | Draft — schema valid, possibly missing required fields or coverage | Inform user; proceed to Phase 8. |
 | 1 (`[FAIL]`) | Schema invalid, OR `status: complete` but required fields missing, OR `status: complete` but coverage incomplete | Show field-level errors verbatim. Offer via `AskUserQuestion`: fix now, or accept `status: draft`. Re-run validation after re-entry. |
 | 2 | Cannot read/parse one of the files | Surface to user (missing file, bad YAML, permission error). Do not retry silently. |
 | 3 | Missing dependency | Validator prints `pip install` instructions. Ask the user to install and re-run; do NOT auto-install. |
 
 **Downstream-agent contract**: downstream skills/agents MUST reject the
 UX artifacts if `UX.yaml.metadata.status != "complete"` OR if the
-validator exits non-zero.
+validator exits non-zero. The one exception is to the exit code, never to the
+status: a failure every check of which `doctor.py --artifact docs/UX.yaml`
+reports as accepted deviance does not reject
+(`sdlc/skills/repair/references/accepted-deviance.md`).
 
 ## Coverage-check details
 
@@ -203,7 +222,7 @@ Both are harmless no-ops when the project has not run `/sdlc:setup`.
 
 ## Closing the session
 
-After Phase 8's CLAUDE.md write succeeds:
+Once Phase 8's refresh has run:
 
 - Set `status: complete` in the state file.
 - Keep the state file as an audit trail — do **not** delete it.

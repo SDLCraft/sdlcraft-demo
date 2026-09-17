@@ -112,8 +112,11 @@ resolves toward "surface it and ask", not "make a reasonable guess".
   `--force`. `--force` only when the changelog was repaired and the tool still
   cannot tell.
 - **Verification cannot run** (missing pydantic, no python on PATH for a
-  subprocess) → do not mark anything `resolved`. Leave findings `triaged`, state
-  what could not be verified, and say what the user should run.
+  subprocess) → do not mark anything `resolved`. Leave the finding `open`, record
+  what could not be verified in its `evidence` (the queue's bounded slot for
+  partial progress), and say what the user should run. A surgical fix parked with
+  a resolution block the queue validator refuses is the defect ledger IMP-131
+  removed — only a re-invoke in progress may sit `triaged`.
 
 ## Session
 
@@ -130,9 +133,9 @@ resolves toward "surface it and ask", not "make a reasonable guess".
   the state file's `lesson_notes` in the next write and continue. Never stop
   the repair to record a lesson; Phase 6 drains the list.
 - **Interrupted mid-repair** → on the next invocation, reconcile: for each
-  finding marked `triaged` with a partial `artifacts_touched` list, re-verify
-  those artifacts against disk before continuing. Re-applying an edit that
-  already landed is the common failure mode here.
+  finding left `open` whose `evidence` records partial progress, re-verify those
+  artifacts against disk before continuing. Re-applying an edit that already
+  landed is the common failure mode here.
 - **A finding whose artifacts have changed since it was raised** → re-read
   before trusting the evidence. Evidence is a snapshot; the defect may already
   be gone, in which case close it `resolved` with `mode: none` and a note that

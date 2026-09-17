@@ -77,6 +77,24 @@ Validates:
          at data_model_version >= 3.0, warnings below (CLAUDE.md §10).
          entities.<E>.stored_in must resolve to 'primary' or a declared
          store_id — unknown ids warn (never block).
+       - Entity-reference field resolution: a bare `entity:` string in
+         id_strategy.natural_keys, indexes_and_queries.access_patterns,
+         indexes_and_queries.expected_indexes, integrity_and_constraints
+         .unique_constraints and integrity_and_constraints.check_constraints
+         must resolve to a declared entity — the same invariant the other
+         nine entity-name-resolution sites already hold. Errors at
+         data_model_version >= 3.0, warnings below (CLAUDE.md §10; ledger
+         IMP-012).
+       - Orphan-entity advisory (warn-level, never blocks): an entity that
+         nothing in the model references — not named by a relationship,
+         edge, composition, cross_reference, one_of, key_value pattern, or
+         bounded_context, and composing nothing itself — is dead schema or a
+         rename that missed a reference. A union parent's own `one_of` and a
+         mixin's own `composes` count as outbound ownership (CONNECTED, not
+         merely inbound-referenced), so a union root is never a false
+         positive. Skipped, with a note, when there are fewer than two
+         entities or no reference-bearing block exists to check against
+         (ledger IMP-012).
        - Lifecycle wiring (warn-level): lifecycle.field exists on the entity;
          terminal states have no outgoing transition; the state set is listed
          in the field's validation.enum (or a declared enum) when one exists.
@@ -109,7 +127,7 @@ import re
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 
 # =============================================================================
@@ -120,6 +138,8 @@ from typing import Any, Dict, List, Literal, Optional, Union
 # =============================================================================
 
 GLOSSARY_PATH = ".claude/rules/sdlc-output-glossary.md"
+STALE_NOTE = ("an upstream moved after this file was written; review the delta "
+              "before the next stage reads it")
 
 def join_ids(ids, limit=12):
     """Render a grouped finding's id list. Capped, because a line nobody
@@ -592,10 +612,14 @@ class Entity(_Permissive):
     traces_prd_features: Optional[List[str]] = None
     traces_ux_surfaces: Optional[List[str]] = None
     traces_prd_workflows: Optional[List[str]] = None
-    # file-native: discriminator + Pydantic composition + on-disk serialization.
+    # file-native: discriminator + on-disk serialization.
     category: Optional[str] = None
-    composes: Optional[List[str]] = None
     serialization: Optional[Any] = None
+    # Pydantic mixins this entity extends - ANY paradigm (IMP-138). Every field
+    # check resolves through the chain (_composes_closure), so an inherited
+    # field counts as present; the entity still needs its own non-empty
+    # `fields` (only a union parent is exempt).
+    composes: Optional[List[str]] = None
     # graph: the node label (defaults to the entity key when omitted).
     node_label: Optional[str] = None
     # vector: which fields form the stored payload alongside the vector.
@@ -1281,11 +1305,20 @@ def check_required(dm: DataModel) -> List[str]:
                 for ep in entity_required:
                     if is_union and ep in ("fields", "primary_key"):
                         continue
-                    val = _get_dotted(entity, ep)
                     if ep == "fields":
-                        if not isinstance(val, dict) or len(val) == 0:
+                        # A field inherited through `composes` counts as the
+                        # entity's own (IMP-138/IMP-163) - the same
+                        # resolution check_union_integrity uses at its
+                        # discriminator check, so an entity whose fields come
+                        # entirely from a composed mixin is not a false
+                        # reject. An unresolved/undeclared composes target
+                        # still resolves to no fields, so nothing here is
+                        # over-relaxed.
+                        if not _entity_field_names(root, ename):
                             missing.append(f"{scope_label}entities.{ename}.{ep}")
-                    elif ep in ENTITY_PRESENT_ONLY_PATHS:
+                        continue
+                    val = _get_dotted(entity, ep)
+                    if ep in ENTITY_PRESENT_ONLY_PATHS:
                         if val is None:
                             missing.append(f"{scope_label}entities.{ename}.{ep}")
                     elif _is_empty(val):
@@ -1532,14 +1565,53 @@ def _entity_names(root: object) -> List[str]:
     return []
 
 
+def _composes_closure(root: object, entity_name: str) -> Tuple[List[str], List[str]]:
+    """Walk an entity's `composes` chain ONCE and return two things: every field
+    name the entity carries (its own plus the inherited ones), and the composes
+    targets no entity declares.
+
+    `composes` is documented inheritance - Pydantic mixins this entity extends -
+    so a field it inherits is a field it has, and every field check in this file
+    resolves through here rather than reading `entity.fields` directly (ledger
+    IMP-138). The walk is recursive because a mixin may compose another; the
+    visited set makes a cyclic or self-naming chain stop instead of hanging. A
+    target nobody declared contributes no fields - nothing requires a mixin to
+    be modelled as an entity, so callers name it only where a field the chain
+    was meant to supply is actually missing."""
+    entities = _get_dotted(root, "entities")
+    if not isinstance(entities, dict):
+        return [], []
+    names: List[str] = []
+    unresolved: List[str] = []
+    seen: set = set()
+    queue: List[str] = [str(entity_name)]
+    while queue:
+        current = queue.pop(0)
+        if current in seen:
+            continue
+        seen.add(current)
+        entity = entities.get(current)
+        if entity is None:
+            if current != str(entity_name) and current not in unresolved:
+                unresolved.append(current)
+            continue
+        fields = getattr(entity, "fields", None)
+        if isinstance(fields, dict):
+            for fname in fields:
+                if fname not in names:
+                    names.append(fname)
+        composes = getattr(entity, "composes", None)
+        if isinstance(composes, list):
+            queue.extend(str(c) for c in composes)
+    return names, unresolved
+
+
 def _entity_field_names(root: object, entity_name: str) -> List[str]:
-    entity = (_get_dotted(root, "entities") or {}).get(entity_name)
-    if entity is None:
-        return []
-    fields = getattr(entity, "fields", None)
-    if isinstance(fields, dict):
-        return list(fields.keys())
-    return []
+    return _composes_closure(root, entity_name)[0]
+
+
+def _unresolved_composes(root: object, entity_name: str) -> List[str]:
+    return _composes_closure(root, entity_name)[1]
 
 
 def check_relationship_integrity(root: object) -> List[str]:
@@ -1758,10 +1830,19 @@ def check_union_integrity(root: object) -> List[str]:
                             f"as its own entity")
                 continue
             if disc:
-                vfields = getattr(variant, "fields", None)
-                if not isinstance(vfields, dict) or disc not in vfields:
+                # Fields inherited through `composes` count (IMP-138): the
+                # shared resolver walks that chain, so the idiomatic mixin
+                # carrying the discriminator is not a false reject.
+                if disc not in _entity_field_names(root, vname):
+                    unresolved = _unresolved_composes(root, vname)
+                    hint = ""
+                    if unresolved:
+                        hint = (f" (it composes {join_ids(unresolved)}, which no entity "
+                                f"declares, so nothing is inherited from there - declare "
+                                f"the mixin as an entity, or give the variant its own "
+                                f"'{disc}' field)")
                     errs.append(f"entities.{vname}.fields: no '{disc}' field, but {ename}.one_of "
-                                f"names it as a variant told apart by '{disc}'")
+                                f"names it as a variant told apart by '{disc}'{hint}")
     return errs
 
 
@@ -1839,6 +1920,205 @@ def check_key_value_design(root: object) -> List[str]:
         if ent and ent not in enames:
             errs.append(f"key_value_design.key_patterns[{i}].entity: '{ent}' not in entities")
     return errs
+
+
+_ENTITY_REF_FIELD_PATHS: Tuple[str, ...] = (
+    "id_strategy.natural_keys",
+    "indexes_and_queries.access_patterns",
+    "indexes_and_queries.expected_indexes",
+    "integrity_and_constraints.unique_constraints",
+    "integrity_and_constraints.check_constraints",
+)
+
+
+def check_entity_ref_fields(root: object) -> List[str]:
+    """Version-gated by the caller (error at data_model_version >= 3.0,
+    warning below, CLAUDE.md section 10): every bare `entity:` string in
+    id_strategy.natural_keys, indexes_and_queries.access_patterns,
+    indexes_and_queries.expected_indexes, integrity_and_constraints
+    .unique_constraints and integrity_and_constraints.check_constraints must
+    resolve to a declared entity - the same invariant
+    check_key_value_design/check_bounded_context_partition already hold for
+    their own blocks, extended to the five that were never checked
+    (ledger IMP-012)."""
+    errs: List[str] = []
+    entities = _get_dotted(root, "entities")
+    enames = set(entities.keys()) if isinstance(entities, dict) else set()
+    for path in _ENTITY_REF_FIELD_PATHS:
+        items = _get_dotted(root, path)
+        if not isinstance(items, list):
+            continue
+        for i, item in enumerate(items):
+            ent = getattr(item, "entity", None)
+            if ent and ent not in enames:
+                errs.append(f"{path}[{i}].entity: '{ent}' not in entities")
+    return errs
+
+
+def _referenced_entity_names(root: object) -> set:
+    """Every entity name a reference-bearing site elsewhere in the document
+    names: relationships (from/to/join_table), a field's `references`,
+    data_classification.* entries, bounded_contexts.*.entities, edges
+    (from/to), composition (parent/child), `one_of` variants,
+    cross_references (from/to), key_value_design.key_patterns.entity, the
+    five entity_ref fields check_entity_ref_fields resolves, and every
+    `composes` target (IMP-138 tolerance - a mixin nothing else names is
+    still connected to whatever composes it). Used only to decide whether an
+    entity is an orphan (check_orphan_entities) - existence of the named
+    entity is each site's own check's job, not this collector's."""
+    referenced: set = set()
+
+    rels = _get_dotted(root, "relationships")
+    if isinstance(rels, list):
+        for rel in rels:
+            for attr in ("from_entity", "to_entity", "join_table"):
+                v = getattr(rel, attr, None)
+                if v:
+                    referenced.add(str(v))
+
+    entities = _get_dotted(root, "entities")
+    if isinstance(entities, dict):
+        for entity in entities.values():
+            fields = getattr(entity, "fields", None) or {}
+            if isinstance(fields, dict):
+                for field in fields.values():
+                    ref = getattr(field, "references", None)
+                    if ref and "." in str(ref):
+                        referenced.add(str(ref).partition(".")[0])
+            composes = getattr(entity, "composes", None)
+            if isinstance(composes, list):
+                for c in composes:
+                    referenced.add(str(c))
+            one_of = getattr(entity, "one_of", None)
+            if isinstance(one_of, list):
+                for v in one_of:
+                    referenced.add(str(v))
+
+    dc = _get_dotted(root, "data_classification")
+    if dc is not None:
+        for list_name in ("pii_fields", "regulated_fields", "localized_fields", "encrypted_at_rest"):
+            for ref in getattr(dc, list_name, None) or []:
+                if isinstance(ref, str) and "." in ref:
+                    referenced.add(ref.partition(".")[0])
+
+    bcs = _get_dotted(root, "bounded_contexts")
+    if isinstance(bcs, dict):
+        for ctx in bcs.values():
+            for ent in getattr(ctx, "entities", None) or []:
+                referenced.add(str(ent))
+
+    edges = _get_dotted(root, "edges")
+    if isinstance(edges, list):
+        for edge in edges:
+            for attr in ("from_entity", "to_entity"):
+                v = getattr(edge, attr, None)
+                if v:
+                    referenced.add(str(v))
+
+    comp = _get_dotted(root, "composition")
+    if isinstance(comp, list):
+        for item in comp:
+            for attr in ("parent", "child"):
+                v = getattr(item, attr, None)
+                if v:
+                    referenced.add(str(v))
+
+    xrefs = _get_dotted(root, "cross_references")
+    if isinstance(xrefs, list):
+        for xr in xrefs:
+            for attr in ("from_entity", "to_entity"):
+                v = getattr(xr, attr, None)
+                if v:
+                    referenced.add(str(v))
+
+    kvd = _get_dotted(root, "key_value_design")
+    if kvd is not None:
+        for kp in getattr(kvd, "key_patterns", None) or []:
+            v = getattr(kp, "entity", None)
+            if v:
+                referenced.add(str(v))
+
+    for path in _ENTITY_REF_FIELD_PATHS:
+        items = _get_dotted(root, path)
+        if isinstance(items, list):
+            for item in items:
+                v = getattr(item, "entity", None)
+                if v:
+                    referenced.add(str(v))
+
+    return referenced
+
+
+def _has_orphan_reference_surface(root: object, entities: Dict[str, object]) -> bool:
+    """Is there anything an orphan COULD be checked against? Deliberately
+    narrower than `_referenced_entity_names` - the five entity_ref blocks
+    (natural_keys/access_patterns/expected_indexes/unique_constraints/
+    check_constraints) count toward WHO is referenced but not toward this
+    guard, so a model whose only reference-bearing content is a bookkeeping
+    block (an index on a single-entity model, say) still gets the honest
+    vacuous-pass line rather than a check that quietly checked nothing."""
+    for path in ("relationships", "edges", "composition", "cross_references"):
+        val = _get_dotted(root, path)
+        if isinstance(val, list) and val:
+            return True
+    bcs = _get_dotted(root, "bounded_contexts")
+    if isinstance(bcs, dict) and bcs:
+        return True
+    kvd = _get_dotted(root, "key_value_design")
+    if kvd is not None and getattr(kvd, "key_patterns", None):
+        return True
+    for entity in entities.values():
+        one_of = getattr(entity, "one_of", None)
+        if isinstance(one_of, list) and one_of:
+            return True
+        fields = getattr(entity, "fields", None) or {}
+        if isinstance(fields, dict):
+            for field in fields.values():
+                if getattr(field, "references", None):
+                    return True
+    return False
+
+
+def check_orphan_entities(root: object) -> List[str]:
+    """WARN-only, never blocks status:complete (ledger IMP-012): an entity
+    nobody points at is either dead schema or a rename that missed a
+    reference. The invariant is CONNECTED, not merely inbound-referenced: a
+    union parent's own non-empty `one_of` and a mixin's own non-empty
+    `composes` are outbound ownership, so a union root (nothing else names
+    `Payload` - it names its variants) or a composing entity is never
+    flagged even when nothing else names it. Skips, and says so, when there
+    are fewer than two entities or no reference-bearing block exists to
+    check entities against - that is not the same as a clean pass."""
+    warns: List[str] = []
+    entities = _get_dotted(root, "entities")
+    if not isinstance(entities, dict) or len(entities) < 2:
+        return warns
+
+    if not _has_orphan_reference_surface(root, entities):
+        warns.append(
+            "orphan-entity check: no reference-bearing block (relationships, "
+            "edges, composition, cross_references, one_of, key_value_design, "
+            "bounded_contexts) is present to check entities against - "
+            "nothing was checked, which is not the same as a clean pass."
+        )
+        return warns
+
+    referenced = _referenced_entity_names(root)
+    for ename, entity in entities.items():
+        if ename in referenced:
+            continue
+        one_of = getattr(entity, "one_of", None)
+        composes = getattr(entity, "composes", None)
+        if (isinstance(one_of, list) and one_of) or (isinstance(composes, list) and composes):
+            continue  # outbound ownership - connected without being named elsewhere
+        warns.append(
+            f"entities.{ename}: nothing in this model references it (no "
+            f"relationship, edge, composition, cross_reference, one_of, "
+            f"key_value pattern, or bounded_context names it, and it "
+            f"composes nothing) - dead schema, or a rename that missed a "
+            f"reference. Wire it in, or drop it."
+        )
+    return warns
 
 
 def load_prd_features(
@@ -2009,10 +2289,20 @@ class DataDeferralIndex:
             _reason = str(_w.get("text") or "").strip()
             if not _reason:
                 continue
-            for _eid in (_w.get("defers") or []):
-                _eid = str(_eid).strip()
-                if _eid:
-                    self.declared.setdefault(_eid.upper(), _reason)
+            _ids = [str(_e).strip() for _e in (_w.get("defers") or []) if str(_e).strip()]
+            for _eid in _ids:
+                self.declared.setdefault(_eid.upper(), _reason)
+            # Warn-first (CLAUDE.md 10, ledger IMP-109): the canonical WRN block
+            # ignores a mapping whose id is not WRN-NNN, yet its deferral still
+            # counts for one more version - say so instead of honouring it silently.
+            _wid = str(_w.get("id") or "").strip()
+            if _ids and not _WRN_ID_RE.match(_wid):
+                self.shape_warnings.append(
+                    f"{label}data_warnings entry '{_wid}' still defers {', '.join(_ids)}, "
+                    f"but that id is not of the form WRN-NNN, so the warning itself is "
+                    f"ignored. The deferral counts for one more version only - give the "
+                    f"warning a WRN-NNN id."
+                )
 
     def defer(self, ids: Any, covered: Any = None) -> set:
         """The subset of `ids` this scope has deferred (structured first,
@@ -2255,8 +2545,8 @@ def check_provenance(dm: "DataModel", docs_dir: Path) -> List[str]:
             continue  # upstream absent - a missing input is Phase 2's finding, not a hash mismatch
         if current[:16] != recorded[:16]:
             warns.append(
-                f"built against an older docs/{fname} - run /sdlc:data to "
-                f"review the delta"
+                f"built against an older docs/{fname} - run /sdlc:data --reconcile "
+                f"to review the delta"
             )
     return warns
 
@@ -2366,6 +2656,8 @@ def validate_file(path: Path) -> int:
     volume_errs: List[str] = []
     store_gaps: List[str] = []
     union_gaps: List[str] = []
+    entity_ref_gaps: List[str] = []
+    orphan_warns: List[str] = []
     stored_in_warns: List[str] = []
     lifecycle_warns: List[str] = []
     paradigm_none_warns: List[str] = []
@@ -2414,6 +2706,8 @@ def validate_file(path: Path) -> int:
         gaps, si_warns = check_store_ids(root)
         store_gaps.extend(f"{scope}{g}" for g in gaps)
         union_gaps.extend(f"{scope}{g}" for g in check_union_integrity(root))
+        entity_ref_gaps.extend(f"{scope}{g}" for g in check_entity_ref_fields(root))
+        orphan_warns.extend(f"{scope}{w}" for w in check_orphan_entities(root))
         stored_in_warns.extend(f"{scope}{w}" for w in si_warns)
         lifecycle_warns.extend(f"{scope}{w}" for w in check_entity_lifecycles(root))
         # Volume-vs-scale only applies to paradigms with partitioning/sharding.
@@ -2470,6 +2764,11 @@ def validate_file(path: Path) -> int:
     # keeps the meta-corpus's private extension quiet until it is migrated).
     union_errs = union_gaps if _paradigm_gated else []
     union_warns = [] if _paradigm_gated else union_gaps
+    # Entity-ref-field resolution shares the 3.0 floor too (ledger IMP-012): a
+    # bare `entity:` string in these five blocks could not have been checked
+    # before this version existed, so a legacy artifact merely warns.
+    entity_ref_errs = entity_ref_gaps if _paradigm_gated else []
+    entity_ref_warns = [] if _paradigm_gated else entity_ref_gaps
 
     # Deferral hygiene (warn-level): malformed structured entries + ids that
     # only the deprecated prose fallback deferred.
@@ -2482,6 +2781,8 @@ def validate_file(path: Path) -> int:
             deferral_warns.append(dep)
 
     provenance_warns = check_provenance(dm, docs_dir)
+    # Ledger IMP-127: NEXT names the reconcile form while an upstream is stale.
+    stale_upstream = [w for w in provenance_warns if "built against an older" in str(w)]
 
     n_scopes = len(dm.products or {}) if (dm.metadata.monorepo and dm.products) else 1
     all_stateless = n_scopes > 0 and len(coverage_skips) == n_scopes
@@ -2520,6 +2821,7 @@ def validate_file(path: Path) -> int:
         or paradigm_decl_errs
         or store_gap_errs
         or union_errs
+        or entity_ref_errs
     )
     soft_problems = bool(uncovered_features or volume_errs)
 
@@ -2540,6 +2842,8 @@ def validate_file(path: Path) -> int:
         out += [f"a secondary store id is missing or invalid - {e_}"
                 for e_ in store_gap_errs]
         out += [f"a union entity cannot be resolved - {e_}" for e_ in union_errs]
+        out += [f"an entity-reference field does not resolve - {e_}"
+                for e_ in entity_ref_errs]
         if paradigm_decl_errs:
             out.append(
                 f"{len(paradigm_decl_errs)} store(s) do not say which kind of storage "
@@ -2571,6 +2875,10 @@ def validate_file(path: Path) -> int:
         out += [f"a union entity cannot be resolved - {e_} "
                 f"(this blocks from data_model_version 3.0)"
                 for e_ in union_warns]
+        out += [f"an entity-reference field does not resolve - {e_} "
+                f"(this blocks from data_model_version 3.0)"
+                for e_ in entity_ref_warns]
+        out += orphan_warns
         out += stored_in_warns
         out += lifecycle_warns
         out += paradigm_none_warns
@@ -2611,8 +2919,13 @@ def validate_file(path: Path) -> int:
                   f"{checked_features} PRD requirement(s) accounted for. /sdlc:api "
                   f"can run it (or skip to /sdlc:arch if there is no API).")
         print_findings([], soft)
-        print_next("/sdlc:api  (or /sdlc:arch if the system has no API)",
-                   show_glossary=bool(soft))
+        if stale_upstream:
+            print_next(f"/sdlc:data --reconcile  ({STALE_NOTE})",
+                       "then /sdlc:api  (or /sdlc:arch if the system has no API)",
+                       show_glossary=bool(soft))
+        else:
+            print_next("/sdlc:api  (or /sdlc:arch if the system has no API)",
+                       show_glossary=bool(soft))
         return 0
 
     # status == "draft"

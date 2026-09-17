@@ -104,9 +104,15 @@ runs:                                      # REQUIRED — list[Run]; may be empt
                                            #   resumed session can skip the
                                            #   migration - neither is what ran
                                            #   (ledger IMP-095)
-    skill_version_at_start: null           # OPTIONAL — state.migrations[0].from:
+    skill_version_at_start: null           # OPTIONAL — the `from` of the earliest
+                                           #   state.migrations[] entry whose `at`
+                                           #   falls INSIDE this run (>= started_at):
                                            #   the version a migrated run began
-                                           #   under (it spanned an upgrade)
+                                           #   under (it spanned an upgrade). A
+                                           #   migration that already finished in an
+                                           #   earlier, unrelated session on a reused
+                                           #   state file is not this run's — omitted
+                                           #   when none qualifies (ledger IMP-144)
     plugin_version: "0.6.0"                # OPTIONAL — see resolution chain in
                                            #   lessons.py --help
     plugin_version_source: marker          # OPTIONAL — flag | manifest | marker
@@ -161,10 +167,30 @@ lessons:                                   # REQUIRED — list[Lesson]; may be e
     skill_version: "1.3"                   # OPTIONAL — about the skill running
                                            #   now ($CLAUDE_SKILL_DIR): its
                                            #   SKILL.md footer; about another
-                                           #   skill: that skill's state file,
+                                           #   skill: that skill's state file
+                                           #   (unconditionally — including a
+                                           #   LEDGER-shaped one, code today: it
+                                           #   is what wrote what was observed),
                                            #   else the installed footer
     state_skill_version: null              # OPTIONAL — the state file's number
                                            #   when the footer won (see runs[])
+    footer_skill_version: null             # OPTIONAL — an AMBIENT lesson about
+                                           #   another skill's LEDGER-shaped state
+                                           #   (code today) whose installed footer
+                                           #   disagrees with the ledger's own
+                                           #   skill_version: the ledger is never
+                                           #   re-stamped between runs, so this is
+                                           #   the newer number nothing has run at
+                                           #   here yet — kept beside the primary
+                                           #   field (never replacing it) so a
+                                           #   human, and `--delta` dating from the
+                                           #   OLDER of the two, both see the skew
+                                           #   (ledger IMP-144). A flat/sharded
+                                           #   foreign state never sets this: it IS
+                                           #   re-stamped on its own next run, and
+                                           #   comparing it to the footer would
+                                           #   misdate the common case — a skill
+                                           #   genuinely still at an older version
     plugin_version: "0.6.0"                # OPTIONAL — what the maintainer dates
                                            #   the lesson from: has the named file
                                            #   changed since? unchanged = still

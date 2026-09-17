@@ -46,13 +46,21 @@ What it installs into the target project root (default: cwd):
                                           bullets the prd/ux/data/arch skills add.
   5. docs/INDEX.yaml                    — generated once now (no-op if docs/ empty).
 
-A project that generates docs/INDEX.yaml with its OWN tool (detected from the
-INDEX.yaml header and the hook commands) keeps that wiring: the generator copy,
-the docs-access rule, the hook, the CLAUDE.md section and the index generation
-are all skipped, and only the generator-agnostic pieces (glossary, lessons,
-findings, bump helper, version marker) are installed — the run reports
-`Status: partial`. Pass --force-stock to replace the project's own toolchain
-with the stock one (the foreign hook entry is removed).
+A project whose PostToolUse hook regenerates docs/INDEX.yaml with its OWN tool
+keeps that wiring: the generator copy, the docs-access rule, the hook, the
+CLAUDE.md section and the index generation are all skipped, and only the
+generator-agnostic pieces (glossary, lessons, findings, bump helper, version
+marker) are installed — the run reports `Status: partial`. Both .claude/
+settings.json and .claude/settings.local.json are read for that signal, though
+only settings.json is ever written. Pass --force-stock to replace the project's
+own toolchain with the stock one (the foreign hook entry is removed from
+settings.json; a hook in settings.local.json is reported, never edited).
+
+The INDEX.yaml HEADER is a narrower signal, and gates one step: when it names a
+generator that is not the stock one, that file is left exactly as it is and
+everything else is installed normally. A header this script does not recognise
+— hand-trimmed, or from an older stock generator — counts as ours, because
+guessing "foreign" there would silently un-wire a stock project.
 
 Run from the project root:
 
@@ -115,7 +123,14 @@ MIGRATE_WARNINGS_DEST_REL = ".claude/sdlc/migrate_warnings.py"
 WARNING_ITEM_DEST_REL = ".claude/sdlc/warning_item.py"
 MARKER_DEST_REL = ".claude/sdlc/sdlc-plugin.json"
 HOOK_MATCHER = "Write|Edit|MultiEdit"
-HOOK_TOKEN = "docs_index.py"  # idempotency marker inside the hook command
+# Idempotency marker inside the hook command: the stock generator's PATH, not
+# the bare file name. A project's own `python scripts/check_docs_index.py`
+# contains "docs_index.py" too, and matching that took the user's read-only
+# hook for ours and overwrote its command with the stock one - the same hook
+# --force-stock had just been taught not to delete (ledger IMP-118). The path
+# still matches a stock hook written with any python invocation, which is what
+# this test is for.
+HOOK_TOKEN = GENERATOR_DEST_REL
 # Commands that regenerate a docs index some OTHER way (the project runs its
 # own toolchain). A hook command containing one of these but not the stock
 # generator path marks the index wiring as the project's own. The bare
@@ -125,6 +140,10 @@ HOOK_TOKEN = "docs_index.py"  # idempotency marker inside the hook command
 FOREIGN_INDEX_TOKENS = ("docs_index", "docs-index")
 FOREIGN_INDEX_FILE_TOKEN = "INDEX.yaml"
 _GENERATOR_VERB_RE = re.compile(r"docs-index|\bindex\b|generate", re.IGNORECASE)
+# Verbs that only READ an index. A hook naming one of these and no generator
+# verb is a check, not a generator (ledger IMP-118).
+_READONLY_VERB_RE = re.compile(
+    r"\b(?:check|lint|validate|verify|audit|assert|grep|diff)\w*", re.IGNORECASE)
 SECTION_HEADING = "## SDLC Documents"
 INDEX_MARKER = "`docs/INDEX.yaml`"
 
@@ -161,6 +180,31 @@ never hand-edit either, and never record status in this file."""
 
 SECTION_SENTINEL = "Read them by slice via"
 
+# Every intro paragraph setup itself wrote before 0.9.0, verbatim. These are
+# the only lines a re-run may DELETE from inside the section; everything else
+# it finds there is the user's and is carried over. They are matched exactly,
+# because the substring that used to stand in for them ("Access the docs below
+# via") also occurs in sentences a user writes about the index, and those were
+# being deleted with no word to anyone (ledger IMP-117). A retired line this
+# set cannot recognise - a reflowed copy in an old project - is treated as the
+# user's and carried over, which is the harmless direction to be wrong in.
+RETIRED_ACCESS_NOTES = (
+    "**Access the docs below via `docs/INDEX.yaml`, sliced — never load "
+    "`PRD.yaml` or `DATA-MODEL.yaml` whole.** `INDEX.yaml` is a generated "
+    "location map (file + line range + summary per symbol); look a symbol up "
+    "there and `Read` only its range. Full protocol: "
+    "`.claude/rules/sdlc-docs-access.md`.",
+    "**Access the docs below via `docs/INDEX.yaml`, sliced — never load "
+    "`PRD.yaml`, `DATA-MODEL.yaml` or `TASKS.json` whole.** `INDEX.yaml` is a "
+    "generated location map (file + line range + summary per symbol, plus a "
+    "`shards:` inventory of every `docs/*__*` sub-artifact); look a symbol up "
+    "there and `Read` only its range. Full protocol: "
+    "`.claude/rules/sdlc-docs-access.md`.",
+)
+
+# The non-blank lines of the block above, as written today.
+_OUR_BODY_LINES = {ln.strip() for ln in SECTION_BODY.split("\n") if ln.strip()}
+
 # A bullet an older plugin version left behind: "- `docs/X`: ... by `sdlc-y` on
 # <ts>." They are inert now (nothing rewrites them), so they are reported and
 # left alone rather than deleted - this script never removes a line a user might
@@ -188,19 +232,29 @@ def _index_bullet(timestamp: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _reads_only(cmd: str) -> bool:
+    """True for a command that only INSPECTS an index - a lint, a validator, a
+    grep. A generator verb anywhere in the same command wins, so a chained
+    ``lint docs && docs-index`` still counts as regenerating."""
+    return bool(_READONLY_VERB_RE.search(cmd)) and not _GENERATOR_VERB_RE.search(cmd)
+
+
 def is_foreign_index_command(cmd: str) -> bool:
     """True when a hook command regenerates a docs index with a non-stock tool.
 
-    ``docs_index`` / ``docs-index`` in the command is enough on its own. The
-    bare ``INDEX.yaml`` token counts only together with a generator verb
-    (``docs-index`` / ``index`` / ``generate``) elsewhere in the same command,
-    so ``grep FR-001 docs/INDEX.yaml`` or a validator that reads the index is
-    never mistaken for a generator.
+    ``docs_index`` / ``docs-index`` in the command is a signal, but not proof:
+    ``python scripts/check_docs_index.py --strict`` carries the token and only
+    READS the file, and taking it for a generator disabled the whole stock
+    install - then ``--force-stock`` deleted the project's lint hook (ledger
+    IMP-118). So a command that names a checking verb and no generator verb is
+    not a generator. The bare ``INDEX.yaml`` token counts only together with a
+    generator verb, so ``grep FR-001 docs/INDEX.yaml`` is never mistaken for
+    one either.
     """
     if not cmd or GENERATOR_DEST_REL in cmd:
         return False
     if any(t in cmd for t in FOREIGN_INDEX_TOKENS):
-        return True
+        return not _reads_only(cmd)
     if FOREIGN_INDEX_FILE_TOKEN in cmd:
         rest = cmd.replace(FOREIGN_INDEX_FILE_TOKEN, " ")
         return bool(_GENERATOR_VERB_RE.search(rest))
@@ -224,28 +278,58 @@ def foreign_hook_commands(settings: dict) -> "list[str]":
     return found
 
 
-def detect_foreign_wiring(index_text: "str | None", settings: dict) -> "list[str]":
-    """Reasons this project runs its OWN index toolchain. Pure - no I/O.
+def foreign_index_reasons(index_text: "str | None") -> "list[str]":
+    """Reasons the docs/INDEX.yaml FILE was written by another tool. Pure.
 
-    Two signals, both cheap and both conservative: the docs/INDEX.yaml header
-    naming a generator that is not the stock one, and a PostToolUse hook whose
-    command regenerates an index without being the stock command. A false
-    positive only skips the index wiring (with a clear log line and a
-    --force-stock override); a false negative can only happen when there is no
-    index wiring present to clobber.
+    This signal gates one thing: whether this run regenerates that file. It
+    used to gate the hook, the CLAUDE.md section and the generator copy as
+    well, so a header naming another tool cost a project its whole install
+    (ledger IMP-118).
+
+    An index whose header this does not recognise - hand-trimmed, or written
+    by an older stock generator - is read as OURS. Nothing pins the stock
+    header's history, and the failure mode of guessing "foreign" is silent
+    abstention, which is worse than the overwrite --force-stock already covers.
+    """
+    if not index_text:
+        return []
+    first = next(
+        (ln.strip().lstrip("﻿").strip() for ln in index_text.splitlines()
+         if ln.strip().lstrip("﻿").strip()), "")
+    if "GENERATED" in first.upper() and GENERATOR_DEST_REL not in first:
+        return [f"docs/INDEX.yaml says it is generated by another tool: "
+                f"{first.lstrip('#').strip()}"]
+    return []
+
+
+def foreign_hook_reasons(settings: dict, local_settings: "dict | None" = None) -> "list[str]":
+    """Reasons another toolchain OWNS this project's index. Pure - no I/O.
+
+    A hook is positive evidence: someone wired a command that regenerates the
+    index. That is what makes this the signal that holds back the stock hook,
+    the CLAUDE.md section and the generator copy. Both settings files are read,
+    because a fork may declare its hooks in settings.local.json and setup would
+    otherwise wire a second generator beside it (ledger IMP-118).
     """
     reasons: "list[str]" = []
-    if index_text:
-        first = next((ln.strip() for ln in index_text.splitlines() if ln.strip()), "")
-        if "GENERATED" in first.upper() and GENERATOR_DEST_REL not in first:
+    for name, blob in ((".claude/settings.json", settings),
+                       (".claude/settings.local.json", local_settings or {})):
+        for cmd in foreign_hook_commands(blob):
             reasons.append(
-                f"docs/INDEX.yaml says it is generated by another tool: {first.lstrip('#').strip()}"
+                f"a hook in {name} already regenerates the index with another tool: {cmd}"
             )
-    for cmd in foreign_hook_commands(settings):
-        reasons.append(
-            f"an existing hook already regenerates the index with another tool: {cmd}"
-        )
     return reasons
+
+
+def detect_foreign_wiring(index_text: "str | None", settings: dict) -> "list[str]":
+    """Every reason this project may run its OWN index toolchain, both signals
+    together. Pure - no I/O.
+
+    Kept as one call because `repair/doctor.py` imports it to label its index
+    check. The installer itself uses the two halves separately: they gate
+    different things.
+    """
+    return foreign_index_reasons(index_text) + foreign_hook_reasons(settings)
 
 
 def strip_foreign_hooks(settings: dict) -> "tuple[dict, list[str]]":
@@ -330,14 +414,84 @@ def merge_hook(settings: dict, python_cmd: str) -> "tuple[dict, str]":
 # ---------------------------------------------------------------------------
 
 
+_FENCE_RE = re.compile(r" {0,3}(?:`{3,}|~{3,})")
+_ATX_RE = re.compile(r" {0,3}#{1,6}(?:\s|$)")
+
+
 def _find_section(lines: "list[str]", heading: str) -> "tuple[int, int] | None":
+    """`(start, end)` of the heading's section, or None when it is absent.
+
+    Two rules beyond "find the heading", both of them about not touching text
+    that is not ours (ledger IMP-117):
+
+      * the section ends at the next ATX heading of ANY level. Ending it only
+        at the next `## ` swallowed an `# Appendix` below it - the H1 and its
+        paragraphs were absorbed into the section and rewritten with it.
+      * lines inside a ``` or ~~~ fence are skipped, so a CLAUDE.md that only
+        QUOTES the heading in a code block is not mistaken for one that has
+        the section, and the block is not written into the fence.
+    """
+    start = None
+    fence = ""
     for i, line in enumerate(lines):
-        if line.strip() == heading:
-            j = i + 1
-            while j < len(lines) and not lines[j].startswith("## "):
-                j += 1
-            return i, j
-    return None
+        stripped = line.strip()
+        if _FENCE_RE.match(line):
+            token = stripped[0]
+            if not fence:
+                fence = token
+            elif fence == token:
+                fence = ""
+            continue
+        if fence:
+            continue
+        if start is None:
+            if stripped == heading:
+                start = i
+        elif _ATX_RE.match(line):
+            return start, i
+    return (start, len(lines)) if start is not None else None
+
+
+def _render_section(keep: "list[str] | None" = None) -> "list[str]":
+    """The section as lines: heading, our block, whatever is carried over, and
+    ONE trailing blank line.
+
+    All three write paths render through this - created, appended_section and
+    updated_section - so they cannot disagree about the trailing blank. They
+    used to: only the update path wrote it, so the FIRST re-run of every fresh
+    install changed one byte and `git diff CLAUDE.md` was not empty after all
+    (ledger IMP-117).
+    """
+    lines = [SECTION_HEADING, ""] + SECTION_BODY.split("\n")
+    if keep:
+        lines += [""] + list(keep)
+    return lines + [""]
+
+
+def _carried_over(body: "list[str]") -> "list[str]":
+    """The lines in the section that this script did not write, in order.
+
+    Blank lines INSIDE that block survive - a user's paragraphs, and the blank
+    line in their fenced example, are theirs - while blanks that merely
+    separated our own lines, and any at either end of the block, are dropped.
+    That normalisation is what keeps the render a FIXED POINT: a carried block
+    that kept its leading or trailing blank would gain a line on every run,
+    which is the same churn in a different disguise.
+    """
+    keep: "list[str]" = []
+    pending: "list[str]" = []
+    for line in body:
+        if not line.strip():
+            pending.append(line)
+            continue
+        if _is_ours(line):
+            pending = []
+            continue
+        if keep:
+            keep += pending
+        pending = []
+        keep.append(line)
+    return keep
 
 
 def upsert_claude_md(content: str, timestamp: str) -> "tuple[str, str, list]":
@@ -349,9 +503,8 @@ def upsert_claude_md(content: str, timestamp: str) -> "tuple[str, str, list]":
     Nothing outside the section is ever touched, and the file's own line
     endings are preserved by the caller.
     """
-    section = SECTION_HEADING + "\n\n" + SECTION_BODY + "\n"
     if not content:
-        return section, "created", []
+        return "\n".join(_render_section()) + "\n", "created", []
 
     had_trailing_newline = content.endswith("\n")
     lines = content.split("\n")
@@ -362,23 +515,21 @@ def upsert_claude_md(content: str, timestamp: str) -> "tuple[str, str, list]":
     if found is None:
         if lines and lines[-1].strip() != "":
             lines.append("")
-        lines += [SECTION_HEADING, ""] + SECTION_BODY.split("\n")
+        lines += _render_section()
         out = "\n".join(lines) + "\n"
         return out, "appended_section", []
 
     start, end = found
     body = lines[start + 1:end]
-    keep = [ln for ln in body if ln.strip() and not _is_ours(ln)]
+    # Anything in the section we did not write (the legacy bullets, or a note a
+    # user added) is preserved BELOW the block rather than dropped - blank
+    # lines included.
+    keep = _carried_over(body)
     # Only the bullets that SURVIVE are worth reporting: the retired access
     # note and INDEX bullet are ours and have just been replaced, so counting
     # those would report work this run already did.
     legacy = [ln for ln in keep if LEGACY_BULLET_RE.match(ln.strip())]
-    # Anything in the section we did not write (the legacy bullets, or a note a
-    # user added) is preserved BELOW the block rather than dropped.
-    new_body = [""] + SECTION_BODY.split("\n")
-    if keep:
-        new_body += [""] + keep
-    new_body += [""]  # one blank line before whatever heading follows
+    new_body = _render_section(keep)[1:]  # the heading is already in `lines`
     if body == new_body:
         action = "no-op"
     else:
@@ -391,16 +542,20 @@ def upsert_claude_md(content: str, timestamp: str) -> "tuple[str, str, list]":
 
 
 def _is_ours(line: str) -> bool:
-    """True for a line this script wrote in a previous run (any version)."""
+    """True for a NON-BLANK line this script wrote in a previous run.
+
+    Blank lines are nobody's here: `_carried_over` decides which of them are
+    structure and which are a user's paragraph break, because that depends on
+    what surrounds them, not on the line itself.
+    """
     stripped = line.strip()
     if not stripped:
+        return False
+    if stripped in _OUR_BODY_LINES:
         return True
-    if stripped in {ln.strip() for ln in SECTION_BODY.split("\n")}:
+    if stripped in RETIRED_ACCESS_NOTES:           # the retired intro note
         return True
-    return (
-        "Access the docs below via" in stripped        # the retired intro note
-        or INDEX_MARKER in stripped and "Wired by" in stripped  # retired bullet
-    )
+    return INDEX_MARKER in stripped and "Wired by" in stripped  # retired bullet
 
 
 # ---------------------------------------------------------------------------
@@ -579,13 +734,40 @@ def run(
     # malformed file should abort before anything is written.
     settings_path = project_root / ".claude" / "settings.json"
     try:
+        # Read BYTES, not text: read_text() decodes with universal newlines, so
+        # a CRLF file arrives as LF and the detection below could never see
+        # what the file actually uses - the same reason, and the same shape, as
+        # the CLAUDE.md branch further down (ledger IMP-006, IMP-116).
+        settings_raw = settings_path.read_bytes() if settings_path.exists() else None
         settings = (
-            json.loads(settings_path.read_text(encoding="utf-8"))
-            if settings_path.exists()
+            json.loads(settings_raw.decode("utf-8"))
+            if settings_raw is not None
             else {}
         )
     except (OSError, ValueError) as e:
         return 2, [f"[ERR] cannot read {settings_path}: {e}"], "failed"
+    # settings.json is the CONSUMER's file: they wrote it and they commit it,
+    # so it keeps the line endings it already has. A file this run creates is
+    # LF. (The marker below is the other case - the plugin generates it whole,
+    # so it is always LF.)
+    settings_newline = "\r\n" if settings_raw and b"\r\n" in settings_raw else "\n"
+
+    # settings.local.json is read for DETECTION only: a fork may declare its
+    # generator hook there, and setup would otherwise wire a second generator
+    # beside it (ledger IMP-118). This installer never writes that file, and a
+    # malformed copy is not this run's business, so it is ignored rather than
+    # fatal.
+    local_settings_path = project_root / ".claude" / "settings.local.json"
+    try:
+        local_settings = (
+            json.loads(local_settings_path.read_text(encoding="utf-8"))
+            if local_settings_path.exists()
+            else {}
+        )
+    except (OSError, ValueError):
+        local_settings = {}
+    if not isinstance(local_settings, dict):
+        local_settings = {}
 
     index_path = project_root / "docs" / "INDEX.yaml"
     try:
@@ -593,7 +775,12 @@ def run(
     except OSError:
         index_text = None
 
-    foreign = [] if force_stock else detect_foreign_wiring(index_text, settings)
+    # A foreign HOOK means another toolchain owns this project: the stock
+    # generator, docs-access rule, hook, CLAUDE.md section and index generation
+    # are all held back. A foreign index HEADER holds back one thing - the
+    # index file itself (ledger IMP-118).
+    foreign = [] if force_stock else foreign_hook_reasons(settings, local_settings)
+    foreign_index = [] if force_stock else foreign_index_reasons(index_text)
     removed_hooks: "list[str]" = []
     if foreign:
         log.append(
@@ -610,6 +797,24 @@ def run(
         settings, removed_hooks = strip_foreign_hooks(settings)
         for cmd in removed_hooks:
             log.append(f"  [{'would remove' if dry else 'removed'}] foreign index hook: {cmd}")
+        for cmd in foreign_hook_commands(local_settings):
+            log.append(
+                f"  [left untouched] {local_settings_path} (it also regenerates the "
+                f"index: {cmd}. /sdlc:setup only ever writes settings.json, so remove "
+                f"that hook by hand if you want the stock one to own the index)"
+            )
+    if foreign_index and not foreign:
+        log.append(
+            "  [own-index] docs/INDEX.yaml says another tool generates it, so this run "
+            "leaves that one file exactly as it is and installs everything else:"
+        )
+        for reason in foreign_index:
+            log.append(f"      - {reason}")
+        log.append(
+            "      the stock hook below regenerates docs/INDEX.yaml on the next docs/ "
+            "edit - remove that hook, or re-run with --force-stock, to settle which "
+            "tool owns the file"
+        )
 
     def _left_alone(dest: "Path | str", what: str) -> None:
         log.append(f"  [left untouched] {dest} ({what})")
@@ -680,8 +885,12 @@ def run(
         )
         if not dry and marker_action != "no-op":
             marker_path.parent.mkdir(parents=True, exist_ok=True)
+            # Generated wholesale by the plugin, so it is LF on every host.
+            # Preserving what was there would keep rewriting CRLF for every
+            # Windows project that already has one, and nothing else would ever
+            # heal it (ledger IMP-116).
             marker_path.write_text(
-                json.dumps(marker, indent=2) + "\n", encoding="utf-8"
+                json.dumps(marker, indent=2) + "\n", encoding="utf-8", newline="\n"
             )
             written += 1
 
@@ -699,7 +908,8 @@ def run(
         if not dry and hook_action != "no-op":
             settings_path.parent.mkdir(parents=True, exist_ok=True)
             settings_path.write_text(
-                json.dumps(new_settings, indent=2) + "\n", encoding="utf-8"
+                json.dumps(new_settings, indent=2) + "\n", encoding="utf-8",
+                newline=settings_newline,
             )
             written += 1
 
@@ -734,10 +944,30 @@ def run(
                 new_md.replace("\r\n", "\n").replace("\n", newline).encode("utf-8"))
             written += 1
 
-    # 5: initial index generation (skipped for a project running its own toolchain).
+    # 5b: the statusboard, so the project has one from minute one. It reads
+    # docs/ and the queues, never the index, so it is generated for a project
+    # that keeps its own INDEX.yaml too.
+    def _statusboard() -> int:
+        import subprocess
+
+        board = project_root / STATUSBOARD_DEST_REL
+        rc = subprocess.call([sys.executable, str(board), "--path", str(project_root)],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) \
+            if board.exists() else 1
+        if rc == 0:
+            log.append(f"  [generated] {project_root / '.claude/rules/sdlc-statusboard.md'}")
+            return 1
+        log.append("  [skipped] statusboard (needs pyyaml; run "
+                   "'python .claude/sdlc/statusboard.py' once it is installed)")
+        return 0
+
+    # 5: initial index generation - skipped for a project running its own
+    # toolchain, and for one whose index header names another generator.
     docs_dir = project_root / "docs"
-    if foreign:
+    if foreign or foreign_index:
         _left_alone(docs_dir / "INDEX.yaml", "generated by the project's own tool")
+        if foreign_index and not foreign and not dry and docs_dir.is_dir():
+            written += _statusboard()
     elif dry:
         log.append(f"  [would generate] {docs_dir / 'INDEX.yaml'}")
     else:
@@ -748,19 +978,7 @@ def run(
             target = docs_index.write_index(docs_dir)
             log.append(f"  [generated] {target}")
             written += 1
-            # 5b: the statusboard, so the project has one from minute one.
-            import subprocess
-
-            board = project_root / STATUSBOARD_DEST_REL
-            rc = subprocess.call([sys.executable, str(board), "--path", str(project_root)],
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) \
-                if board.exists() else 1
-            if rc == 0:
-                log.append(f"  [generated] {project_root / '.claude/rules/sdlc-statusboard.md'}")
-                written += 1
-            else:
-                log.append("  [skipped] statusboard (needs pyyaml; run "
-                           "'python .claude/sdlc/statusboard.py' once it is installed)")
+            written += _statusboard()
         else:
             log.append(f"  [skipped] {docs_dir} does not exist yet - index will be built on first doc write")
     log.append(f"  targets written: {written}")

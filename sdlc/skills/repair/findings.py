@@ -23,6 +23,17 @@ Usage:
     findings.py list --owed-by docs/<artifact> [--json]
                         # the re-invoke findings waiting on that file + the
                         # handoff notes left for it (read by every --reconcile)
+    findings.py reopen FND-NNN
+                        # a resolved/wontfix/deferred finding whose owed work
+                        # turned out incomplete (doctor.py --provenance's
+                        # "should be reopened" hint names the command).
+                        # Mode-aware: mode=re-invoke -> triaged, resolution
+                        # KEPT (downstream_rerun replayed unconditionally -
+                        # this script never asks which stage still needs it,
+                        # the repair session that reopened it decides); any
+                        # other mode -> open, resolution stripped, its
+                        # artifacts_touched folded into a new evidence line
+                        # so the walk record is not simply discarded.
     findings.py validate
     findings.py stats
   Global: [--project-root <dir>] [--path <queue path>] (before or after the verb)
@@ -33,11 +44,16 @@ record a second copy of a still-open defect (same detected_by + summary) unless
 wontfix finding already named the same symbol or task with the same kind.
 
 Exit codes:
-    0 — recorded (or deliberately not recorded: a duplicate), listed, or valid.
+    0 — recorded (or deliberately not recorded: a duplicate), listed, valid,
+        or reopened.
     1 — the entry was rejected: it would not validate, or a flag value is not
-        in the schema's enum. Nothing was written.
-    2 — the queue could not be read or parsed (or fails validation before the
-        append — repair it first), or could not be written.
+        in the schema's enum. Nothing was written. `reopen` on an id that is
+        not in the queue, or whose status is not resolved/wontfix/deferred,
+        is the same rejection.
+    2 — the queue could not be read or parsed, or could not be written. A
+        queue that merely FAILS VALIDATION does not block an append: the entry
+        lands and the run warns, because a producer must never lose a finding
+        to a row somebody else wrote (ledger IMP-124).
     3 — required dependency missing (pyyaml, pydantic v2, or
         validate_findings.py not reachable from this script).
 """
@@ -334,6 +350,67 @@ def owed_findings(data: Dict[str, Any], artifact: str) -> List[Dict[str, Any]]:
 
 
 # =============================================================================
+# Reopen — the sanctioned pen back into scope for a closed finding whose owed
+# work turned out incomplete (ledger IMP-158)
+# =============================================================================
+
+REOPENABLE_STATUSES = ("resolved", "wontfix", "deferred")
+
+
+def reopen_finding(data: Dict[str, Any], fnd_id: str) -> Tuple[Optional[Dict[str, Any]], List[str]]:
+    """Flip a closed finding back into scope, mode-aware — a blind status
+    overwrite would itself write the class of invalid row 1.17 just rejected
+    (an open finding still carrying a resolution block, or a triaged one
+    carrying a non-re-invoke mode):
+
+      - mode re-invoke -> triaged, resolution KEPT as-is (SKILL.md: a triaged
+        finding may carry exactly this partial-progress block). Its
+        downstream_rerun is replayed unconditionally; deciding which stage
+        still needs the reconcile is the repair session's call, not this
+        script's — it stays non-interactive.
+      - anything else (surgical / additive / none / no mode) -> open,
+        resolution stripped (SKILL.md: an open finding carries no resolution
+        block at all). The walk is not simply discarded: its
+        artifacts_touched is folded into one new evidence line, so a fresh
+        session still knows what was touched before, even though the finding
+        starts over.
+
+    Returns (the mutated finding, []) on success, or (None, [problem, ...])
+    without touching `data` when it cannot be reopened.
+    """
+    target = None
+    for f in data.get("findings") or []:
+        if isinstance(f, dict) and str(f.get("fnd_id")) == fnd_id:
+            target = f
+            break
+    if target is None:
+        return None, [f"{fnd_id} is not in this queue."]
+    status = target.get("status")
+    if status not in REOPENABLE_STATUSES:
+        return None, [f"{fnd_id} is status={status!r} - reopen only applies to "
+                      f"{'/'.join(REOPENABLE_STATUSES)}."]
+    res = target.get("resolution") if isinstance(target.get("resolution"), dict) else {}
+    if (res or {}).get("mode") == "re-invoke":
+        target["status"] = "triaged"
+        # resolution is kept exactly as recorded: SKILL.md's triaged +
+        # re-invoke shape, the same partial-progress block a run in progress
+        # already carries.
+    else:
+        touched = [str(a) for a in (res or {}).get("artifacts_touched") or []]
+        note = (f"reopened {_iso_utc_now()}: previously touched {_join_ids(touched, 6)} "
+                f"(resolution stripped on reopen)" if touched else
+                f"reopened {_iso_utc_now()} (resolution stripped on reopen)")
+        evidence = list(target.get("evidence") or [])
+        evidence.append(note[:MAX_EVIDENCE_LEN])
+        if len(evidence) > MAX_EVIDENCE:
+            evidence = evidence[-MAX_EVIDENCE:]
+        target["evidence"] = evidence
+        target["status"] = "open"
+        target["resolution"] = None
+    return target, []
+
+
+# =============================================================================
 # Dedupe + recurrence
 # =============================================================================
 
@@ -400,15 +477,23 @@ class EntryRejected(Exception):
 
 def append_findings(path: Path, entries: List[Dict[str, Any]], *,
                     dedupe_statuses=OPEN_STATUSES, allow_duplicate: bool = False,
-                    stamp_recurrence: bool = True):
-    """Validate-then-append. Returns (added, skipped):
-    added   = [(fnd_id, entry)] in the order they were written
-    skipped = [(entry, duplicate_of_id)] for entries a still-open twin covers
+                    stamp_recurrence: bool = True, tolerate_existing: bool = False):
+    """Validate-then-append. Returns (added, skipped, pre_existing_errors):
+    added    = [(fnd_id, entry)] in the order they were written
+    skipped  = [(entry, duplicate_of_id)] for entries a still-open twin covers
+    pre_existing_errors = problems the queue ALREADY had when this was called
 
     The whole candidate queue (existing rows + every new entry) is validated
-    before the file is touched. An invalid EXISTING queue raises QueueError
-    (repair it first); an invalid NEW entry raises EntryRejected and nothing
-    is written — not even the entries that were fine.
+    before the file is touched. An invalid NEW entry raises EntryRejected and
+    nothing is written — not even the entries that were fine.
+
+    `tolerate_existing` decides what an already-invalid queue means. Refusing
+    it (the default, and what the doctor sweep wants) protects a queue nobody
+    has repaired. For a PRODUCER — code's raising conditions, every skill's
+    close-phase drain — refusing it threw away a finding because of a row
+    written by someone else, at the one moment the finding had nowhere else
+    to go, so `cmd_add` passes True and reports the queue's own problem
+    instead (ledger IMP-124).
     """
     vf = validator_module()
     try:
@@ -420,11 +505,11 @@ def append_findings(path: Path, entries: List[Dict[str, Any]], *,
     # judged: a counter that fell behind the ids on disk is exactly the state
     # this helper exists to recover from, not a reason to refuse the append.
     data["last_ids"]["FND"] = next_fnd(data) - 1
-    _doc, errors, _warns = vf.validate_raw(data, str(path))
-    if errors:
+    _doc, pre_errors, _warns = vf.validate_raw(data, str(path))
+    if pre_errors and not tolerate_existing:
         raise QueueError(
-            f"{path} already fails validation ({len(errors)} problem(s)); nothing appended - "
-            f"run validate_findings.py and repair the queue first. First problem: {errors[0]}"
+            f"{path} already fails validation ({len(pre_errors)} problem(s)); nothing appended - "
+            f"run validate_findings.py and repair the queue first. First problem: {pre_errors[0]}"
         )
 
     counter = next_fnd(data)
@@ -459,16 +544,19 @@ def append_findings(path: Path, entries: List[Dict[str, Any]], *,
         counter += 1
 
     if not added:
-        return added, skipped
+        return added, skipped, pre_errors
 
     _doc, errors, _warns = vf.validate_raw(data, str(path))
-    if errors:
-        raise EntryRejected(errors)
+    # Only what THIS call introduced can reject it; a problem the queue
+    # already had is reported, not blamed on the new entry.
+    new_errors = [e for e in errors if e not in pre_errors]
+    if new_errors:
+        raise EntryRejected(new_errors)
     try:
         dump_findings(data, path)
     except OSError as e:
         raise QueueError(f"cannot write {path}: {e}")
-    return added, skipped
+    return added, skipped, pre_errors
 
 
 # =============================================================================
@@ -484,6 +572,53 @@ def _queue_path(args) -> Path:
 def _reject(reason: str) -> int:
     print(f"[FAIL] not recorded - {reason}", file=sys.stderr)
     return 1
+
+
+def _reject_all(problems: List[str]) -> int:
+    """Every bad flag at once, so one more run records the finding."""
+    if len(problems) == 1:
+        return _reject(problems[0])
+    print(f"[FAIL] not recorded - {len(problems)} flag(s) are wrong:", file=sys.stderr)
+    for p in problems:
+        print(f"  - {p}", file=sys.stderr)
+    return 1
+
+
+def kind_help(argv: "Optional[List[str]]") -> str:
+    """The --kind enum, spelled out - but only when the call is an `add`.
+
+    Reading the enum means importing the validator, which needs pydantic and
+    exits 3 without it. `list`, `stats` and `--owed-by` need neither, and a
+    --reconcile run reads the queue through `list`, so the import stays on the
+    path that already required it.
+    """
+    generic = "One of the FINDINGS.schema.yaml kinds (`add --help` lists them)."
+    if "add" not in (argv if argv is not None else sys.argv[1:]):
+        return generic
+    try:
+        return "One of: " + ", ".join(k.value for k in validator_module().Kind) + "."
+    except BaseException:
+        return generic
+
+
+def stage_help(argv: "Optional[List[str]]") -> str:
+    """The --suspected-stage enum, spelled out - but only when the call is an
+    `add` (kind_help says why the import stays on that path).
+
+    Read from vf.Stage, never hand-typed: the literal here listed nine stages
+    and went on listing nine after the enum gained `brief`, so the one flag
+    that could record a walk ending outside the pipeline looked invalid to
+    every agent composing the call from --help (ledger IMP-031; IMP-124 is the
+    same fix for --kind).
+    """
+    generic = "Your GUESS at the owning stage (FINDINGS.schema.yaml lists them)."
+    if "add" not in (argv if argv is not None else sys.argv[1:]):
+        return generic
+    try:
+        stages = "|".join(s.value for s in validator_module().Stage)
+        return f"Your GUESS at the owning stage ({stages})."
+    except BaseException:
+        return generic
 
 
 def _derive_raised_by() -> str:
@@ -513,12 +648,17 @@ def cmd_add(args) -> int:
     root = resolve_project_root(args.project_root)
     path = _queue_path(args)
 
+    # Every bad flag in ONE rejection. Reporting them one per run cost a
+    # round-trip each, on a call an agent composes from a SKILL.md template
+    # that enumerates none of the enums (ledger IMP-124; IMP-026 is the same
+    # fix in lessons.py).
+    problems: List[str] = []
     raised_by = args.raised_by or _derive_raised_by()
     if not RAISED_BY_RE.match(raised_by):
-        return _reject(f"--raised-by {raised_by!r} must be 'sdlc-<skill>' or 'user'.")
+        problems.append(f"--raised-by {raised_by!r} must be 'sdlc-<skill>' or 'user'.")
     kinds = [k.value for k in vf.Kind]
     if args.kind not in kinds:
-        return _reject(f"--kind {args.kind!r} is not one of: {', '.join(kinds)}.")
+        problems.append(f"--kind {args.kind!r} is not one of: {', '.join(kinds)}.")
     stages = [s.value for s in vf.Stage]
     stage = args.suspected_stage
     if stage is not None:
@@ -527,21 +667,23 @@ def cmd_add(args) -> int:
                   f"'{vf.LEGACY_STAGE_ALIASES[stage]}'.")
             stage = vf.LEGACY_STAGE_ALIASES[stage]
         if stage not in stages:
-            return _reject(f"--suspected-stage {stage!r} is not one of: {', '.join(stages)}.")
+            problems.append(f"--suspected-stage {stage!r} is not one of: {', '.join(stages)}.")
     summary = (args.summary or "").strip()
     if not summary:
-        return _reject("--summary must not be empty.")
+        problems.append("--summary must not be empty.")
     evidence = [str(e) for e in (args.evidence or [])]
     if not 1 <= len(evidence) <= MAX_EVIDENCE:
-        return _reject(f"evidence must be 1..{MAX_EVIDENCE} lines (got {len(evidence)}) - "
-                       f"a finding nobody can judge is a rumour; a wall of text is one too.")
+        problems.append(f"evidence must be 1..{MAX_EVIDENCE} lines (got {len(evidence)}) - "
+                        f"a finding nobody can judge is a rumour; a wall of text is one too.")
     for line in evidence:
         if len(line) > MAX_EVIDENCE_LEN:
-            return _reject(f"an evidence line exceeds {MAX_EVIDENCE_LEN} chars - summarize, "
-                           f"never paste whole artifacts.")
+            problems.append(f"an evidence line exceeds {MAX_EVIDENCE_LEN} chars - summarize, "
+                            f"never paste whole artifacts.")
     for rel in args.related or []:
         if not FND_RE.match(rel):
-            return _reject(f"--related {rel!r} is not an FND-NNN id.")
+            problems.append(f"--related {rel!r} is not an FND-NNN id.")
+    if problems:
+        return _reject_all(problems)
 
     surfaced: Dict[str, Any] = {}
     if args.qualified_task:
@@ -552,6 +694,13 @@ def cmd_add(args) -> int:
         surfaced["symbol"] = args.symbol
     if args.field_path:
         surfaced["field_path"] = args.field_path
+
+    if not args.detected_by and vf.EXPECTED_COUNT_RE.search(summary):
+        # Ledger IMP-104: the health check accepts a pinned count only from a
+        # finding that names its check. Never blocks - the entry still records.
+        print("  note: the summary pins expected_count but --detected-by is not set - the health "
+              "check accepts a pinned count only from a finding that names its check "
+              "(e.g. --detected-by data/validate_schema).")
 
     entry: Dict[str, Any] = {
         "fnd_id": None,   # minted by append_findings
@@ -576,7 +725,8 @@ def cmd_add(args) -> int:
     entry["resolution"] = None
 
     try:
-        added, skipped = append_findings(path, [entry], allow_duplicate=args.allow_duplicate)
+        added, skipped, pre_errors = append_findings(
+            path, [entry], allow_duplicate=args.allow_duplicate, tolerate_existing=True)
     except QueueError as e:
         print(f"[FAIL] {e}", file=sys.stderr)
         return 2
@@ -593,6 +743,12 @@ def cmd_add(args) -> int:
               f"Pass --allow-duplicate if it really is a second defect.")
         return 0
     fnd_id, written = added[0]
+    if pre_errors:
+        print(f"WARNINGS (1) - the queue was already broken before this entry:")
+        print(f"  - {path} fails its own validator ({len(pre_errors)} problem(s)), which "
+              f"nothing here wrote. The finding above was recorded anyway; run "
+              f"validate_findings.py and repair the queue, or /sdlc:repair cannot work "
+              f"from it. First problem: {pre_errors[0]}")
     line = f"[OK] recorded {fnd_id} ({written['kind']}) - /sdlc:repair will localize it"
     if written.get("recurrence_of"):
         line += (f"  [repaired before as {written['recurrence_of']}; came back "
@@ -700,6 +856,49 @@ def cmd_list(args) -> int:
         print(f"  {f.get('fnd_id'):<8} {str(f.get('status')):<9} {str(f.get('kind')):<26} "
               f"{str(f.get('raised_by')):<12} {stage:<28} {where}")
         print(f"           {str(f.get('summary') or '')[:110]}{rec}")
+    return 0
+
+
+def cmd_reopen(args) -> int:
+    vf = validator_module()
+    path = _queue_path(args)
+    fnd_id = str(args.fnd_id).strip().upper()
+    if not FND_RE.match(fnd_id):
+        return _reject(f"{fnd_id!r} is not an FND-NNN id.")
+    try:
+        data = load_findings(path)
+    except (OSError, yaml.YAMLError, ValueError) as e:
+        print(f"[FAIL] cannot read {path}: {e}", file=sys.stderr)
+        return 2
+    # The candidate write is judged against what the queue ALREADY has wrong,
+    # same rule as append_findings: only what THIS call introduces can reject
+    # it (line 477).
+    _doc, pre_errors, _warns = vf.validate_raw(data, str(path))
+    updated, problems = reopen_finding(data, fnd_id)
+    if problems:
+        return _reject_all(problems)
+    _doc, errors, _warns = vf.validate_raw(data, str(path))
+    new_errors = [e for e in errors if e not in pre_errors]
+    if new_errors:
+        print(f"[FAIL] not reopened - the result would not validate against "
+              f"FINDINGS.schema.yaml:", file=sys.stderr)
+        for e in new_errors:
+            print(f"  - {e}", file=sys.stderr)
+        return 1
+    try:
+        dump_findings(data, path)
+    except OSError as e:
+        print(f"[FAIL] cannot write {path}: {e}", file=sys.stderr)
+        return 2
+    if updated.get("resolution"):
+        detail = f"resolution kept (mode={updated['resolution'].get('mode')})"
+    else:
+        detail = "resolution stripped, walk recorded as a new evidence line"
+    print(f"[OK] {fnd_id} reopened -> status={updated['status']} ({detail})")
+    root = resolve_project_root(getattr(args, "project_root", None))
+    qp = Path(path).resolve()
+    owner = qp.parents[2] if qp.parent.name == "skills-state" and qp.parent.parent.name == ".claude" else root
+    _refresh_statusboard(owner)
     return 0
 
 
@@ -826,12 +1025,11 @@ def main(argv=None) -> int:
     p = sub.add_parser("add", help="Record one finding (validated before it lands).")
     p.add_argument("--raised-by", default=None,
                    help="sdlc-<skill> or user (default: derived from $CLAUDE_SKILL_DIR, else user).")
-    p.add_argument("--kind", required=True)
+    p.add_argument("--kind", required=True, help=kind_help(argv))
     p.add_argument("--summary", required=True, help="One line: what is wrong.")
     p.add_argument("--evidence", action="append", default=None,
                    help=f"Repeatable, 1..{MAX_EVIDENCE} lines, each <= {MAX_EVIDENCE_LEN} chars.")
-    p.add_argument("--suspected-stage", default=None,
-                   help="Your GUESS at the owning stage (prd|ux|design|data|api|arch|test|task|code).")
+    p.add_argument("--suspected-stage", default=None, help=stage_help(argv))
     p.add_argument("--suspected-source", default=None, help="docs/ path you suspect.")
     p.add_argument("--symbol", default=None, help="The smallest thing implicated (work_unit, TST, entity).")
     p.add_argument("--qualified-task", default=None, help="<cid>/TSK-NNN that hit it, if any.")
@@ -865,6 +1063,13 @@ def main(argv=None) -> int:
     _add_global_opts(p, sub=True)
     p.set_defaults(func=cmd_list)
 
+    p = sub.add_parser("reopen", help="Flip a resolved/wontfix/deferred finding back into "
+                                      "scope, mode-aware (the doctor sweep's --provenance report "
+                                      "names the id when one is owed a reopen).")
+    p.add_argument("fnd_id", metavar="FND-NNN")
+    _add_global_opts(p, sub=True)
+    p.set_defaults(func=cmd_reopen)
+
     p = sub.add_parser("validate", help="Run validate_findings.py on the queue.")
     _add_global_opts(p, sub=True)
     p.set_defaults(func=cmd_validate)
@@ -873,8 +1078,8 @@ def main(argv=None) -> int:
     _add_global_opts(p, sub=True)
     p.set_defaults(func=cmd_stats)
 
-    args = ap.parse_args(argv)
-    return args.func(args)
+    parsed = ap.parse_args(argv)
+    return parsed.func(parsed)
 
 
 if __name__ == "__main__":

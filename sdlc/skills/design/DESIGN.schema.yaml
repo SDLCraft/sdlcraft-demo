@@ -98,7 +98,13 @@
 # metadata — always at top level, present in both single- and multi-product mode
 # -----------------------------------------------------------------------------
 metadata:
-  design_version: "1.0"                     # schema version this file conforms to
+  design_version: "2.0"                     # schema version this file conforms to -
+                                            #   the prose-only deferral fallback (a bare
+                                            #   design_warnings mention, reported as
+                                            #   `[deferral hygiene]`, ledger IMP-019)
+                                            #   retires at this floor (validate_schema.py's
+                                            #   _prose_deferrals_allowed, _floor=2); a NEW
+                                            #   write stamps 2.0, an older stamp only warns
   last_updated: "2026-06-22T12:00:00Z"      # ISO-8601 UTC timestamp of last write
   generated_by: sdlc-design                 # always literal string "sdlc-design"
   session_id: "00000000-0000-0000-0000-000000000000"  # UUID of the interview session
@@ -176,7 +182,10 @@ metadata:
 # the way a malformed `deferrals` entry defers nothing. A malformed STRING is
 # the blocking error it has always been. New writes emit the mapping at
 # <name>_version >= 2.0 (DATA-MODEL: >= 3.0); `.claude/sdlc/migrate_warnings.py`
-# converts an existing artifact.
+# converts an existing artifact - from any skill but repair, run it as
+# `--by sdlc-<skill> --no-bump` (or bare: it derives both from
+# $CLAUDE_SKILL_DIR), so the changelog credits the skill that ran and the run
+# bumps the version once.
 design_warnings: []                         # list[string] of "WRN-NNN: <msg>"
 
 # deferrals — the structured DEFER half of the asset-brief coverage gate

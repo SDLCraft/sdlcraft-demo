@@ -104,6 +104,11 @@ First match wins:
 | 5 | Otherwise | the pipeline successor |
 | 6 | The successor is not implemented, or does not ship in this build — the **demo edition** (the free build) ships `setup` through `arch` plus `repair` and `lesson`; `test`, `task` and `code` ship only in the **full edition** | say so plainly, name what the user *can* do instead, and do **not** print it as a bare runnable command. Demo edition: the specification is complete, and test planning, the task graph and code generation are in the full edition — name the `homepage` from the plugin's `.claude-plugin/plugin.json` when it has one |
 
+Rule 3's `--stale` runs through the copy
+`${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks. An
+installed `docs_index.py` older than capability 5 rejects `--stale` with exit
+2, and that is not an empty stale list.
+
 The successor map:
 
 ```
@@ -132,7 +137,10 @@ in-run position while work remains, and the pipeline successor once the run is
 complete.
 
 `code` and `repair` already ship richer variants of this card (a resume card and
-a "what changed" card). Match their shape; do not invent a third.
+a "what changed" card). Match their shape; do not invent a third. Both carry
+`Status:` like every other card, and `lint_output_style.py` fails a card
+template without one, or one that prints the findings queue's state or field
+names (ledger IMP-154).
 
 ## What not to say
 

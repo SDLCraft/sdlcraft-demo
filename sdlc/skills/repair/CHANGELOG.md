@@ -7,6 +7,84 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.19 (2026-09-17) — A resolved finding can be reopened when its downstream never rebuilt, and a wontfix code-defect closure names the task to rebuild
+
+Ledger IMP-158: `findings.py reopen FND-NNN` — mode-aware: a re-invoke finding returns to `triaged` with its resolution and recorded `downstream_rerun` kept; a surgical or additive one returns to `open` with the resolution stripped and `artifacts_touched` folded into an evidence line; the write is validated first. `doctor.py --provenance` gains a "should be reopened" hint (JSON key `reopenable`) for a RESOLVED re-invoke finding whose owed artifact is stale by the existing `docs_index --stale` comparison — worded as staleness, never as a cause — and merges that resolved-but-stale set into `emit_findings`' owed registry before its loop, so the failing check is HELD and the reopen hint is the only channel (it would otherwise have minted a second finding with no handoff). Regressions: `doctor_selftest.py` `resolved_reopen_tests` (a sharded reconcile command) and a `findings_selftest.py` reopen section, red at 1.18.
+
+Ledger IMP-063 (repair half; code's `stale_task_findings()` join is in code 0.24): `resolution.located_stage: code` is ALLOWED on `status: wontfix` only — the closure where that value is honest — and a wontfix with `located_stage: code` and an empty `stale_tasks` WARNS (the closer forgot the task). back-propagation.md's "never localize to code" absolute gained its qualifier (walk the owner table first; only when every upstream contract states the fact correctly and the code alone diverges is the finding mis-raised) and SKILL.md Phases 2/3 say to name the owning task in `stale_tasks` — the channel code's plan gate reads. Fixtures `_smoke/19_wontfix_code_stale_tasks.yaml` (validates) and `20_wontfix_code_missing_stale_tasks.yaml` (warns). A status-agnostic join was rejected: an OPEN finding's stale_tasks is a plan for a spec nobody fixed yet.
+
+## 1.18 (2026-09-17) — Localizing a lone dangling reference to a retired id now names both outcomes and the durable retired-id channel `--check` offers
+
+Ledger IMP-177 (split from IMP-160's dossier). back-propagation.md's Step 3 said a single dangling reference to a legitimately retired id always means the referencing artifact holds a stale copy, while docs_index.py keeps a durable channel — `docs/INDEX.allow.yaml` `retired_ids` or the PRD's `metadata.retired_ids` — for a citation that is deliberate and is listed as "cited without a definition on purpose". The paragraph now names both outcomes, says the retiring changelog entry decides between them, and points at the channel. Pinned by a prose arm in `_smoke/doctor_selftest.py` (the two literal tokens, red at 1.17).
+
+## 1.17 (2026-09-16) — Phase 6 stops prescribing closes this skill's own queue validator rejects, and the doctor blames the file the defect is actually in
+
+Ledger IMP-131 and IMP-130, plus the doctor half of IMP-118.
+
+**The section headed "write it right the first time" was the source of the rejected writes.** Phase 6 told the agent to park a surgical fix with an unverifiable hop as `triaged` with a resolution block — which the queue validator appends to `errors`, so it blocks at every queue version — and to leave a re-invoke `triaged` with an empty downstream list, which v2 refuses. A finding in that state now stays `open`, and partial surgical progress goes in `evidence`, the queue's bounded slot that `doctor.py`, the statusboard and the owed-by listing already read; the earlier design put it in a state-file key that no script in this repository parses. Phase 1's resume rule moved in the same pass and is asserted as a PAIR with Phase 6's status word, because those two drifting apart is what produced this item. Also: a v2-gated rule is described as blocking rather than warning, citing the validator's own gate note; a hard-coded rule count is gone (AUTHORING section 8); Phase 4 names the brief exception; and the Phase 3 gate states its precedence, with the additive criterion winning when it holds, because this skill's own text calls the recurrence default "never a refusal of the in-run modes, just a changed default".
+
+**The doctor blamed the wrong file.** Accepted deviance and minted findings keyed on the crosscheck's target rather than the file the defect is located in, a per-line hold matched only extension-bearing names so a shard row was attributed to the system PRD, and a relative docs directory resolved against the working directory. All four are fixed at the reader. The fallback to the old key is **gated on the finding's own raised date**, not left permanent: an unconditional either-key match would have let a wontfix on the system file silence genuinely new shard defects, which is the accept-direction twin of the bug being fixed.
+
+The installer's own-toolchain predicate had a second copy here that would have disagreed with it for exactly the projects that item is about; it now mirrors both installer signals and an arm pins the agreement.
+
+**Additive mode owes a provenance stamp** (IMP-107). Its mechanics prescribed none, yet the canonical additive fix edits an upstream that a downstream shard is stamped against, so the Phase 5 staleness check exited 1 on a row the same block calls a missed stamp and routed to a reconcile that additive's own close says is not owed. An additive run AUTHORED the whole delta, so the stamp claim is true for it: additive's rule was the wrong side and is what moved. The stamp is prescribed under surgical step 5's existing rules, fresh pairs only, holding every other recorded upstream and reading the printout, upstream-first because other additive shapes stamp a chain. A bare instruction here would have re-opened the two items that exist precisely because an unqualified stamp forges a review. The verification prose also gained the re-stamp-only vocabulary its own verdicts already print.
+
+**The doctor now asks the installer instead of keeping its own copy.** The follow-up pass on IMP-118 found the two predicates differed FOUR ways, not one: the doctor's copy lacked the read-only narrowing, so a strict check script was a generator to one side and a mere check to the other; it never read the local settings file, and called an entry point that accepts none, so the LIVE path missed a fork's hook too; the two produced different reason text, which is the label a consumer reads; and one did not strip a byte-order mark. The old agreement arm was green on that tree, comparing only truthiness across seven cases, none of which distinguished them. A green pin over a real disagreement is worse than no pin. The doctor now imports the installer's two-signal API through a cached never-raising loader, keeping a mirror only for the unreachable-installer path, and 15 cases compare each signal as an exact list.
+
+Regressions: the new `_smoke/validator_contract_selftest.py` (11 assertions, red on HEAD) and `_smoke/additive_stamp_selftest.py` (6, with both guard assertions green before and after so the fix cannot pass by moving the wrong side), both registered in `_smoke/expected.yaml` and `run_smoke.py`; three cases in `_smoke/findings_selftest.py`; twelve in `_smoke/doctor_selftest.py`. Two stale descriptions of the old state in `references/edge-cases.md` were corrected in the same release, and the reconcile chain in `references/forward-propagation.md` now names the system file's own spelling rather than the bare form (IMP-145), alongside one site corrected for IMP-113.
+
+## 1.16 (2026-09-16) — `bump_artifact.py` reads the whole changelog, `findings.py add` never drops a producer's finding, and `migrate_warnings.py` credits the skill that ran it
+
+Ledger IMP-140, IMP-124. The bump refused any artifact whose FIRST changelog line was older than its version - which is also what an oldest-first list looks like, so a PRD carrying every line including the current one could not be repaired without `--force`. It now refuses only when no line names the version (a bump that never got its line) and reports an out-of-order list while prepending. `findings.py add` appends onto a queue that was already invalid (reporting the queue's own problem) while the doctor sweep keeps refusing it, lists every bad flag in one rejection, and enumerates `--kind` in `--help`. `migrate_warnings.py` derives `--by` from `$CLAUDE_SKILL_DIR` and then leaves the caller's own version bump alone. Regressions: `_smoke/bump_selftest.py`, `_smoke/findings_selftest.py`, `_smoke/migrate_selftest.py`.
+
+## 1.15 (2026-09-15) — The close card has a Status: row saying whether repair's edits are done, what each finding still owes and who runs it; the Findings: row translates queue states instead of printing `triaged` / `downstream_rerun`, and Next: prints the first owed command with its position and terminus
+
+Ledger IMP-154 (aicf LSN-087). The card counted findings in the queue's own
+words ("1 triaged (awaiting re-invocation)", "1 re-invoke awaiting
+downstream_rerun") and was one of three cards without a Status: row, so a run
+that fixed every finding at its source read as unfinished beside a Next:
+naming another skill. Phase 6 now holds one table from queue state to the
+Findings: phrase (closed / still owes N re-runs / not closable / not verified /
+parked), a first-match Status: procedure, and a Next: bullet per state that
+keeps exactly one command on the row. Phase 2 (the IMP-077 label) and the
+IMP-054 bullet point at the table instead of restating a literal. doctor.py's
+"awaiting re-invocation per FND-NNN (<command>)" label is unchanged: it names
+the command and is the shared owed-work label.
+
+Paths: `SKILL.md` Phase 2 (doctor labels), Phase 6 (the IMP-054 bullet, the
+card, "The `Findings:` and `Status:` rows", the Next: bullets). Pinned by
+`lint_output_style.py` `lint_cards()` (a card template must carry Status: and
+neither queue word, and so must a prose line that tells the agent what to
+print on the card) - red on the pre-fix tree with 7 violations; behaviour
+check `evals/evals.json` case 4, one added assertion.
+
+## 1.14 (2026-09-15) — A defect the walk surfaces beside the one being fixed, whose decision this run can obtain, is minted and worked in THIS run: it joins the queue, Phase 1 re-reads the queue after each finding closes, and its gate offers *decide it now* at position 1; a later-run sibling only when the decision is not this run's to take
+
+Ledger IMP-153 (aicf LSN-086). Phase 4's split clause sent the modelling
+half of a finding - and any adjacent defect the walk surfaced - to a sibling
+finding for a later run, against the same phase's "FIX IT in this run" rule,
+while Phase 3 had no way back for a defect found after its gate; one project
+overrode the agent at the gate. Criterion 2 is unchanged (a gate answer is
+recorded in the new finding's `resolution.summary`, not in the additive
+criterion), and there is no re-entry mid-Phase 4: a second fix between the
+first's steps 1-4 and 5-8 would move bytes the first's stamp then claims as
+reviewed (IMP-099/106), so the minted finding is worked after the current
+one's Phase 5 by the existing per-finding loop. IMP-107 (additive never
+stamps the downstream shard) sits in the adjacent sentence and is untouched.
+
+Paths: `SKILL.md` Phase 1 ("The queue is re-read after every finding
+closes"), Phase 4 (the split clause). Pinned by `evals/evals.json` case 15
+with `evals/fixtures/case15_adjacent_defect/` (an ARCH shard with one staged
+content finding and a planted, askable contradiction twelve lines below it;
+the run must mint and resolve the second finding in the same run) - red on
+the pre-fix skill.
+
+## 1.13 (2026-09-15) — `references/accepted-deviance.md` is the one statement of the accepted-deviance rule; `doctor --artifact` warns when a wontfix `expected_count` finding was not applied; surgical step 5 holds every recorded upstream it did not review
+
+Ledger IMP-104, IMP-106, IMP-108 (2026-09-15 retro).
+- New `references/accepted-deviance.md`; arch/test/task point at it instead of three diverging copies. `doctor.py --artifact` lists a wontfix `expected_count` finding whose `detected_by` names no check it runs (in WARNINGS and as `unapplied_deviance` in `--json`); the registry key stays `(detected_by, file)`. `findings.py add` and `validate_findings.py` warn on `expected_count` without `detected_by`. Pinned: `_smoke/deviance_clause_selftest.py` (new, swept), doctor_selftest and findings_selftest arms.
+- Surgical step 5 and `references/forward-propagation.md` pass `--hold-upstream` for every recorded upstream the run did not review, read the stamp's `re-stamped ...` lines before closing, and run the stamp through the helper resolver.
+
 ## 1.12 (2026-09-15) — Surgical step 5 stamps only a pair the Phase 2 snapshot showed fresh; a pre-existing stale pair is named on the close card and routed to its own reconcile, never stamped; `findings.py list --id` reads a finding a reconcile's delta cites
 
 Ledger IMP-099 (aicf LSN-080): a stamp claims that every delta between the recorded upstream

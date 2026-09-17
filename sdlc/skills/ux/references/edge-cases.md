@@ -86,11 +86,10 @@ the happy path.
   monotonically), surface a one-time warning to the user but proceed
   without rejecting.
 
-- **`WRN-NNN` counter drift.** If `state.last_ids.WRN` is lower than
-  the max WRN-NNN already in `ux_warnings` on disk (e.g. the user
-  copied warnings between projects), reconcile by setting the counter
-  to `max(on_disk, state) + 0` before writing the next warning. Same
-  rule for `SCR-NNN`.
+- **`WRN-NNN` / `SCR-NNN` counter drift.** Covered by the canonical resume
+  recipe (`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` → "Resume
+  with stale state"; AUTHORING §5's `max(state counter, highest id present
+  on disk)`), not restated here.
 
 ## Surface-inventory edge cases
 
@@ -234,13 +233,11 @@ filesystem read-only (offer to write to a different path),
 
 ## Resume with stale state
 
-If the state file's `skill_version` is older than the current skill's,
-migrate it **additively** before the resume prompt — bump the version, add
-the missing baseline keys with empty defaults, record a `migrations` entry,
-touch no answer or theme list — then offer resume at position 1. Canonical
-recipe: `prd/references/edge-cases.md` → "Resume with stale state" (CLAUDE.md
-State file contract). Only a state file NEWER than the skill gets "warn and
-offer a clean restart".
+SKILL.md's Phase 1 carries the inline trigger (all four states, plus the
+older-`skill_version` line). The canonical recipe — the additive migration,
+and the theme-list / `last_ids` reconciliation — lives in
+`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` → "Resume with stale
+state". Nothing to add here.
 
 ## Hallucination-guard violation
 

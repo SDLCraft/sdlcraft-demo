@@ -7,6 +7,80 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.20 (2026-09-17) — The index resolves every sanctioned item spelling it used to decline to block, indexes ARCH failure modes and security concerns, tells index-new from document-new on the first drift after an upgrade (capability 9), and the always-loaded docs-access rule carries only the read protocol
+
+Ledger IMP-160: SCR/USR/OPR/AST/QUE items written with `id:` not first, single-quoted, or as a single-line flow mapping (the QUE form prd's own SKILL.md instructs) now resolve under `--show` and `--refs`, not only pass `--check` — one quote/bracket-aware tokenizer serves both the definition scan and the unaddressable fallback, which used to record an `id:`-looking token from inside quoted prose as the item's id (the red team's phantom `QUE-999`); that phantom is no longer swallowed and never resolves. Round two of IMP-028, whose remedy indexed only the block shape.
+
+Ledger IMP-161: `failure_modes[].id` and `security_concerns[].id` (container- and component-level) are symbols, keyed qualified `<cid>/<id>` so a risk id never collides with a same-named component; `targets_failure_mode` / `targets_security_concern` resolve the bare id inside the citing shard's container and get the dangling check every family has; a mitigation-only edit is now "changed in body" under `--drift` instead of "re-stamp only", so `test --reconcile` asks. `--stamp` records the capability it was made with and `--drift` classifies items visible only since a later capability as index-new — one line, "re-stamp only", never a question — so the first drift after this upgrade does not walk N phantom additions. Consumers pick this up with one `/sdlc:setup` re-run. Regressions: new `_smoke/index_selftest.py` arms (33), `wire_selftest.py`'s pinned capability string.
+
+Ledger IMP-141 (AUTHORING §19): `assets/sdlc-docs-access.md` — installed into every consumer session as `.claude/rules/sdlc-docs-access.md` — drops its write-time paragraphs (`--stamp`, `--items`, `--drift`, `--stale`, and the `${CLAUDE_SKILL_DIR}` "no installed copy" fallback, which restated `references/helper-resolution.md` and named a variable no ambient session defines); a skill run reads those steps from its own SKILL.md phase text. The asset keeps the read protocol (`--show`, `--refs`, `--check`, `--find`, `--hash`, the content hash) plus one sentence pointing a project with its own generator at `references/helper-resolution.md`. The four installed rule files now share one byte budget in the repo-root `lint_context_budget.py` (modelled on the statusboard's own cap), which also bans skill-run mechanics from the three protocol assets and the skill-dir variable from all four; the glossary keeps naming the flags because it defines the headings the terminal prints.
+
+## 1.19 (2026-09-16) — The index reads a requirement item whatever its spelling, so a correct PRD stops failing the id check
+
+Ledger IMP-159.
+
+**This file disagreed with itself.** `_FR_ITEM_RE` accepted either quote while `_SYMBOL_ITEM_RE` and `_DEF_LISTITEM_RE` demanded a double one — so a single-quoted NFR, WKF, ACR or ENT was not a definition at all, every structured reference to one came back **dangling**, and `--check` exited 1 on documents that were correct. That is a blocking false reject, not a silent miss, and it is worth saying plainly: of the spellings this item covers, the single-quoted one was the loudest failure and the wrapped one the quietest. Both patterns now accept either quote.
+
+The summary was wrong wherever it was produced: built from the item's first physical line alone, so a wrapped item lost its continuation and a comment-tailed one carried both the closing quote and the comment into the index. `_item_text()` now builds it from the item's full line range — which `_block_end` had already computed — for the FR arm and the other-families arm alike.
+
+`CAPABILITY_VERSION` 7 → 8; consumers re-run `/sdlc:setup` to pick it up, and the board reports the new number. One consequence to expect rather than be surprised by: the first `--drift` after the upgrade may report items as *added* that were always there, because a previously unindexed single-quoted item becomes a real symbol with a body hash. That is a capability artifact, not a document edit.
+
+Pinned by new `_smoke/index_selftest.py` arms over a re-spelled corpus: `--check` clean, `--show` resolving each single-quoted family, the wrapped summary carrying its continuation, and the comment-tailed one carrying neither quote nor comment.
+
+## 1.18 (2026-09-16) — A re-run stops rewriting hand-written project instructions, stops clobbering a project's own toolchain, and the board reads warnings through the canonical parser instead of its own copy
+
+Ledger IMP-117, IMP-118, IMP-116, IMP-110 and IMP-119, plus a second defect found while fixing them.
+
+**The re-run was not idempotent and was destructive at the edges.** The section was rebuilt from non-blank lines, so a user's two-paragraph note or a fenced block lost its blank lines; the section ended at the next `##`, so a following `#` heading was swallowed; a `## SDLC Documents` line inside a code fence was treated as the section; and the retired 0.8.0 intro was matched as a substring, so a user line that merely contained the phrase was deleted. The scanner is now fence- and heading-aware, the retired line is matched exactly, one renderer serves the created, appended and updated paths, and the carried-over block is normalised to a FIXED POINT — naively keeping blank lines would have made the block grow by one per run, which the existing idempotence assertion would have caught. A reflowed retired line now has a case asserting it SURVIVES, so the safe failure is pinned rather than incidental.
+
+**Own-toolchain detection could both clobber and abstain.** It demanded positive proof of a fork, so a project whose index header was hand-trimmed or written by an older generator got its index replaced; and it treated any hook merely mentioning the generator — including a read-only CI check — as a foreign generator, which disabled the whole install. A foreign HOOK, read from `settings.json` **and** `settings.local.json` and excluding read-only verbs, is what gates the install now, because a hook is positive evidence of another toolchain; a non-stock index header gates only index generation; an unrecognised header is treated as ours. Inverting the header test globally, which was the first design, would have silently un-wired stock projects across all three install steps.
+
+**Found while fixing that:** the hook-merge token was the bare substring `docs_index.py`, so a project with its own `check_docs_index.py` hook had it OVERWRITTEN rather than preserved. It now targets the generator path. Two required assertions were unreachable until this was fixed.
+
+**Line endings are an ownership question, not one rule.** Files this installer generates wholesale (the marker) are written LF; files the consumer authors (`settings.json`) have their endings detected from bytes and written back unchanged. A single "preserve on rewrite" rule would have frozen CRLF forever in the marker, since every Windows project that ever ran setup already holds it that way and nothing else rewrites it. The CRLF selftest's glob now covers `.json` and `.yaml`, and the assertions compare bytes before and after rather than looking for absent CRLF — an absence check passes on the pre-fix tree on POSIX and would pin nothing off Windows.
+
+**The board no longer keeps its own copy of the warning rules.** `statusboard.py` imports the canonical parser through the loader pattern already in that file, so the always-loaded board stops printing as live caveats the entries every validator reports as ignored; `STATUS.md` gains one counted line naming BOTH refusal channels, since a line covering only the non-blocking one would have hidden a blocking entry from both files. The duplicate kind/status/impact tuples are gone.
+
+**The index generator stops blocking on YAML it cannot address.** Ids carried by a definition shape the line scanner cannot parse are recorded as unaddressable at scan time; a reference to one is neither an edge nor dangling, and one non-blocking warning names the id, its site and the rewrite that would index it. An id nothing defines in any shape still blocks — that direction is pinned too, because a blanket never-block rule would have hidden the defect the gate exists to catch.
+
+Regressions: `_smoke/wire_selftest.py` (12 and 13 assertions red across two of the items), `_smoke/statusboard_selftest.py` section 9, and `_smoke/index_selftest.py` section 16 — 7 of 283 red before the fix.
+
+## 1.17 (2026-09-16) — The statusboard's Next names the command an owed finding is waiting on, and `--find` accumulates repeated filters
+
+Ledger IMP-132, IMP-115. `next_step` sent every non-resolved finding to `/sdlc:repair`, so mid-reconcile the always-loaded board contradicted the doctor output from the same moment and the chain stalled. The board now imports `findings.py` (installed beside it) and reads `awaiting_registry`, so the owed-work rule keeps one owner; decided findings (wontfix, deferred, duplicate) no longer count as open; a Pro-only owed command is described rather than printed in the free edition. `docs_index.py --find` takes `action="extend"`. Regressions: `_smoke/statusboard_selftest.py`, `_smoke/index_selftest.py`.
+
+## 1.16 (2026-09-15) — `docs_index.py` capability 7: `--drift` marks every removed or changed upstream item the artifact references or cites (`[referenced here]`, `[cited in prose xN]`, a unit's name in a directive included) and calls an upstream whose changed items carry no mark `re-stamp only` (`--stale` rows too); `--stamp` and `--drift` warn when the artifact references items of an earlier-stage file its stamp does not record
+
+Ledger IMP-147 (aicf LSN-084) and IMP-148 (aicf LSN-085). The changed-in-body
+list is the operand a reconcile's step 4 filters to "only items this file
+traces or covers", and the helper left that filter to the reader - a prose
+cite at four sites was invisible to a hand filter over structured traces. A
+system test that drove a container unit's contract had never recorded the
+unit's shard as an upstream, and nothing compared a stamp with what the file
+references.
+
+- `_item_delta_lines` marks each removed or changed item from `my_refs`
+  (structured) plus a targeted prose scan of the artifact for the item's id
+  or bare name outside its metadata block and changelogs (`_cite_counts`,
+  `_artifact_scan_ranges`); each family counts its marked items; an upstream
+  with none is labelled `re-stamp only` in `--drift` and in `--stale` rows
+  (`restamp_only` in `--stale --json`). No new index field.
+- `_provenance_gaps` / `_gap_warnings`: `--stamp` (also `provenance_gaps` in
+  `--json`) and `--drift` warn when the artifact references items defined in
+  an earlier-stage file that the stamp does not record - same-family shards
+  and later-stage files excluded, only for owners with a `--reconcile` form.
+- `CAPABILITY_VERSION` 6 -> 7 (consumers re-run `/sdlc:setup`);
+  `assets/sdlc-docs-access.md` and `references/helper-resolution.md` say so.
+- Pinned by `_smoke/index_selftest.py` sections 12d and 12e (red on the
+  pre-fix helper: 7 assertions) and `_smoke/wire_selftest.py` (capability 7).
+
+## 1.15 (2026-09-15) — `docs_index.py` capability 6: the hook refreshes only for files directly in the project's own docs dir, `--stamp` names every re-stamped upstream whose items moved and `--hold-upstream` keeps one untouched; installed helpers are used only when their capability matches the plugin, and the statusboard says when `/sdlc:setup` should be re-run
+
+Ledger IMP-034 (reopened), IMP-106, IMP-108 - found by the 2026-09-15 retro (lessons/retro/2026-09-15/).
+- `docs_index.py --hook` resolves the docs dir as `--docs-dir`, else `<--project-root>/docs`, else the `docs/` beside the nearest `.claude/`, and refreshes only for a file directly in it. It used to match any path with a `docs` component (state files, `src/config.yaml`) and wrote the index into the first `docs` ancestor. `_smoke/index_selftest.py` section 8b now feeds absolute paths under a docs-named ancestor and is red on the 0.6.0 generator.
+- `--stamp` prints `re-stamped <file>: <ids> changed ... since the last stamp - reviewed by this run?` for each recorded upstream it refreshes whose items moved, and `--hold-upstream FILE` (repeatable) keeps that recorded entry byte-identical so `--drift` still owes its delta. `CAPABILITY_VERSION` 5 -> 6. Pinned in index_selftest section 15.
+- New `references/helper-resolution.md`: a skill runs the installed `.claude/sdlc/docs_index.py` only when the marker records a capability at least the plugin copy's; otherwise the plugin copy, and the user is told once to re-run `/sdlc:setup`. `statusboard.py` adds one line to both boards when the install lags. Pinned by `_smoke/helper_resolution_selftest.py` and `_smoke/statusboard_selftest.py` (now swept by run_smoke).
+
 ## 1.14 (2026-09-15) — `docs_index.py --drift` prints its item lists and the fallback residue whole (they are the delta a reconcile takes verbatim), `--check` names every ambiguity candidate, and `--stale` warns about sha-only stamps (no items map), naming the re-stamp
 
 Ledger IMP-097 (aicf LSN-078): the canonical reporting block's `join_ids(ids, 8)` capped

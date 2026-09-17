@@ -7,6 +7,22 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.13 (2026-09-17) — Provider integrations are typed and traced to the PRD's INT ids, the theme runs for a CLI or library too, the reason-less non_api_features escape closes at a floor new writes actually stamp, and Phase 1 is the shared four-state trigger
+
+Ledger IMP-011: `external_dependencies[]` entries are typed and carry `integration_ref: INT-NNN`, resolved against `PRD.integrations_required` the way arch's `check_int_binding` does — no second INT id family (the red team caught the draft minting one). The integrations theme runs even at `api_kind: none` (the 14-integration CLI that had to smuggle provider contracts into ARCH prose), and `applicability: not_applicable` is stamped only when the kind is none AND the list is empty. Blocking from `api_version` 2.0, warning below. Regression: `_smoke/14_integration_contracts_at_floor.yaml` (exit 1) / `15_…_below_floor.yaml` (exit 0). Ownership recorded for later: api's entry is the provider contract, arch's `external_contract` the realization pointer; codegen reads neither today.
+
+Ledger IMP-129 (api half; the arch half ships in arch's own entry): `check_feature_coverage` honours a bare `non_api_features` entry only below `api_version` 2.0; the uncovered-FR error text and resource-discovery.md now point at the typed `deferrals` list instead of inviting the escape; `evals/grade.py` counts `deferrals[].id` as coverage (it read only the bare list, so a correct post-fix output would have graded red). The schema template stamps 2.0 and merge-validate.md says new writes do — the floor was dead code on every file the skill wrote while the template said "1.1". Regression: `_smoke/16_deferral_floor/` (exit 1); fixture 10 is the below-floor legacy form. The task-side reader of arch's list is IMP-176.
+
+Ledger IMP-112 / IMP-173 / IMP-174 / IMP-016: Phase 1 is the five-line trigger every interview skill shares — `in_progress`; artifact present → scope the update per ux's upstream-reconciliation.md REFINE row, then merge; artifact ABSENT → restart-from-partial_answers or discard, never resume; no state file; an older `skill_version` → prd's edge-cases.md recipe. The counter stub in merge-validate.md and the stale-state restatement in edge-cases.md are pointers to that recipe, whose formula is max(state counter, highest id on disk — the canonical file and every `API__*` shard). Pinned by prd's `_smoke/resume_recipe_lockstep_selftest.py`.
+
+## 1.12 (2026-09-16) — A stale upstream routes NEXT to `/sdlc:api --reconcile`, and the Phase 8 pointer-write prose is gone
+
+Ledger IMP-127 and IMP-111. Regression: `_smoke/output_honesty_selftest.py` (fixture 11).
+
+## 1.11 (2026-09-15) — Phase 2's upstream validator stops honour accepted deviance (`doctor.py --artifact`); a typed deferral with a malformed WRN id warns; `docs_index.py` calls run the copy `helper-resolution.md` picks
+
+Ledger IMP-104, IMP-108, IMP-109 (2026-09-15 retro). Eval case 4 (phase-2-accepted-deviance) pins the gate on `evals/fixtures/accepted-deviance/`.
+
 ## 1.10 (2026-09-15) — Phase 7 stamps provenance through `docs_index.py --stamp` over every file read, `UX__<surface>.yaml` shards included, instead of a hand-written sha-only entry for the three canonicals
 
 Ledger IMP-102 (aicf LSN-083, the arch lesson's sibling sweep): the write paragraph told the

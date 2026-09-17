@@ -53,7 +53,8 @@ in it.
   each upstream consumed — `docs/PRD.yaml` and `docs/UX.yaml` — each
   `{file, session_id, last_updated, sha256}`. `sha256` from
   `docs/INDEX.yaml.generated_from[<file>]`, or
-  `python .claude/sdlc/docs_index.py --hash docs/<file>`, else the text-level
+  `python .claude/sdlc/docs_index.py --hash docs/<file>` (the copy
+  `${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks), else the text-level
   hash `sha256(read_text(encoding='utf-8').encode()).hexdigest()[:16]` —
   never raw bytes (a byte hash differs between CRLF and LF checkouts). See
   CLAUDE.md §7 and `sdlc/skills/ux/references/upstream-reconciliation.md`.
@@ -63,6 +64,16 @@ in it.
     covered (brief or deferral).
   - `draft` on EXIT, any null required field, composition mismatch, or an
     uncovered asset.
+
+## Version stamp (new writes)
+
+`metadata.design_version` (DESIGN.yaml): a NEW write stamps `"2.0"` or
+higher — the prose-only deferral fallback (a bare `design_warnings` mention,
+reported as `[deferral hygiene]`, ledger IMP-019) retires at/after 2.0, and
+an older stamp silently keeps the fallback live instead of retiring it
+(CLAUDE.md §10). The update flow on an existing artifact bumps the version's
+minor number and never crosses a floor by itself — moving 1.x → 2.0 needs an
+explicit reason, not an automatic edit.
 
 ## Running the validator
 
@@ -79,7 +90,7 @@ coverage** (trace-or-defer). It also prints advisory notes (e.g. an
 | Code | Meaning | Agent action |
 |---|---|---|
 | 0 `[OK]` | complete, composition consistent, every asset covered | ✓ Proceed to Phase 8. |
-| 0 `[DRAFT]` | draft — schema valid, maybe missing fields / coverage | Inform user; proceed to Phase 8 (pointer still injected). |
+| 0 `[DRAFT]` | draft — schema valid, maybe missing fields / coverage | Inform user; proceed to Phase 8. |
 | 1 `[FAIL]` | schema invalid, OR `complete` with missing fields / composition error / id-prefix violation / uncovered asset | Show errors verbatim. Offer via `AskUserQuestion`: fix now, or accept `draft`. Re-validate after re-entry. |
 | 2 | Cannot read/parse a file | Surface to user (missing file, bad YAML, permissions). Don't retry silently. |
 | 3 | Missing dependency | Validator prints `pip install`. Ask user to install; don't auto-install. |
@@ -137,13 +148,16 @@ also does this, but a mid-session hook only activates next session). Then set
 state `status: complete`, keep the file, and tell the user:
 
 > "Design spec written: `docs/DESIGN.yaml`" + the sub-files. "Index and
-> statusboard refreshed. Downstream coding agents (and `sdlc:arch`/`sdlc:task`)
+> statusboard refreshed. Downstream coding agents (and `sdlc:task`)
 > can now style every surface and scaffold the asset pipeline from these."
 
 ## Downstream-agent contract
 
 Downstream skills/agents MUST reject the design artifacts if
 `DESIGN.yaml.metadata.status != "complete"` OR the validator exits non-zero.
+The one exception is to the exit code, never to the status: a failure every
+check of which `doctor.py --artifact docs/DESIGN.yaml` reports as accepted
+deviance does not reject (`sdlc/skills/repair/references/accepted-deviance.md`).
 
 > **Field-level errors are the one thing you show verbatim** — the field path
 > *is* the fix, so paraphrasing it costs the user the answer. Everything else

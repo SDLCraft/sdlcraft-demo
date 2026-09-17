@@ -34,14 +34,34 @@ by different machinery:
 | Meaning | Trigger | Handled by |
 |---|---|---|
 | **Resume** an interrupted session | state file `status: in_progress` | the state-file resume prompt (Phase 1) |
-| **Refine / extend** deliberately | state `complete`/`aborted`, upstream *unchanged* | the merge/update flow (`references/merge-validate.md`) |
+| **Refine / extend** deliberately | state `complete`/`aborted`, upstream *unchanged* | [the refine-scoping step](#refine-scoping) below, then the merge/update flow (`references/merge-validate.md`) |
 | **Reconcile** because upstream changed | state `complete`/`aborted`, upstream *changed* | **this document** — in the plain invocation before its interview, or alone as `--reconcile` |
 
 The first two are well-defined and uniform across skills. This document
-governs only the third — the case the user most often re-invokes for
-("the PRD/UX/DATA/API moved under me"). The three are not mutually
-exclusive in one run (a resume can also discover upstream drift); run
-resume first, then the delta-review below before the theme interview.
+governs the third — the case the user most often re-invokes for ("the
+PRD/UX/DATA/API moved under me") — and the refine row's scoping step below.
+The three are not mutually exclusive in one run (a resume can also discover
+upstream drift); run resume first, then the delta-review below before the
+theme interview.
+
+### Refine scoping (before Phase 7 merge) {#refine-scoping}
+
+A `complete`/`aborted` re-invocation with upstream unchanged still needs a
+scope before Phase 7's merge — otherwise the agent either re-walks every
+theme or invents its own scoping question each run. Open only:
+
+1. **The themes the user names** — or, for a sharded skill, the shard the
+   user names (a surface, a resource, a container).
+2. **The §7 delta items**, if a delta-review just ran.
+3. **The non-confirmed set** — an open `QUE` entry that blocks a theme, an
+   inventory field the current schema defines that the artifact still
+   holds as `null`, any bucket a `finding` names, and a legacy plain-string
+   ACR/QUE id, routed through the skill's id-migration helper (prd's
+   `migrate_ids.py`) rather than a buried inventory hint.
+
+Confirm everything else in one summary; do not re-walk it question by
+question. `prd` is exempt from `--reconcile` (it consumes no upstream) but
+not from this scoping step — its own Phase 1 points here too.
 
 ## The provenance record
 
@@ -127,7 +147,11 @@ the plugin's copy instead — `python
 "${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs --stamp …` — it
 still writes nothing but the artifact. Only when neither can run, hand-write
 the four scalar fields per entry as above (no `items`); the next
-re-invocation then diffs by the fallback method and says so.
+re-invocation then diffs by the fallback method and says so. An installed copy
+older than the plugin's counts as having none: every `python
+.claude/sdlc/docs_index.py …` in this file runs the copy
+`${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once per
+run.
 
 ## Step 2 — detect change on re-run (Phase 2) {#step-2}
 
@@ -255,8 +279,15 @@ Every consumer skill exposes exactly this delta as its `--reconcile` form — se
 ## Step 4 — the delta-review pass (one AskUserQuestion sweep) {#step-4}
 
 Present a **single consolidated summary** across all changed upstreams before
-the theme interview begins — don't drip-feed one upstream at a time. Lead
-with what moved:
+the theme interview begins — don't drip-feed one upstream at a time. The
+channel rule applies here too (`../../prd/references/importance-flows.md`,
+AUTHORING §18): the summary either rides inside the first resolve
+question's text below (fold it in, then batch as normal), or it is printed
+alone and the turn ENDS there — no `AskUserQuestion` call in the same
+turn — taking the user's typed reply before the resolve batch opens next
+turn. Printing the summary and calling `AskUserQuestion` in the same turn
+is the defect this rule forbids: the markdown may not render. Lead with
+what moved:
 
 > Since this `<OUTPUT>` was last written:
 > - `docs/PRD.yaml` changed (added FR-014, FR-015; removed FR-009; bodies of
@@ -275,11 +306,14 @@ yields a candidate, position 1 is **incorporate — add `<candidate>`**, with th
 candidate named, never a bare "incorporate". Read the whole item: one FR often
 carries several clauses — a content rule *and* the command that exposes it —
 and the coverage gates are whole-item (an FR is traced or deferred as one), so
-a `defer` written for one clause silences the clause that names the command.
-A `defer` for an item whose text names a command therefore needs a reason
-that says why the *named command* needs no surface — or the command clause is
-incorporated and only the rest deferred (`ux`'s validator warns
-`[FR names a command]` when a deferred FR's text still names one). (aicf
+a `defer` written for one clause silences the clause that names the command —
+and so does an `incorporate` that folds the item into a surface running some
+other command, because a trace is whole-item too. A `defer` for an item whose
+text names a command therefore needs a reason that says why the *named
+command* needs no surface, and an `incorporate` needs a surface that actually
+runs it — or the command clause is incorporated and only the rest deferred
+(`ux`'s validator warns `[FR names a command]` whenever an FR's text names a
+command that no surface tracing it runs). (aicf
 LSN-056: FR-097 deferred as "global content rule" while its text named
 `aicf explain <term>`; ARCH then claimed it realized in a surface with no
 function behind it, and the codegen task stuck.)
@@ -422,8 +456,15 @@ The steps, in order:
      names the candidate it yields, or the handoff proposal when one exists.
    - *removed* → the §4 stale-ref case: re-trace, remove with approval, or
      defer; never a silent delete.
-   - *changed in body* → only items this file traces or covers; a change
-     nothing here depends on is not this run's business. Per item, two
+   - *changed in body* → only the items the report marks `[referenced here]`
+     (a structured trace) or `[cited in prose xN]` (a mention in a
+     description or directive — re-read those N sites). The report computes
+     this filter; never re-derive it by hand, and an unmarked list means an
+     older installed helper (re-run `/sdlc:setup`; ledger IMP-147, aicf
+     LSN-084: a prose cite at four sites was invisible to a hand filter over
+     structured traces). A change nothing here depends on is not this run's
+     business, and an upstream the report calls `re-stamp only` is step 6's
+     case. Per item, two
      questions, batched across items: *does the change contradict what this
      file says?* (→ correct it here) and *does it assign something this file
      does not cover yet?* (→ an authoring card — unless it *delegates* the
@@ -446,8 +487,9 @@ The steps, in order:
    storage paradigm, a new surface family) — save the decisions so far, stop,
    and name the plain form as `Next:`; its Phase 2 resumes this review from
    the `delta_review` slot instead of asking again.
-6. **Hash moved, no item delta** (a comment or formatting edit) → re-stamp and
-   add one changelog line, with no question.
+6. **Hash moved, no item delta** (a comment or formatting edit), or the report
+   says `re-stamp only` (items moved, none this file references or cites) →
+   re-stamp and add one changelog line, with no question.
 7. **Phase 7 and Phase 8 as usual** — merge (never drop an item the user did
    not approve dropping), `--stamp` against every upstream consumed, validate
    bare, refresh the index and the statusboard, drain `finding_notes` and
@@ -471,7 +513,7 @@ file that stops at step 5 stops the walk.
 
 | Skill | Upstreams | An added item is seeded by | Structural, so the plain form |
 |---|---|---|---|
-| `ux` | PRD | `surface-discovery.md` Step 1b/1c — an FR or ENT naming a command or a screen is a surface candidate; a defer names the command (`[FR names a command]`); a new surface gets its `UX__<surface>.yaml` through the per-surface drill | another surface family; ux's downstream-claim check stays in the plain form |
+| `ux` | PRD | `surface-discovery.md` Step 1b/1c — an FR or ENT naming a command or a screen is a surface candidate; a defer names the command and an incorporate points at a surface that runs it (`[FR names a command]`); a new surface gets its `UX__<surface>.yaml` through the per-surface drill | another surface family; ux's downstream-claim check stays in the plain form |
 | `design` | PRD, UX | the asset manifest's candidate rules (`asset-pipeline.md`) and the token groups a new surface needs (`design-tokens.md`) | a change to `functional_structure` or `aesthetic_direction` |
 | `data` | PRD, UX | `entity-discovery.md` — an FR or surface naming a persisted thing is an entity candidate; the sub-model sweep runs for each new entity only | another storage paradigm, bounded-context split |
 | `api` | PRD, UX, DATA | `resource-discovery.md` — a new entity or surface is a resource or operation candidate; a new resource gets its `API__<resource>.yaml` | another `api_kind` or transport style |

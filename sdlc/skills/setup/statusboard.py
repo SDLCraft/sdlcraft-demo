@@ -34,6 +34,11 @@ bookkeeping. A legacy `"WRN-NNN: <text>"` string reads as
 honest board with counts rather than a wrong one - run
 `.claude/sdlc/migrate_warnings.py` to sharpen it.
 
+The grammar itself is NOT re-implemented here: this script imports the canonical
+block from `warning_item.py`, so an entry every validator reports as ignored is
+ignored on this board too, and the ones no reader can use are counted in
+STATUS.md instead of being presented as live caveats (ledger IMP-110).
+
 Usage:
     python statusboard.py                 # rewrite both files
     python statusboard.py --check         # exit 1 if they are stale; write nothing
@@ -51,6 +56,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sys
 from hashlib import sha256
 from pathlib import Path
@@ -94,9 +101,86 @@ STAGES = [
 ]
 SUCCESSOR = dict(zip([s for s, _ in STAGES], [s for s, _ in STAGES][1:] + [None]))
 
-WRN_KINDS = ("deferral", "limitation", "decision", "exception", "scope_change", "note")
-WRN_STATUSES = ("open", "resolved")
-WRN_IMPACTS = ("none", "local", "downstream", "risk")
+# A finding is "still open" in exactly the sense the queue's own writer uses.
+OPEN_STATUSES = ("open", "triaged")
+
+
+_FINDINGS_MOD = []
+
+
+def findings_helper():
+    """findings.py, if it is next to this script - else None.
+
+    What a finding still owes (an open re-invoke resolution's
+    downstream_rerun, an unverified propagation hop) is a rule with one owner,
+    and doctor.py already reads it there. A second copy of that condition here
+    is the defect IMP-110 records for the WRN parse in this same file, so the
+    board imports the helper instead: `.claude/sdlc/findings.py` beside an
+    installed board, `../repair/findings.py` beside the plugin's. Absent or
+    unimportable - an older install, a project that never ran setup - the board
+    degrades to what it said before: every open finding routes to /sdlc:repair.
+    """
+    if _FINDINGS_MOD:
+        return _FINDINGS_MOD[0]
+    import importlib.util
+    here = Path(__file__).resolve().parent
+    mod = None
+    for cand in (here / "findings.py", here.parent / "repair" / "findings.py"):
+        if not cand.is_file():
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location("sdlc_findings_for_board", cand)
+            if spec is None or spec.loader is None:
+                continue
+            candidate = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(candidate)
+            if hasattr(candidate, "awaiting_registry"):
+                mod = candidate
+                break
+        except Exception:
+            continue
+    _FINDINGS_MOD.append(mod)
+    return mod
+
+
+_WARNING_MOD = []
+
+
+def warning_parser():
+    """warning_item.py, if it is next to this script - else None.
+
+    The `*_warnings` grammar has ONE implementation (CLAUDE.md section 2): the
+    canonical block in `warning_item.py`, embedded byte-identical in every
+    validator and pinned there by `lint_claude_md.py`. A private copy here read
+    as live caveats the entries all of those copies report as ignored, which is
+    the defect ledger IMP-110 records - the same shape IMP-132 fixed one
+    function above. So the board imports it: `.claude/sdlc/warning_item.py`
+    beside an installed board, `../repair/warning_item.py` beside the plugin's.
+    Absent or unimportable - an older install - the board degrades to reading
+    each entry as written (`_as_written`), because the docs hook regenerates
+    this file on every write and an import failure must never raise.
+    """
+    if _WARNING_MOD:
+        return _WARNING_MOD[0]
+    import importlib.util
+    here = Path(__file__).resolve().parent
+    mod = None
+    for cand in (here / "warning_item.py", here.parent / "repair" / "warning_item.py"):
+        if not cand.is_file():
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location("sdlc_wrn_for_board", cand)
+            if spec is None or spec.loader is None:
+                continue
+            candidate = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(candidate)
+            if hasattr(candidate, "parse_warnings"):
+                mod = candidate
+                break
+        except Exception:
+            continue
+    _WARNING_MOD.append(mod)
+    return mod
 
 
 # ---------------------------------------------------------------------------
@@ -124,30 +208,124 @@ def read_edition(root):
     return edition, (str(marker["pro_url"]) if marker.get("pro_url") else None)
 
 
-def norm_warning(entry, source):
-    """One warning as a dict, whichever form it is written in.
+def _older(installed, running):
+    """Dotted numbers compare part by part as integers (0.10.0 > 0.9.14);
+    anything that does not parse counts as older when the two differ."""
+    try:
+        return (tuple(int(p) for p in str(installed).split("."))
+                < tuple(int(p) for p in str(running).split(".")))
+    except ValueError:
+        return str(installed) != str(running)
 
-    Mirrors `parse_warnings` in the validators, minus the reporting: this
-    script reads, it never judges.
+
+def _plugin_root(explicit):
+    """The running plugin's root: --plugin-root, else $CLAUDE_SKILL_DIR/../..
+    Only a folder with a skills/ directory counts; None when neither names one."""
+    candidates = [Path(explicit)] if explicit else []
+    if os.environ.get("CLAUDE_SKILL_DIR"):
+        candidates.append(Path(os.environ["CLAUDE_SKILL_DIR"]).parent.parent)
+    for root in candidates:
+        if (root / "skills").is_dir():
+            return root
+    return None
+
+
+def collect_setup_lag(root, state, plugin_root=None):
+    """The installed helpers' plugin version when they lag the plugin in use,
+    else None (ledger IMP-108).
+
+    Evidence, first that exists: the plugin in view (its version, and
+    docs_index.py's CAPABILITY_VERSION against the marker's), else the newest
+    run lessons.py recorded from a real plugin. The fallback is what keeps the
+    board steady: the docs hook regenerates it with no plugin in view, and a
+    line that came and went with the invoker would churn the file. The value
+    names only the installed version, so both sources render the same line.
+    """
+    marker = load(root / MARKER_REL)
+    if not marker:
+        return None
+    installed = marker.get("plugin_version")
+    shown = str(installed) if installed else "an older plugin"
+    plugin = _plugin_root(plugin_root)
+    if plugin is not None:
+        manifest = load(plugin / ".claude-plugin" / "plugin.json") or {}
+        running = manifest.get("version")
+        if installed and running and _older(installed, running):
+            return shown
+        cap = (marker.get("helpers") or {}).get("docs_index")
+        try:
+            text = (plugin / "skills" / "setup" / "docs_index.py").read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            text = ""
+        m = re.search(r"^CAPABILITY_VERSION\s*=\s*[\"']?(\d+)", text, re.M)
+        if cap is not None and m and _older(cap, m.group(1)):
+            return shown
+        return None
+    queue = load(state / "sdlc-lessons.yaml") or {}
+    runs = [r for r in (queue.get("runs") or []) if isinstance(r, dict)
+            and r.get("plugin_version")
+            and r.get("plugin_version_source") in ("manifest", "flag")]
+    if not runs or not installed:
+        return None
+    newest = max(runs, key=lambda r: str(r.get("finished_at") or ""))
+    return shown if _older(installed, newest["plugin_version"]) else None
+
+
+def norm_warnings(entries, label, source):
+    """One artifact's `*_warnings` list as dicts, plus what could not be read.
+
+    Returns `(items, refused)`. This is an ADAPTER over the canonical parser,
+    not a second reading of the grammar: it adds the `source` and `line` a
+    WarningItem does not carry, and nothing else. `refused` carries one row per
+    entry the parser drops, `blocking` telling its two channels apart - a
+    string that is not a warning at all is an error that fails the artifact,
+    while a malformed mapping is only reported and ignored. Neither becomes a
+    caveat, because no validator reads them either; STATUS.md counts them.
+    """
+    entries = entries or []
+    parser = warning_parser()
+    if parser is None:
+        return [_as_written(e, source) for e in entries], []
+    items, errors, _shape = parser.parse_warnings(entries, label)
+    out = [{"id": it.id, "text": it.text, "kind": it.kind, "status": it.status,
+            "impact": it.impact, "defers": list(it.defers),
+            "resolution": it.resolution, "resolved_on": it.resolved_on,
+            "source": source, "typed": it.typed} for it in items]
+    kept = {it.where for it in items}
+    refused = []
+    for i in range(len(entries)):
+        where = "%s[%d]" % (label, i)
+        if where in kept:
+            continue
+        refused.append({
+            "where": "docs/%s %s" % (source, where),
+            # The error messages open with `<where>:`, the shape reports with
+            # `<where> ` - so the prefix test cannot confuse [1] with [10].
+            "blocking": any(m.startswith(where + ":") for m in errors),
+        })
+    return out, refused
+
+
+def _as_written(entry, source):
+    """One entry exactly as the artifact writes it - the degraded path only.
+
+    Reached when `warning_item.py` is not installed beside this script. It
+    judges nothing: no field is checked against the canonical vocabulary and no
+    entry is dropped, so an older install gets a board built from what the
+    artifact actually says rather than from a second, drifting copy of rules
+    that live somewhere else.
     """
     if isinstance(entry, dict):
-        kind = str(entry.get("kind") or "note").strip()
-        status = str(entry.get("status") or "open").strip()
-        impact = str(entry.get("impact") or "local").strip()
-        if status == "resolved" and not str(entry.get("resolution") or "").strip():
-            status = "open"
-        return {
-            "id": str(entry.get("id") or "").strip() or "WRN-???",
-            "text": str(entry.get("text") or "").strip(),
-            "kind": kind if kind in WRN_KINDS else "note",
-            "status": status if status in WRN_STATUSES else "open",
-            "impact": impact if impact in WRN_IMPACTS else "local",
-            "defers": [str(d) for d in (entry.get("defers") or [])],
-            "resolution": entry.get("resolution"),
-            "resolved_on": entry.get("resolved_on"),
-            "source": source,
-            "typed": True,
-        }
+        return {"id": str(entry.get("id") or "").strip() or "WRN-???",
+                "text": str(entry.get("text") or "").strip(),
+                "kind": str(entry.get("kind") or "note").strip(),
+                "status": str(entry.get("status") or "open").strip(),
+                "impact": str(entry.get("impact") or "local").strip(),
+                "defers": [str(d).strip() for d in (entry.get("defers") or [])
+                           if str(d).strip()],
+                "resolution": entry.get("resolution"),
+                "resolved_on": entry.get("resolved_on"),
+                "source": source, "typed": True}
     s = str(entry or "").strip()
     wid, _, text = s.partition(":")
     return {"id": wid.strip() or "WRN-???", "text": text.strip() or s,
@@ -174,7 +352,12 @@ def artifact_files(docs):
 
 def collect_warnings(docs):
     """Every warning in every artifact, normalized and located."""
-    out = []
+    return collect_warnings_detail(docs)[0]
+
+
+def collect_warnings_detail(docs):
+    """`(warnings, refused)` across every artifact - see `norm_warnings`."""
+    out, refused = [], []
     for path in artifact_files(docs):
         doc = load(path)
         if not doc:
@@ -182,11 +365,12 @@ def collect_warnings(docs):
         for key, value in doc.items():
             if not key.endswith("_warnings") or not isinstance(value, list):
                 continue
-            for entry in value:
-                w = norm_warning(entry, path.name)
+            items, bad = norm_warnings(value, key, path.name)
+            for w in items:
                 w["line"] = line_of(path, w["id"])
-                out.append(w)
-    return out
+            out.extend(items)
+            refused.extend(bad)
+    return out, refused
 
 
 def collect_pipeline(docs, state, edition="pro"):
@@ -284,19 +468,32 @@ def collect_questions(docs):
 
 def collect_findings(state):
     doc = load(state / "sdlc-findings.yaml") or {}
+    helper = findings_helper()
+    owed = {}
+    if helper is not None:
+        try:
+            for _artifact, (fnd_id, _label, cmds) in (helper.awaiting_registry(doc) or {}).items():
+                owed.setdefault(str(fnd_id), [str(c) for c in (cmds or [])])
+        except Exception:
+            owed = {}
     out = []
     for f in doc.get("findings") or []:
-        if not isinstance(f, dict) or str(f.get("status") or "") == "resolved":
+        # wontfix, deferred and duplicate are decided, not open: counting them
+        # inflated the board's tally and sent the reader to /sdlc:repair for
+        # work nobody owes.
+        if not isinstance(f, dict) or str(f.get("status") or "") not in OPEN_STATUSES:
             continue
         # The queue writes `fnd_id`, not `id` (FINDINGS.schema.yaml); accept
         # both so a hand-written entry still shows up with its real id.
-        out.append({"id": str(f.get("fnd_id") or f.get("id") or "FND-???"),
+        fid = str(f.get("fnd_id") or f.get("id") or "FND-???")
+        out.append({"id": fid,
                     "status": str(f.get("status") or "open"),
                     "kind": str(f.get("kind") or ""),
                     "summary": str(f.get("summary") or "").strip(),
                     "source": str(f.get("suspected_source") or ""),
                     "raised_by": str(f.get("raised_by") or ""),
-                    "evidence": [str(e) for e in (f.get("evidence") or [])]})
+                    "evidence": [str(e) for e in (f.get("evidence") or [])],
+                    "owed": owed.get(fid, [])})
     return out
 
 
@@ -393,11 +590,16 @@ def wrap(text, width=74, indent="  "):
     return lines
 
 
-def next_step(pipeline, findings, blocked, questions, pro_url=None):
+def next_step(pipeline, findings, blocked, questions, pro_url=None, edition="pro"):
     """The single best next command, decided here rather than copied.
 
     Order matches CLAUDE.md section 14: an unfinished artifact first, then
-    recorded defects, then the pipeline successor.
+    recorded defects, then the pipeline successor - including rule 2's
+    exception, which this file used to miss (ledger IMP-132). A finding
+    /sdlc:repair has already localized and handed off is not waiting on
+    repair; it is waiting on the --reconcile it owes, which is what doctor.py
+    names on the same queue. Sending the reader back into repair mid-chain
+    stalls the chain.
     """
     for row in pipeline:
         if row["status"] == "draft":
@@ -405,6 +607,16 @@ def next_step(pipeline, findings, blocked, questions, pro_url=None):
                     "%s is still a draft - no later stage will consume it."
                     % row["artifact"])
     if findings:
+        owed = [c for f in findings for c in f.get("owed") or []]
+        if owed and all(f.get("owed") for f in findings):
+            cmd = owed[0]
+            skill = cmd.split("/sdlc:", 1)[-1].split()[0] if "/sdlc:" in cmd else ""
+            if edition == "free" and skill in PRO_STAGES:
+                return (None, "%d finding(s) wait on %s, which ships in the full "
+                        "edition%s." % (len(findings), cmd,
+                                        " (%s)" % pro_url if pro_url else ""))
+            return (cmd, "%d finding(s) are waiting on this re-invocation; running "
+                    "it in a new session is what clears them." % len(findings))
         return ("/sdlc:repair",
                 "%d finding(s) are open against this project's specs."
                 % len(findings))
@@ -443,6 +655,11 @@ def render_tier1(data, stamp):
           "     %s -->" % stamp, ""]
     L += ["Where the pipeline stands and what is still unresolved. Every caveat in",
           "full, including the resolved ones: `%s`." % TIER2_REL, ""]
+    if data.get("setup_lag"):
+        L += ["**Setup is behind the plugin.** The helper scripts in `.claude/sdlc/` "
+              "were installed by plugin %s and the plugin in use is newer, so skills "
+              "run its own copies. Run `/sdlc:setup` once to update them."
+              % data["setup_lag"], ""]
 
     L += ["## Pipeline", "",
           "| Stage | Artifact | Status | v | Open caveats |",
@@ -481,11 +698,14 @@ def render_tier1(data, stamp):
         L.append("")
 
     if data["findings"]:
-        L += ["## Open findings - %d  (`/sdlc:repair`)" % len(data["findings"]), ""]
+        all_owed = all(f.get("owed") for f in data["findings"])
+        L += ["## Open findings - %d%s" % (len(data["findings"]),
+                                           "" if all_owed else "  (`/sdlc:repair`)"), ""]
         for f in data["findings"]:
-            L += ["- **%s** *(%s%s)*%s" % (
+            L += ["- **%s** *(%s%s)*%s%s" % (
                 f["id"], f["status"], ", " + f["kind"] if f["kind"] else "",
-                " - " + f["source"] if f["source"] else "")]
+                " - " + f["source"] if f["source"] else "",
+                " - waiting on `%s`" % f["owed"][0] if f.get("owed") else "")]
             L += wrap(trim(f["summary"], 300))
         L.append("")
 
@@ -612,12 +832,32 @@ def render_tier2(data, stamp):
                   "", f["summary"], ""]
             if f["source"]:
                 L += ["Suspected source: `%s`" % f["source"], ""]
+            if f.get("owed"):
+                L += ["Waiting on: %s" % ", ".join("`%s`" % c for c in f["owed"]), ""]
             for e in f["evidence"]:
                 L.append("- %s" % e)
             if f["evidence"]:
                 L.append("")
 
     L += ["## Caveats, verbatim, by artifact", ""]
+    # One line for BOTH channels the canonical parser separates. A line that
+    # covered only the ignored mappings would let a blocking entry disappear
+    # from the ambient board and from here - a stricter silence than the one
+    # this file's import exists to remove.
+    refused = data.get("refused_warnings") or []
+    if refused:
+        ignored = [r["where"] for r in refused if not r["blocking"]]
+        broken = [r["where"] for r in refused if r["blocking"]]
+        bits = []
+        if ignored:
+            bits.append("%d malformed, which every validator reads and ignores "
+                        "(%s)" % (len(ignored), id_list(ignored)))
+        if broken:
+            bits.append("%d that a validator refuses outright, failing the "
+                        "artifact (%s)" % (len(broken), id_list(broken)))
+        L += ["- Entries no reader can use: %d - %s. They are in no list above, "
+              "because nothing else reads them either. Fix them in the artifact "
+              "and they appear here." % (len(refused), " and ".join(bits)), ""]
     by_file = {}
     for x in data["warnings"]:
         by_file.setdefault(x["source"], []).append(x)
@@ -655,6 +895,9 @@ def render_tier2(data, stamp):
           % (", ".join(integ["dangling"]) if integ["dangling"] else "none")]
     L += ["- Acceptance criteria with no covering test: %s"
           % (", ".join(integ["uncovered_acr"]) if integ["uncovered_acr"] else "none")]
+    if data.get("setup_lag"):
+        L.append("- Installed helpers: from plugin %s, older than the plugin in use - "
+                 "run `/sdlc:setup` once." % data["setup_lag"])
     L.append("")
     if data["lessons"]:
         L += ["## Lessons about the plugin", "",
@@ -667,19 +910,22 @@ def render_tier2(data, stamp):
 # driver
 # ---------------------------------------------------------------------------
 
-def gather(root):
+def gather(root, plugin_root=None):
     docs, state = root / "docs", root / STATE_REL
     edition, pro_url = read_edition(root)
-    warnings = collect_warnings(docs)
+    setup_lag = collect_setup_lag(root, state, plugin_root)
+    warnings, refused = collect_warnings_detail(docs)
     pipeline = collect_pipeline(docs, state, edition)
     findings = collect_findings(state)
     blocked = collect_blocked(state)
     questions = collect_questions(docs)
     return {
-        "warnings": warnings, "pipeline": pipeline, "findings": findings,
+        "warnings": warnings, "refused_warnings": refused,
+        "pipeline": pipeline, "findings": findings,
         "blocked": blocked, "questions": questions,
         "integrity": collect_integrity(docs), "lessons": collect_lessons(state),
-        "next": next_step(pipeline, findings, blocked, questions, pro_url),
+        "next": next_step(pipeline, findings, blocked, questions, pro_url, edition),
+        "setup_lag": setup_lag,
     }
 
 
@@ -699,6 +945,10 @@ def main():
                     help="print the ambient board; write nothing")
     ap.add_argument("--detail", action="store_true",
                     help="print the full board; write nothing")
+    ap.add_argument("--plugin-root", default=None,
+                    help="the running plugin's root (default: the plugin of the skill "
+                         "that runs this); used only to notice that /sdlc:setup's "
+                         "install is older")
     args = ap.parse_args()
 
     root = Path(args.path).resolve()
@@ -707,7 +957,7 @@ def main():
               "yet. Run /sdlc:setup first." % root)
         return 2
 
-    data = gather(root)
+    data = gather(root, args.plugin_root)
     # The stamp is a fingerprint of the SOURCES, not a wall clock. A wall clock
     # would rewrite both files on every run and dirty the diff even when
     # nothing about the project changed - the same churn this whole change set

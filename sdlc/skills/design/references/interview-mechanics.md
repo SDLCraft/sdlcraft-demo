@@ -64,6 +64,11 @@ draft-approve loop, scope-completeness sweep, EXIT-mid-flow) lives in
   `aesthetic_direction.style_family` / `mood_keywords` / `requires_custom_assets`;
   the token `color` / `typography` groups; `assets.style_guide`; the brief
   `prompt` (critical, see below) / `style_anchors` / `acceptance_criteria`.
+  The draft rides inside the approve/iterate `AskUserQuestion` call — the
+  recommended option's `preview`, or the question text when `preview` is
+  unavailable — never only as chat markdown printed the same turn (the
+  channel rule: AUTHORING §18, `../../prd/references/importance-flows.md`
+  → "The channel rule").
 - **`critical`** — full per-item drill-down + scope-completeness sweep. The
   `asset_manifest.assets` inventory (theme 4) and each brief `prompt` (theme 5,
   per asset). See `references/asset-pipeline.md` for both state machines.

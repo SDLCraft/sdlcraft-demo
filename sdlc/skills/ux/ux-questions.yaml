@@ -959,6 +959,22 @@ questions:
     confidence_field: false
     importance: med
 
+  - theme: cli_specifics
+    id: global_flags
+    schema_path: cli.global_flags
+    question: "Any flags shared by every command (not specific to one subcommand), e.g. --json or --no-color?"
+    hint: "Declared ONCE here so codegen doesn't reinvent (and re-type) the same flag inside every cli_command surface's layout.cli_args. Same CLIArg shape as cli_args."
+    suggested_answers:
+      - "--<flag>: <purpose>, e.g. --config <path>"
+      - "none - every flag is per command"
+    free_text_allowed: true
+    free_text_expected: true
+    required: false
+    required_if: "surface_family in ['cli', 'mixed']"
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
   # ---------------------------------------------------------------------------
   # per_surface_deepdive — runs once per surface from theme 4.
   # All questions below carry schema_path prefixed `surface.` — the agent

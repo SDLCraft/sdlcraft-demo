@@ -10,7 +10,7 @@ This is the **demo edition** (MIT). It takes a project from idea to a complete,
 validated architecture. The full edition, SDLCraft, continues from there to
 tested code — see [Editions](#editions).
 
-> Pre-1.0 (version 0.9.13): expect the skills to keep changing.
+> Pre-1.0 (version 0.9.14): expect the skills to keep changing.
 
 ## Install
 
@@ -37,9 +37,15 @@ setup → prd → [ux] → [design] → data → [api] → arch → test* → ta
 
 One skill's output is the next skill's input — `setup` to initialize a new project, `prd` defines *what* to build, `ux`/`design`/`data`/`api` flesh out surfaces/look/storage/contract, `arch` turns that into containers. The full version contains `test` and `task` which turn each container into a test strategy and a dependency-ordered task graph, and `code` which executes that graph into actual source files. `repair` sits off to the side and can be invoked at any point to diagnose and fix a defect — it walks backward from wherever the defect surfaced to the *earliest* artifact whose content is actually wrong. `deploy` is the one stage not yet implemented.
 
+Invoke each skill explicitly via `/sdlc:<skill>`. *DO NOT use plan-mode*.
+
 ### Skipping a stage
 
 `ux`, `design` and `api` are the three optional stages — everything else always runs. `/sdlc:prd` asks once which of them your project needs and records the answer, so a headless project goes `prd → data → arch → test → task → code`. Change your mind later by re-running `/sdlc:prd`, or just run the skipped skill — the stages after it pick the artifact up on their next run.
+
+## Feedback
+
+`/sdlc:setup` asks once whether to share anonymous reports about defects in the skills themselves that help the maintainer to improve them; the default is off, and declining costs you nothing. Nothing about your project's content is sent — see [`PRIVACY.md`](PRIVACY.md) for what a report does and does not contain.
 
 ## Skills
 All skills need to be explicitly invoked. Most of them provide an **interview mechanic** that lets you define your software project step by step.
@@ -290,14 +296,6 @@ way.
 
 It is currently in an invite-only beta — open an issue in this repository to
 ask for access.
-
-## Feedback
-
-`/sdlc:setup` asks once whether to share anonymous reports about defects in the
-skills themselves; the default is off, and declining costs you nothing. Nothing
-about your project's content is sent — see [`PRIVACY.md`](PRIVACY.md) for what
-a report does and does not contain. Issues and ideas are welcome in this
-repository.
 
 ## Legal
 

@@ -125,44 +125,10 @@ on it.
 - `--hash <file>` prints the canonical 16-hex content hash of a file (the same
   value `generated_from` records). Use it when you need a provenance hash for a
   file the index does not cover; never hash inline.
-- `--drift <artifact>` reads the artifact's `metadata.upstream_provenance`,
-  compares every recorded hash with the upstream's current hash, and for each
-  upstream that moved names what changed. When the stamp carries an `items`
-  map (written by `--stamp`), the delta is exact and item by item: which work
-  units / tests / entities / requirement items were **added**, **removed** or
-  **changed in body** since the artifact was written — no git, no guessing.
-  Without one it falls back to the artifact's own references as the old set,
-  subtracts the artifact's structured `deferrals`, and says plainly that the
-  residue mixes "new upstream" with "never covered". Exit 0 = built against
-  the current upstreams, 1 = at least one moved, 2 = cannot read. Under each
-  moved upstream a `why` line quotes that upstream's own changelog entries
-  since the stamp — the reason for the change, written by whoever made it.
-  Every consumer skill calls it in Phase 2 before deciding whether an
-  upstream-change review is due; it never edits anything.
-- `--stale [--json]` runs the same comparison over every artifact at once and
-  lists the stale ones **in the order to reconcile them** (upstream first, a
-  system file before its shards), each with its owning skill's `--reconcile`
-  command. A `--reconcile` run computes its `Next:` from it, which is what
-  lets the chain after a repair route itself. Exit 1 when any file is stale.
-- `--items <upstream>` prints every item the upstream defines with its body
-  hash — what `--stamp` records. A work unit's hash ignores its
-  declaration-only fields (`touches_entities`, `status`), so an entity-trace
-  backfill is not a change; only behaviour-bearing fields are. `--json` for a
-  mapping.
-- `--stamp <artifact> [--upstream docs/<file> ...]` rewrites the artifact's
-  `metadata.upstream_provenance`: `{file, session_id, last_updated, version,
-  sha256, items}` per upstream — the ones already recorded plus every `--upstream`.
-  It writes ONLY that artifact (never the index, never an upstream), so it is
-  safe on a project that runs its own index generator. Every skill that writes
-  an artifact runs it at write time instead of hand-writing the entries.
-
-**No installed copy?** A project that generates `docs/INDEX.yaml` with its own
-tool has no `.claude/sdlc/docs_index.py`. The read-only subcommands (`--drift`,
-`--stale`, `--items`, `--hash`, `--show`, `--refs`, `--find`, `--check`) and `--stamp`
-(which writes only the artifact it is given) may then be run from the plugin's
-own copy, `python "${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs …`
-— never the bare form, which would regenerate `docs/INDEX.yaml` over the
-project's own.
+A project with its own `docs_index.py` generator has no
+`.claude/sdlc/docs_index.py` to run these from by hand — a skill run that
+needs the write-time commands resolves the plugin's own copy per
+`setup/references/helper-resolution.md` instead.
 
 ## The content hash
 
