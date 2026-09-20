@@ -58,7 +58,7 @@ Interview modes follow the canonical 8-phase flow (see "Phase 1 — Resume
 check" through "Phase 8 — Refresh & close" below). The `-d` mode
 skips the interview and runs only edge derivation + confirmation. The
 `--reconcile` forms skip it too: they run only the upstream-change review
-(`sdlc/skills/ux/references/upstream-reconciliation.md` → "The `--reconcile`
+(`${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md` → "The `--reconcile`
 form"), then Phases 7–8.
 
 State is persisted **after every confirmed batch and after every per-item
@@ -178,7 +178,7 @@ then proceed exactly as that form:
    Only when every stamp matches does the abort above fire.
    Without this arm the resolver sent the user to `/sdlc:test` while the same
    validator run said "run `/sdlc:arch` to review the delta" — a loop with no
-   exit (ledger IMP-049).
+   exit.
 
 Before launching a resolved container interview, confirm the target with one
 `AskUserQuestion` so auto-advance never silently drops the user into a long
@@ -229,7 +229,7 @@ Otherwise, classify the invocation:
 5. **`--reconcile`** (alone, after `--system`, or after one `<container>`) →
    the **reconcile form**: the upstream-change review and nothing else — no
    interview, no structural questions. Follow
-   `sdlc/skills/ux/references/upstream-reconciliation.md` → "The `--reconcile`
+   `${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md` → "The `--reconcile`
    form" (steps 1–8, and this skill's row in its specifics table), then
    Phases 7–8. `--system --reconcile` → `docs/ARCH.yaml`;
    `<container> --reconcile` → `docs/ARCH__<container>.yaml` (the container
@@ -256,7 +256,7 @@ artifacts read at Phase 2.
 
 Before the resume check (Phase 1), settle whether the two optional upstreams —
 `docs/API.yaml` and `docs/UX.yaml` — are coming at all. Follow the three-step
-rule in `sdlc/skills/prd/references/optional-stages.md`; ask **only** when both
+rule in `${CLAUDE_SKILL_DIR}/../prd/references/optional-stages.md`; ask **only** when both
 of the first two steps come up empty.
 
 ```bash
@@ -319,7 +319,7 @@ Check for `.claude/skills-state/sdlc-arch.state.yaml`:
   multiple modes can live in the same file (see "Session state file").
 - If `status: complete` or `aborted` and the target output yaml exists,
   scope the update — see
-  `sdlc/skills/ux/references/upstream-reconciliation.md`'s REFINE row (open
+  `${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md`'s REFINE row (open
   only the named themes, the §7 delta items, and the non-confirmed set;
   confirm the rest in one summary) — then `references/merge-validate.md`.
   In container mode, re-validate the existing `docs/ARCH__<cid>.yaml` first:
@@ -375,7 +375,7 @@ for that check and file): run
 `python "${CLAUDE_SKILL_DIR}/../repair/doctor.py" --docs-dir docs --artifact docs/<the file whose validator exited non-zero>`
 (one `--artifact` per such file, never `--quick`) and stop only on a check it
 reports red. The full rule, including what to do without the doctor:
-`sdlc/skills/repair/references/accepted-deviance.md`. Print a clear message
+`${CLAUDE_SKILL_DIR}/../repair/references/accepted-deviance.md`. Print a clear message
 naming the offending file and the upstream skill the user should run. With
 `ux_present: false`, skip step 3 entirely — do not validate a file that is
 absent by design, and do not treat its absence as a reason to stop.
@@ -401,7 +401,7 @@ that `python "${CLAUDE_SKILL_DIR}/../repair/findings.py" list --owed-by
 docs/<the ARCH file this run writes>` returns is waiting on this very run — its
 owed re-run is what you are doing. Leave it out of the question and read it as
 the reason for the change: its `fix` and `handoff` notes (canonical:
-`sdlc/skills/ux/references/upstream-reconciliation.md` → "The `--reconcile`
+`${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md` → "The `--reconcile`
 form", step 3).
 
 **While pre-filling, note incomplete upstreams for Phase 8.** When a
@@ -480,7 +480,7 @@ absent = fall back to comparing hashes inline: for each upstream artifact
 current hash (from `docs/INDEX.yaml.generated_from[<file>]`, else
 the `docs_index.py --hash` text-level hash (sha256 of the file read as UTF-8 text, first 16 hex — never raw bytes)). For every changed upstream, classify the delta
 (added / removed / modified ids) and run the **delta-review pass before the
-theme interview** per `sdlc/skills/ux/references/upstream-reconciliation.md`
+theme interview** per `${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md`
 (CLAUDE.md §7). System mode compares against `ARCH.yaml`'s provenance; container
 mode against the specific `ARCH__<container>.yaml`'s — so a container drilled
 long after the system interview is reconciled against whatever upstream state
@@ -496,23 +496,9 @@ per CLAUDE.md §13. See also
 
 ### Phase 3 (first step) — Repo evidence
 
-Before seeding anything, look at what the project already has. On a greenfield
-project this finds nothing and costs one command; on a **brownfield** one it is
-the best evidence available, and this skill used to ignore it entirely.
-
 ```bash
 python .claude/sdlc/repo_scan.py --domain arch --json
 ```
-
-Helper absent (the project never ran `/sdlc:setup`) → skip silently and seed
-from the upstream artifacts alone. Never block the run on it.
-
-It returns package manifests (and their workspace globs), Dockerfiles, compose files, terraform, k8s/helm manifests, CI workflows and a Procfile — each hit a `path`, `line`
-and one-line `excerpt`. Fold them into the pre-fill map below as **`⚠ inferred`
-candidates**, never as answers: cite `<path>:<line>` in the `_rationale` sibling
-of whatever field the evidence fed, confirm each one individually (the canonical
-flow forbids batch-accepting inferred values), and pass on `truncated` /
-`capped_signals` as "this is a sample of a large repo, not an inventory".
 
 **Be most careful here.** A compose service or a Dockerfile is a candidate
 container and a manifest is a candidate tech stack, but the structure the repo
@@ -522,7 +508,7 @@ one; and when the existing layout contradicts the pattern chosen in Phase 4,
 say so rather than quietly following the code.
 
 Full rules, including what to do when the repo contradicts an upstream
-artifact: `sdlc/skills/setup/references/repo-evidence.md`.
+artifact: `${CLAUDE_SKILL_DIR}/../setup/references/repo-evidence.md`.
 
 ### Phase 3 — Inventory seeding (mode-specific)
 
@@ -800,9 +786,9 @@ every shard the system pass read). Container mode names each
 `API__<resource>.yaml` in its `owns_api_resources`. Provenance is
 file-granular — `--drift` and `--stale` compare the files an artifact
 *records* — so a shard edit that leaves `UX.yaml` byte-identical is invisible
-unless the shard itself is recorded (aicf LSN-083: five moved surface shards
-went unreported on a container reconcile; the validator now warns on an owned
-shard the stamp omits). The helper writes `{file, session_id, last_updated,
+unless the shard itself is recorded — five moved surface shards went
+unreported on a container reconcile, so the validator now warns on an owned
+shard the stamp omits. The helper writes `{file, session_id, last_updated,
 sha256, items}`, and the `items` map is what lets the next `--drift` name the
 delta item by item instead of recovering it from git or falling back to the
 residue — a hand-written `{file, sha256}` entry is a sha-only stamp `--stale`
@@ -933,11 +919,11 @@ in `CLAUDE.md`. See `references/merge-validate.md`.
 For bullet detection and append behavior, see
 `references/merge-validate.md`.
 
-**Refresh the navigation index.** If `.claude/sdlc/docs_index.py` exists (the
-project ran `/sdlc:setup`), run `python .claude/sdlc/docs_index.py` after
-writing `docs/ARCH.yaml` and its per-container files so `docs/INDEX.yaml`
-reflects the new content right away (the setup hook also does this, but a hook
-added mid-session only activates next session). Harmless no-op if not installed.
+**Refresh the navigation index.** Resolve the copy per `helper-resolution.md`:
+the installed `.claude/sdlc/docs_index.py` if present, run it after writing
+`docs/ARCH.yaml` and its per-container files; own-toolchain (marker present,
+no `docs_index` helper) → run the project's own docs-hook command from
+`.claude/settings.json` and name it; no marker → nothing to run.
 Optionally run `python .claude/sdlc/docs_index.py --check` afterwards to
 confirm the write introduced no dangling id references before closing.
 
@@ -968,24 +954,21 @@ Then: set the active session's `status:
 complete` in the state file (keep the file as audit trail), tell the
 user where the artifacts live, and point at what comes next:
 
-**Self-review & record the run** (CLAUDE.md 15; doctrine:
-`sdlc/skills/lesson/references/lessons-capture.md`). First drain `state.lesson_notes` (mid-run observations — that file →
-"Mid-run: note now, record at close"), then answer the self-review questions
-from that file for this run. Each yes that matches a raising condition
-becomes one `lessons.py add` (at most 2 per run unless one is a `blocker`;
-drained notes count toward the cap). Then record the run — the helper reads the
-newest sub-session by default; pass `--session system` or
-`--session "container|<cid>"` when closing a different one:
+**Self-review & record the run** (CLAUDE.md 15; doctrine and the self-review
+questions: `${CLAUDE_SKILL_DIR}/../lesson/references/lessons-capture.md` → "Mid-run:
+note now, record at close"). Drain `state.lesson_notes`, answer the self-review for
+this run (at most 2 `lessons.py add` per run unless one is a `blocker`; drained
+notes count toward the cap), then `python .claude/sdlc/lessons.py record-run --skill arch --plugin-root "${CLAUDE_SKILL_DIR}/../.."`
+— the helper reads the newest sub-session by default; pass `--session system` or `--session "container|<cid>"` for another.
+Best-effort: a non-zero exit is one `Attention:` clause; helper absent, skip silently.
 
-```bash
-python .claude/sdlc/lessons.py record-run --skill arch --plugin-root "${CLAUDE_SKILL_DIR}/../.."
-```
-
-Best-effort: a non-zero exit becomes one `Attention:` clause in the card;
-helper absent (project never ran `/sdlc:setup`) — skip silently.
+**Commit the run** (CLAUDE.md 20; the message rules and what is staged:
+`${CLAUDE_SKILL_DIR}/../setup/references/auto-commit.md`) — the last action before the card, on every exit path, never a blocker:
+`python .claude/sdlc/autocommit.py commit --skill arch --invocation "<the form the dispatch resolved, as typed>" --summary "<one line: what changed, in the user's words>"`
+Its one printed line is the card's `Commit:` row; off, or helper absent → no row.
 
 **Close with the card** (CLAUDE.md 14; canonical shape:
-`sdlc/skills/prd/references/reporting-to-the-user.md`). The user reading this
+`${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`). The user reading this
 knows only "there is a pipeline and I run it in order", so answer their three
 questions and nothing else: did it work, can I run the next skill, what do I
 type next.
@@ -997,13 +980,14 @@ Status:    complete - /sdlc:test can run it
 Attention: {what needs a decision, in the user's words}
 Findings:  {only when this run recorded FND ids - "2 recorded (FND-011,
            FND-012) -> /sdlc:repair"; omit otherwise}
+Commit:    {a1b2c3d  /sdlc:arch → <summary> | nothing to commit | not committed - <reason> — only when auto-commit is on}
 Next:      {the computed next invocation}   ← in a NEW session
 Why new:   the artifacts and state files on disk are the handoff, not this
            transcript.
 ```
 
 **Compute the `Next:` row; never copy the example.** Procedure and successor
-map: `sdlc/skills/prd/references/reporting-to-the-user.md` (CLAUDE.md 14).
+map: `${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md` (CLAUDE.md 14).
 `/sdlc:arch` is **sharded** — it runs per container — so it resolves to:
 
 - **This shard is `draft`, the user typed `EXIT`, or the validator is not green**
@@ -1024,7 +1008,7 @@ each row from this run's actual state.
 
 Rules: omit any row with nothing to say (never write "no warnings"). Add a
 `Lessons:` row only when this run recorded at least one — e.g. `Lessons: 1
-recorded (LSN-004) - about this skill, for its maintainer; nothing for you to
+recorded (LSN-NNN) - about this skill, for its maintainer; nothing for you to
 do` — and never print "no lessons". Add the `Findings:` row only when findings
 were recorded (or open findings name an input of this run) — the ids plus one
 consequence clause routing to `/sdlc:repair`.
@@ -1240,4 +1224,4 @@ The architecture interview can be long. Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.21"
+skill_version: "1.23"

@@ -35,6 +35,13 @@ What it installs into the target project root (default: cwd):
                                           plugin and every helper version
                                           installed, so recorded runs, lessons
                                           and findings say what they ran against.
+                                          Also carries the `telemetry` and
+                                          `auto_commit` answer blocks setup asks
+                                          for once; a re-run never resets them.
+  2i. .claude/sdlc/autocommit.py        — the close-step committer every skill
+                                          runs when the project opted in
+                                          (CLAUDE.md §20; copied from this
+                                          skill folder).
   3. .claude/settings.json             — a `Write|Edit|MultiEdit` PostToolUse hook
                                           that runs the generator on every docs/
                                           edit, anchored on $CLAUDE_PROJECT_DIR so
@@ -101,6 +108,7 @@ REPO_SCAN_SRC = SKILL_DIR / "repo_scan.py"
 STATUSBOARD_SRC = SKILL_DIR / "statusboard.py"
 MIGRATE_WARNINGS_SRC = SKILL_DIR.parent / "repair" / "migrate_warnings.py"
 WARNING_ITEM_SRC = SKILL_DIR.parent / "repair" / "warning_item.py"
+AUTOCOMMIT_SRC = SKILL_DIR / "autocommit.py"
 PLUGIN_MANIFEST = SKILL_DIR.parent.parent / ".claude-plugin" / "plugin.json"
 # Skills only the Pro edition ships. Their absence beside setup/ is how an
 # install knows it is the free edition; the marker records it so the
@@ -121,6 +129,7 @@ REPO_SCAN_DEST_REL = ".claude/sdlc/repo_scan.py"
 STATUSBOARD_DEST_REL = ".claude/sdlc/statusboard.py"
 MIGRATE_WARNINGS_DEST_REL = ".claude/sdlc/migrate_warnings.py"
 WARNING_ITEM_DEST_REL = ".claude/sdlc/warning_item.py"
+AUTOCOMMIT_DEST_REL = ".claude/sdlc/autocommit.py"
 MARKER_DEST_REL = ".claude/sdlc/sdlc-plugin.json"
 HOOK_MATCHER = "Write|Edit|MultiEdit"
 # Idempotency marker inside the hook command: the stock generator's PATH, not
@@ -637,6 +646,27 @@ def telemetry_block(existing: "dict | None", project_id: "str | None") -> dict:
     return block
 
 
+# The auto-commit block seeded on a fresh install (CLAUDE.md §20). `mode: off`
+# is the default on purpose: nothing is committed until someone answers the
+# question setup asks. autocommit.py owns the semantics.
+AUTO_COMMIT_SEED = {
+    "mode": "off",
+    "decided_on": None,
+}
+
+
+def auto_commit_block(existing: "dict | None") -> dict:
+    """The marker's auto_commit block: an existing one wins, seeded when absent.
+
+    Same rule as the telemetry block - a re-run must never reset the answer.
+    """
+    block = dict(AUTO_COMMIT_SEED)
+    stored = (existing or {}).get("auto_commit")
+    if isinstance(stored, dict):
+        block.update(stored)
+    return block
+
+
 def plugin_marker(
     existing: "dict | None", version: str, timestamp: str,
     helpers: "dict[str, str] | None" = None, project_id: "str | None" = None,
@@ -651,11 +681,13 @@ def plugin_marker(
     """
     helpers = helpers or {}
     telemetry = telemetry_block(existing, project_id)
+    auto_commit = auto_commit_block(existing)
     if (
         isinstance(existing, dict)
         and existing.get("plugin_version") == version
         and existing.get("helpers", {}) == helpers
         and existing.get("telemetry") == telemetry
+        and existing.get("auto_commit") == auto_commit
         and existing.get("edition", "pro") == edition
         and existing.get("pro_url") == pro_url
     ):
@@ -667,14 +699,16 @@ def plugin_marker(
         "helpers": helpers,
         "edition": edition,
         "telemetry": telemetry,
+        "auto_commit": auto_commit,
     }
     if pro_url:
         marker["pro_url"] = pro_url
     if isinstance(existing, dict) and existing.get("installed_at") \
             and existing.get("plugin_version") == version \
             and existing.get("helpers", {}) == helpers:
-        # Only the telemetry block moved (a first install of it onto an older
-        # marker). Nothing about the install itself changed, so keep its date.
+        # Only the telemetry or auto_commit block moved (a first install of it
+        # onto an older marker). Nothing about the install itself changed, so
+        # keep its date.
         marker["installed_at"] = existing["installed_at"]
     return marker, ("updated" if isinstance(existing, dict) else "written")
 
@@ -725,6 +759,7 @@ def run(
         GENERATOR_SRC, RULE_SRC, GLOSSARY_SRC, LESSONS_SRC, LESSONS_RULE_SRC,
         FINDINGS_SRC, FINDINGS_VALIDATOR_SRC, FINDINGS_RULE_SRC, BUMP_SRC,
         REPO_SCAN_SRC, STATUSBOARD_SRC, MIGRATE_WARNINGS_SRC, WARNING_ITEM_SRC,
+        AUTOCOMMIT_SRC,
     )
     if not all(src.is_file() for src in sources):
         missing = ", ".join(str(s) for s in sources if not s.is_file())
@@ -841,6 +876,7 @@ def run(
         (STATUSBOARD_SRC, STATUSBOARD_DEST_REL),
         (MIGRATE_WARNINGS_SRC, MIGRATE_WARNINGS_DEST_REL),
         (WARNING_ITEM_SRC, WARNING_ITEM_DEST_REL),
+        (AUTOCOMMIT_SRC, AUTOCOMMIT_DEST_REL),
     ):
         written += _copy(src, project_root / dest_rel, dry, log)
 
@@ -862,6 +898,7 @@ def run(
                 ("repo_scan", helper_version(REPO_SCAN_SRC)),
                 ("statusboard", helper_version(STATUSBOARD_SRC)),
                 ("migrate_warnings", helper_version(MIGRATE_WARNINGS_SRC)),
+                ("autocommit", helper_version(AUTOCOMMIT_SRC)),
             )
             if ver
         }

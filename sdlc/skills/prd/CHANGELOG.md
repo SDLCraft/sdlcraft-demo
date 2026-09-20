@@ -7,6 +7,18 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.21 (2026-09-20) — Phase 8 commits the run when the project opted in (auto-commit, CLAUDE.md 20)
+
+- New close step after `record-run`, before the card: `python .claude/sdlc/autocommit.py commit --skill prd --invocation "<as typed>" --summary "<one line>"` (mechanics in `setup/references/auto-commit.md`), its one printed line as the card's new `Commit:` row; runs on every exit path, never a blocker. The restated self-review paragraph is now a pointer at `lessons-capture.md`, paying for the lines (AUTHORING §19 ceilings unchanged). Pinned by `setup/_smoke/autocommit_lockstep_selftest.py`.
+
+## 1.20 (2026-09-19) — Phase 8's index refresh distinguishes own-toolchain from never-ran-setup
+
+- Phase 8's index refresh distinguishes own-toolchain (marker present, no `docs_index` helper: run the project's own docs-hook command from `.claude/settings.json` and name it) from never-ran-setup (no marker: the only genuine no-op), per setup's helper-resolution.md; the statusboard sentence is unchanged. Pinned by setup's `_smoke/index_refresh_lockstep_selftest.py` (ledger IMP-200).
+
+- Every cross-skill reference pointer in SKILL.md and references/ now uses the consumer-safe `${CLAUDE_SKILL_DIR}/../<skill>/references/<file>.md` form instead of a bare `sdlc/skills/...` path that resolves only in the plugin repository; `lint_skill_paths.py` holds it (ledger IMP-206).
+
+- No shipped runtime file (SKILL.md, references/, assets/) carries a ledger-id citation any more: bare `(IMP-NNN)` / `(LSN-NNN)` parentheticals are gone, history sentences keep their rule and their reason without the ticket, close-card examples show the `LSN-NNN` placeholder; `lint_context_budget.py` counts IMP- and LSN- ids with a ceiling of 0 per skill (ledger IMP-182).
+
 ## 1.19 (2026-09-17) — The channel rule is AUTHORING §18, Phase 7's fill-or-draft decision carries its errors inside the question, the resume recipe has four states and reconciles the counters, and `--set` edits one field without an interview
 
 Ledger IMP-137: the print-then-ask channel rule (content a question depends on rides INSIDE the `AskUserQuestion` call — question text, an option's `description`, or an option's `preview` — because same-turn chat markdown may not render; markdown then a typed reply only when the turn ends with the markdown) lived only in this skill's importance-flows.md, where four other skills cited it by path and three never found it. It is now AUTHORING §18; importance-flows.md keeps the mechanics with a back-pointer, interview-mechanics.md's restatement collapsed to a citation, and the Phase-7 "fill or draft" prompt (merge-validate.md, SKILL.md, edge-cases.md) carries the field-level errors in the question or option descriptions instead of showing them and then asking. Pinned by `_smoke/channel_rule_selftest.py`: per site a positive token (`preview` / "inside the `AskUserQuestion`" / the turn ends) and a negative (no show-then-ask shape), plus §18 cited in every interview skill's references — red at 1.18 on all three sites and 8 of 8 skills. The retro's shorthand for the rule had inverted it; the red team caught the inversion before it shipped.

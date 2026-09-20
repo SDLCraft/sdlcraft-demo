@@ -7,6 +7,21 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.15 (2026-09-20) — Phase 8 commits the run when the project opted in (auto-commit, CLAUDE.md 20)
+
+- New close step after `record-run`, before the card: `python .claude/sdlc/autocommit.py commit --skill api --invocation "<as typed>" --summary "<one line>"` (mechanics in `setup/references/auto-commit.md`), its one printed line as the card's new `Commit:` row; runs on every exit path, never a blocker. The restated self-review paragraph is now a pointer at `lessons-capture.md`, paying for the lines (AUTHORING §19 ceilings unchanged). Pinned by `setup/_smoke/autocommit_lockstep_selftest.py`.
+
+## 1.14 (2026-09-19) — `--path` on an API__<resource>.yaml shard validates the family, and Phase 8 distinguishes own-toolchain
+
+- `validate_all()` no longer applies the system API model to an `API__<resource>.yaml` shard given to `--path`: a shard path redirects to its `API.yaml` sibling and validates the whole family, mirroring test/task. Pinned by the `10_deferral_coverage/API__users.yaml` row (ledger IMP-199).
+- Phase 8's index refresh distinguishes own-toolchain (marker present, no `docs_index` helper: run the project's own docs-hook command from `.claude/settings.json` and name it) from never-ran-setup (no marker: the only genuine no-op), per setup's helper-resolution.md; the statusboard sentence is unchanged. Pinned by setup's `_smoke/index_refresh_lockstep_selftest.py` (ledger IMP-200).
+
+- The `Phase 3 (first step) — Repo evidence` block keeps only its skill-specific lines and a consumer-safe pointer (`${CLAUDE_SKILL_DIR}/../setup/references/repo-evidence.md`); the fifteen lines setup's canonical file already states are gone (14 lines shorter; the lint_context_budget ceiling follows). `lint_skill_paths.py` now flags a bare `sdlc/skills/<x>/references/<y>.md` path in shipped markdown (ledger IMP-181).
+
+- Every cross-skill reference pointer in SKILL.md and references/ now uses the consumer-safe `${CLAUDE_SKILL_DIR}/../<skill>/references/<file>.md` form instead of a bare `sdlc/skills/...` path that resolves only in the plugin repository; `lint_skill_paths.py` holds it (ledger IMP-206).
+
+- No shipped runtime file (SKILL.md, references/, assets/) carries a ledger-id citation any more: bare `(IMP-NNN)` / `(LSN-NNN)` parentheticals are gone, history sentences keep their rule and their reason without the ticket, close-card examples show the `LSN-NNN` placeholder; `lint_context_budget.py` counts IMP- and LSN- ids with a ceiling of 0 per skill (ledger IMP-182).
+
 ## 1.13 (2026-09-17) — Provider integrations are typed and traced to the PRD's INT ids, the theme runs for a CLI or library too, the reason-less non_api_features escape closes at a floor new writes actually stamp, and Phase 1 is the shared four-state trigger
 
 Ledger IMP-011: `external_dependencies[]` entries are typed and carry `integration_ref: INT-NNN`, resolved against `PRD.integrations_required` the way arch's `check_int_binding` does — no second INT id family (the red team caught the draft minting one). The integrations theme runs even at `api_kind: none` (the 14-integration CLI that had to smuggle provider contracts into ARCH prose), and `applicability: not_applicable` is stamped only when the kind is none AND the list is empty. Blocking from `api_version` 2.0, warning below. Regression: `_smoke/14_integration_contracts_at_floor.yaml` (exit 1) / `15_…_below_floor.yaml` (exit 0). Ownership recorded for later: api's entry is the provider contract, arch's `external_contract` the realization pointer; codegen reads neither today.

@@ -38,8 +38,7 @@ top-level fields. **Walk every field's type and recurse:**
   define it as its own entity with `one_of: [CardPayload, BankPayload]` and
   `discriminator: <field>` (no fields of its own), then define every variant
   as a first-class entity carrying that discriminator field. A union is
-  neither a mixin (`composes`) nor containment (`composition`); ledger
-  IMP-080.
+  neither a mixin (`composes`) nor containment (`composition`).
 
 For the **file_native** paradigm, promote each such nested model to a
 first-class entry with `category: sub_model` and wire the parent→child link in

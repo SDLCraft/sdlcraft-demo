@@ -44,8 +44,15 @@
 #   * upstream ids (FR-NNN, TST-NNN, ...) inside summary / evidence text
 #
 # VERSIONING (CLAUDE.md section 10): checks marked "v2" below are ERRORS when
-# findings_file_version >= 2 and WARNINGS on older files. findings.py starts a
-# new queue at "2"; an existing "1" file is never re-stamped by a writer.
+# findings_file_version >= 2 and WARNINGS on older files; checks marked "v3"
+# (ARTIFACTS_TOUCHED_GATED_VERSION — the SAME floor `resolution.sites_considered`
+# below reuses, never a second one) are ERRORS at >= 3 and WARNINGS below it.
+# findings.py starts a NEW queue at "3" (NEW_FILE_VERSION); an existing older
+# file is never re-stamped by a writer BY HAND — `findings.py validate
+# --upgrade` is the one sanctioned exception: it raises a queue's own
+# findings_file_version to the current NEW_FILE_VERSION once every gated check
+# on it passes with ZERO warnings (not merely zero errors), and repair's
+# Phase 6 close runs it on every write.
 #
 # Downstream-rejection rule: this file is private cross-skill state, not a
 # published artifact. Nothing outside the sdlc plugin reads it, and no skill
@@ -53,7 +60,7 @@
 # gate (every consumer skill's Phase 2 lists them), never used as a hard block.
 # =============================================================================
 
-findings_file_version: "2"                 # REQUIRED — string; "1" files still validate
+findings_file_version: "3"                 # REQUIRED — string; "1"/"2" files still validate
 last_updated: <ISO-8601 UTC>               # OPTIONAL — stamped on every write
 
 last_ids:                                  # REQUIRED — writer-managed counters
@@ -248,7 +255,10 @@ findings:                                  # REQUIRED — list[Finding]; may be 
       #                                    #   The reason for the change, carried on
       #                                    #   disk to a fresh session. Checked as
       #                                    #   WARNINGS only (shape, a non-re-invoke
-      #                                    #   mode, a file nothing owes).
+      #                                    #   mode, a file nothing owes, a malformed
+      #                                    #   `retired`, a note that enumerates
+      #                                    #   consumers with no `retired` list — see
+      #                                    #   `retired` below).
       #       basis: measured              #   REQUIRED per note (warns when absent):
       #                                    #   measured = read from the artifacts the
       #                                    #   note names (a siting the caller's own
@@ -258,6 +268,31 @@ findings:                                  # REQUIRED — list[Finding]; may be 
       #                                    #   BEFORE it writes. One register per note,
       #                                    #   so a cold session can tell which is
       #                                    #   which (ledger IMP-082, aicf LSN-064).
+      #       retired:                     #   OPTIONAL — [<token>, ...]: the literal
+      #         - archive_task_v1          #   name(s) this handoff is about (a
+      #                                    #   parameter, CLI flag, field, enum member,
+      #                                    #   literal) that were removed or renamed.
+      #                                    #   `note` says WHY it moved, never WHICH
+      #                                    #   consumers carry the old name — an
+      #                                    #   authored enumeration is unreliable in
+      #                                    #   BOTH directions (FND-104 named five
+      #                                    #   tests without the token and missed five
+      #                                    #   that had it, two of them live
+      #                                    #   assertions; ledger IMP-193). When
+      #                                    #   present, the reconcile step sweeps its
+      #                                    #   own artifact family for every token
+      #                                    #   itself (`grep -rn <token> docs/...`, or
+      #                                    #   `reslice_embeds.py --check` for a TASKS
+      #                                    #   family) instead of trusting `note`'s
+      #                                    #   enumeration — see
+      #                                    #   upstream-reconciliation.md step 3.
+      #                                    #   Checked as a WARNING only: a non-empty
+      #                                    #   list of non-empty strings. A `note` that
+      #                                    #   names two or more OTHER TST-/TSK- ids and
+      #                                    #   reads like a retirement, with no
+      #                                    #   `retired` list at all, is warned as the
+      #                                    #   FND-104 shape (naming one item is a
+      #                                    #   handoff's normal content, never warned).
       #   stale_tasks: ["aicf-cli/TSK-118"]    # tasks whose fingerprint changed —
       #                                    #   /sdlc:code offers these for regeneration
       #                                    #   (from topo_order.py: stale + --affected).
@@ -272,6 +307,37 @@ findings:                                  # REQUIRED — list[Finding]; may be 
       #     - components[0].work_units[3].output
       #   symbols_changed:                 # OPTIONAL — qualified symbols whose content
       #     - aicf-cli/items-controller/createItem   # changed (what --refs was run on)
+      #   sites_considered:                # v3: REQUIRED non-empty when mode is
+      #                                    #   re-invoke OR symbols_changed is
+      #                                    #   non-empty (a surgical fix that changed
+      #                                    #   no named symbol is exempt); optional,
+      #                                    #   checked the same way when present,
+      #                                    #   below that trigger. One entry per
+      #                                    #   ARTIFACT the forward-propagation
+      #                                    #   checklist named — the computed --refs
+      #                                    #   radius PLUS every hit of the
+      #                                    #   retired/added-token sweep
+      #                                    #   (forward-propagation.md, "The
+      #                                    #   checklist"). PERSISTS that checklist
+      #                                    #   instead of only printing it: one added
+      #                                    #   field ended up restated three
+      #                                    #   disagreeing ways by three producers and
+      #                                    #   guessed a fourth way by a renderer,
+      #                                    #   because nothing required recording who
+      #                                    #   else was even looked at (ledger
+      #                                    #   IMP-196). Distinct from `propagation`
+      #                                    #   below, which records only hops the fix
+      #                                    #   DID reach, verified.
+      #     - artifact: docs/TEST-STRATEGY__aicf-cli.yaml   # a docs/ path, like
+      #                                    #   artifacts_touched
+      #       disposition: unaffected      #   edited | resliced | unaffected | deferred
+      #       reason: null                 #   REQUIRED (v3) for deferred — why it
+      #                                    #   stays untouched on purpose
+      #       how: "sweep archive_task_v1: 0 hits"   # REQUIRED (v3) for unaffected —
+      #                                    #   stands in for `reason`; optional
+      #                                    #   elsewhere (edited/resliced may still
+      #                                    #   carry it, e.g. "reslice_embeds.py
+      #                                    #   --check exit 0")
       #   propagation:                     # OPTIONAL — one hop per place the fix had
       #     - hop: source                  #   to land: source | embed | downstream | code
       #                                    #   source     = the artifact whose content was wrong

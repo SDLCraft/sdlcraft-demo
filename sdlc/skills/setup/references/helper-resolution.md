@@ -11,7 +11,7 @@ stamp the old way, or prints a `--drift` list without the `[referenced here]`
 / `[cited in prose xN]` marks and the `re-stamp only` verdict the reconcile
 forms read (capability 7). The prose used to fall back to the plugin's copy only when
 the installed one was ABSENT, never when it was OLDER, and nothing asked for a
-`/sdlc:setup` re-run (ledger IMP-108).
+`/sdlc:setup` re-run.
 
 Every skill that runs an installed helper follows this file. A skill's own
 "helper absent" fallbacks still apply; an installed copy older than the plugin's
@@ -32,7 +32,9 @@ for every later call in the same run.
 |---|---|---|
 | present | a number ≥ the plugin's `CAPABILITY_VERSION` | the installed copy: `python .claude/sdlc/docs_index.py <args>` |
 | present | lower, missing, or no marker at all | the plugin's copy, and tell the user once (below) |
-| absent | (any) | the plugin's copy, per the calling file's own "helper absent" rule |
+| absent | (any) | a flagged call: the plugin's copy, per the calling file's own "helper absent" rule. A bare regenerate never falls back — see the two rows below |
+| absent, bare regenerate only | `.claude/sdlc/sdlc-plugin.json` present, `helpers.docs_index` missing entirely (own-toolchain) | never the plugin's copy — run the project's own docs-hook command from `.claude/settings.json` (the `hooks.PostToolUse` entry naming the index) and say which command ran |
+| absent, bare regenerate only | no `.claude/sdlc/sdlc-plugin.json` at all | nothing to run — the project never ran `/sdlc:setup` |
 
 The plugin's copy takes the same arguments plus `--docs-dir docs`:
 
@@ -49,8 +51,11 @@ A value that is not a number, such as a `sha:` hash, counts as older.
   .claude/sdlc/docs_index.py` with no flag rebuilds `docs/INDEX.yaml`. The
   docs hook rebuilds it with the installed copy after every `docs/` edit
   anyway, and a project that generates its index with its own tool must never
-  receive the stock one. When there is no installed copy, skip the rebuild as
-  the calling file says. Only calls that pass a flag switch copies.
+  receive the stock one. When there is no installed copy, the two absent
+  bare-regenerate rows above decide: own-toolchain (the marker exists but
+  names no `docs_index` helper) runs the project's own docs-hook command and
+  says so; no marker at all is the only genuine no-op — the project never ran
+  `/sdlc:setup`. Only calls that pass a flag switch copies.
 - **No plugin in view, no switch.** In an ambient session (no
   `${CLAUDE_SKILL_DIR}`) there is nothing to compare, so run the installed
   copy as is. A file's by-hand fallback (comparing recorded hashes itself)
@@ -66,6 +71,7 @@ A value that is not a number, such as a `sha:` hash, counts as older.
   | `.claude/sdlc/findings.py` | `"${CLAUDE_SKILL_DIR}/../repair/findings.py"` |
   | `.claude/sdlc/bump_artifact.py` | `"${CLAUDE_SKILL_DIR}/../repair/bump_artifact.py"` |
   | `.claude/sdlc/lessons.py` | `"${CLAUDE_SKILL_DIR}/../lesson/lessons.py"` |
+  | `.claude/sdlc/autocommit.py` | `"${CLAUDE_SKILL_DIR}/../setup/autocommit.py"` |
 
   The close-phase `lessons.py record-run` and `statusboard.py` refreshes keep
   their old command forms, so an older install still runs them. They are

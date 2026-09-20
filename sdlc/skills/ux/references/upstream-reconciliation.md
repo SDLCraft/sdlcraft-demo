@@ -9,7 +9,7 @@ consumers today; `deploy` remains planned) references this file; `prd` does
 not (it consumes no upstream artifact).
 
 Downstream skills point here with the repo-relative path
-`sdlc/skills/ux/references/upstream-reconciliation.md`.
+`${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md`.
 
 ## Contents
 
@@ -181,7 +181,7 @@ python .claude/sdlc/docs_index.py --drift docs/<THIS-ARTIFACT-or-shard>
   docs/<file>`; it reads everything in memory and writes nothing. A stamp
   with no `items` map is diffed against the committed revision whose text
   hash equals the recorded `sha256` when history holds one ("recovered from
-  git" — the helper searches history itself, ledger IMP-083); only an
+  git" — the helper searches history itself); only an
   uncommitted stamp, which matches no revision, leaves the residue below.
   Never dig through git by hand.
 - **exit 2, or neither copy can run** — fall back to a manual compare: for
@@ -264,10 +264,10 @@ the family is advisory — a test strategy targets the work units it chose to
 test and leaves the rest to other tiers — "defined upstream but not referenced
 here" is the sum of *new since the last write* and *never covered*, and the
 two cannot be told apart without the snapshot. On one project that meant a
-45-item "delta" for a reconcile whose true set change was one unit (ledger
-IMP-073). So, when `--drift` reports by the fallback method (no `items` map,
+45-item "delta" for a reconcile whose true set change was one unit. So, when
+`--drift` reports by the fallback method (no `items` map,
 and no committed revision matched the recorded hash — the helper tries git
-first, ledger IMP-083), print the residue as a **backlog line** — "N upstream items are targeted by
+first), print the residue as a **backlog line** — "N upstream items are targeted by
 nothing and deferred by nothing; the last write recorded no snapshot, so
 which of them are new is unknown" — never as the delta, and let the user
 pick the items to treat as new. Re-stamping at this run's write makes the
@@ -313,10 +313,10 @@ text names a command therefore needs a reason that says why the *named
 command* needs no surface, and an `incorporate` needs a surface that actually
 runs it — or the command clause is incorporated and only the rest deferred
 (`ux`'s validator warns `[FR names a command]` whenever an FR's text names a
-command that no surface tracing it runs). (aicf
-LSN-056: FR-097 deferred as "global content rule" while its text named
-`aicf explain <term>`; ARCH then claimed it realized in a surface with no
-function behind it, and the codegen task stuck.)
+command that no surface tracing it runs). (FR-097 once deferred as "global
+content rule" while its text named `aicf explain <term>`; ARCH then claimed
+it realized in a surface with no function behind it, and the codegen task
+stuck.)
 
 Then resolve each item. Batch with `AskUserQuestion` (multi-select where the
 items are independent). For every added / removed / modified item the user
@@ -355,11 +355,11 @@ candidate discovery names, or, when it names none, **the delegation is void
 — record a finding** (`finding_notes`, drained in Phase 8) so repair retires
 the delegating sentence, and author nothing. `defer` stays. "The upstream is
 wrong" is not offered for a delegation: the upstream is not wrong, it
-deferred, and that option beside define/remove is incoherent. (aicf LSN-081:
-a PRD sentence reserved `EdgeDef.discriminator` "until DATA-MODEL describes
+deferred, and that option beside define/remove is incoherent. (A PRD sentence
+once reserved `EdgeDef.discriminator` "until DATA-MODEL describes
 it"; the card offered define / leave / upstream-wrong, the necessity check
 found a symmetry copy with no consumer, and the right outcome was to remove
-it, not to describe it — ledger IMP-100.) Record the choice as
+it, not to describe it.) Record the choice as
 `delegation_void` in the state slot.
 
 Persist each decision to the state file so an EXIT-then-resume does not
@@ -410,7 +410,7 @@ The steps, in order:
 2. **Capture the delta before any write.** `python .claude/sdlc/docs_index.py
    --drift docs/<file>` (the plugin's copy when the project has none — Step 2
    above). Any write this run makes — a re-slice, a stamp — refreshes the
-   stamps the drift check reads, so capture first (ledger IMP-051).
+   stamps the drift check reads, so capture first.
    **Exit 0** → print `[OK] nothing moved since docs/<file> was written`,
    write nothing, compute `Next:` (step 8) and stop. **Exit 1** → the report's
    item lists ARE the delta, verbatim, and its `why` lines are each upstream's
@@ -445,10 +445,27 @@ The steps, in order:
    surgical): <fix>" — as the position-1 recommendation with basis
    `measured` (a recorded resolution is a fact, not an analogy), and never
    re-offers "record a finding" for that item. An open or triaged finding is
-   context for the card, not a gate: it was not owed to this file. (aicf
-   LSN-082: a DATA-MODEL 3.1 change whose changelog cited FND-104 was carded
+   context for the card, not a gate: it was not owed to this file. (A
+   DATA-MODEL 3.1 change whose changelog cited FND-104 was once carded
    as an open incorporate / ignore / finding menu one session after the
-   repair that decided it — ledger IMP-101.)
+   repair that decided it.)
+   **A handoff carrying `retired` is a sweep, not a citation.** When a note's
+   entry carries `retired: [<token>, ...]`, its own prose enumeration of which
+   items use the token is unverified — repair could not confirm it either
+   (`FND-104` named five tests without the retired token and
+   missed five that had it, two of them live assertions). Sweep THIS run's own
+   artifact family — the system file plus its shards, the text this reconcile
+   is about to read or write — for each token: `grep -rn <token> docs/<family
+   system-file-stem>*.yaml` (the same "Token sweep" convention repair's own
+   surgical Phase 4 uses; repair's own corpus-wide sweep stays where it is —
+   this is narrower, one family, not `docs/`). On a TASKS family a prose grep
+   cannot see an embedded copy — run the reslicer's `--check` instead
+   (`reslice_embeds.py --docs-dir docs --container <cid> --all --check`); it
+   re-derives every embed from its source, which is the only sweep that means
+   anything there. Every hit becomes its own card (Step 4), never accepted
+   from the note alone. A `key: null` handoff (the whole file) with `retired`
+   reports file-level hits — "N lines still carry `<token>`" — and the run
+   cards that count as ONE item, not one per line.
 4. **One confirmation card per class of change**, never one per item (Step 4
    above holds the options: incorporate / ignore + warn / defer / the upstream
    is wrong):
@@ -457,14 +474,17 @@ The steps, in order:
    - *removed* → the §4 stale-ref case: re-trace, remove with approval, or
      defer; never a silent delete.
    - *changed in body* → only the items the report marks `[referenced here]`
-     (a structured trace) or `[cited in prose xN]` (a mention in a
-     description or directive — re-read those N sites). The report computes
+     (a structured trace), `[cited in prose xN]` (a mention in a
+     description or directive — re-read those N sites), `[changelog names
+     this file]` (the upstream's own changelog since the stamp already names
+     this file — read the entry and check each changed item against what
+     this file says about it), or `[deferred here]` (this file defers the
+     item — does the deferral's reason still hold now that the contract
+     changed? keep it, or author the test/task). The report computes
      this filter; never re-derive it by hand, and an unmarked list means an
-     older installed helper (re-run `/sdlc:setup`; ledger IMP-147, aicf
-     LSN-084: a prose cite at four sites was invisible to a hand filter over
-     structured traces). A change nothing here depends on is not this run's
-     business, and an upstream the report calls `re-stamp only` is step 6's
-     case. Per item, two
+     older installed helper (re-run `/sdlc:setup`; a prose cite at four
+     sites was once invisible to a hand filter over structured traces).
+     Per item, two
      questions, batched across items: *does the change contradict what this
      file says?* (→ correct it here) and *does it assign something this file
      does not cover yet?* (→ an authoring card — unless it *delegates* the
@@ -474,6 +494,21 @@ The steps, in order:
      resolution (step 3). Neither → refresh the text
      that quotes the upstream in place, with no question. `--drift` already
      leaves declaration-only edits (`touches_entities`, `status`) off the list.
+
+     **An item on the changed-in-body list carrying none of these marks is
+     its own class, never the backlog's.** "Not this run's business" applies
+     only at the WHOLE-UPSTREAM level — an upstream the report calls
+     `re-stamp only` (every changed item in that family unmarked) is step
+     6's case, no question at all. Inside a family the report DOES cover, a
+     changed-in-body item carrying no mark is *changed and uncovered*: one
+     lighter question, batched across items — author a test (or, in `task`,
+     a task), record a typed `deferrals` entry, or say it is not this file's
+     family — never re-stamped as reviewed by silence. On a validator-green
+     artifact every item is targeted, cited, or structurally deferred
+     (AUTHORING §6), so this class should be rare; where an item is
+     genuinely named in none of those buckets, the file predates the
+     `deferrals` mechanism — a pre-2.x artifact still on the prose-only
+     deferral channel — and is walked with the same lighter question.
 5. **Incorporate means a scoped drill, not the interview.** Each accepted
    item is authored at its own list's importance tier — `critical` items get
    the per-item drill (`../../prd/references/importance-flows.md`), and a
@@ -482,14 +517,21 @@ The steps, in order:
    enumeration ("per class the contract enumerates", "every verb") is seeded
    by reading that enumeration from the artifact it names — whatever the
    note's `basis` — and the close card prints seeded-vs-enumerated with the
-   difference (ledger IMP-085). When an accepted item needs a decision this run
+   difference. When an accepted item needs a decision this run
    cannot scope — a Phase 4 structural question (a new container, another
    storage paradigm, a new surface family) — save the decisions so far, stop,
    and name the plain form as `Next:`; its Phase 2 resumes this review from
    the `delta_review` slot instead of asking again.
 6. **Hash moved, no item delta** (a comment or formatting edit), or the report
    says `re-stamp only` (items moved, none this file references or cites) →
-   re-stamp and add one changelog line, with no question.
+   re-stamp and add one changelog line, with no question. That "no question"
+   scopes the delta review only — whatever the skill's own SKILL.md owes
+   every update run (pre-flight WRNs, ask-once gates, Phase 7/8) still runs
+   regardless. **The report says it cannot itemize the upstream** (both the
+   recorded snapshot and the current index hold no items for it) → read the
+   upstream's `git diff` since the stamp, or its changelog lines, and card
+   what changed; the re-stamp-with-no-question path above is only for "no
+   item delta" on an upstream the report DID itemize.
 7. **Phase 7 and Phase 8 as usual** — merge (never drop an item the user did
    not approve dropping), `--stamp` against every upstream consumed, validate
    bare, refresh the index and the statusboard, drain `finding_notes` and

@@ -195,7 +195,7 @@ moved, runs the consolidated delta-review (added / removed / modified ids)
 *before* the interview. This is the cross-skill §7 contract and **generalizes
 the `session_id`/`last_updated` comparison used above** — a content hash also
 catches hand-edits, which `session_id` does not. Full mechanics:
-`sdlc/skills/ux/references/upstream-reconciliation.md`.
+`${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md`.
 
 ## Validation failures
 

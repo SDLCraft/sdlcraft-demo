@@ -7,6 +7,28 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.23 (2026-09-20) — Phase 8 commits the run when the project opted in (auto-commit, CLAUDE.md 20)
+
+- New close step after `record-run`, before the card: `python .claude/sdlc/autocommit.py commit --skill ux --invocation "<as typed>" --summary "<one line>"` (mechanics in `setup/references/auto-commit.md`), its one printed line as the card's new `Commit:` row; runs on every exit path, never a blocker. The restated self-review paragraph is now a pointer at `lessons-capture.md`, paying for the lines (AUTHORING §19 ceilings unchanged). Pinned by `setup/_smoke/autocommit_lockstep_selftest.py`.
+
+## 1.22 (2026-09-19) — [deferral hygiene] never lists a traced FR, `--path` on a UX__<surface>.yaml shard validates the family, and Phase 8 distinguishes own-toolchain
+
+- `check_fr_names_unbuilt_command` no longer hands a COVERED FR to `DeferralIndex.defer()`: a trace-covered FR merely named in a `ux_warnings` note is never added to `prose_only`, so `[deferral hygiene]` never lists it and the command-check row says 'is traced by' instead of a false 'is deferred'. Pinned by fixture `28_traced_fr_prose_hygiene_covered` + `deferral_selftest.py` (ledger IMP-184).
+- `validate_all()` no longer applies the system UX model to a `UX__<surface>.yaml` shard given to `--path`: a shard path redirects to its `UX.yaml` sibling and validates the whole family, mirroring test/task. Pinned by the `04_valid_cli_complete/UX__task-add.yaml` row (ledger IMP-199).
+- Phase 8's index refresh distinguishes own-toolchain (marker present, no `docs_index` helper: run the project's own docs-hook command from `.claude/settings.json` and name it) from never-ran-setup (no marker: the only genuine no-op), per setup's helper-resolution.md; the statusboard sentence is unchanged. Pinned by setup's `_smoke/index_refresh_lockstep_selftest.py` (ledger IMP-200).
+
+- `upstream-reconciliation.md` step 4 lists two new machine marks with their questions — `[changelog names this file]` (the upstream's changelog names this artifact: check each changed item against what this file says) and `[deferred here]` (this file defers the item: does the deferral's reason still hold?) — and step 6 scopes "no question" to the delta review, names the case where the report cannot itemize an upstream at all (read the diff or the changelog lines; re-stamp-with-no-question is only for a real "no item delta" on an upstream the report DID itemize), and says the skill's own update-run obligations still run (ledger IMP-185, IMP-186, IMP-187, IMP-188).
+
+- `upstream-reconciliation.md` step 4 states the third class once - a changed-in-body item carrying no mark is its own class, never the backlog's, with the pre-2.x prose-deferral residue clause - so test's and task's local restatements are one-clause pointers (ledger IMP-187).
+
+- `upstream-reconciliation.md` step 3: a handoff carrying `retired` tokens makes the reconcile sweep its own artifact family (system file + shards) for each token and treat the note's enumeration as unverified prose; a TASKS family's sweep is `reslice_embeds.py --check`; a `key: null` handoff reports file-level hits as one card (ledger IMP-193).
+
+- The `Phase 3 (first step) — Repo evidence` block keeps only its skill-specific lines and a consumer-safe pointer (`${CLAUDE_SKILL_DIR}/../setup/references/repo-evidence.md`); the fifteen lines setup's canonical file already states are gone (14 lines shorter; the lint_context_budget ceiling follows). `lint_skill_paths.py` now flags a bare `sdlc/skills/<x>/references/<y>.md` path in shipped markdown (ledger IMP-181).
+
+- Every cross-skill reference pointer in SKILL.md and references/ now uses the consumer-safe `${CLAUDE_SKILL_DIR}/../<skill>/references/<file>.md` form instead of a bare `sdlc/skills/...` path that resolves only in the plugin repository; `lint_skill_paths.py` holds it (ledger IMP-206).
+
+- No shipped runtime file (SKILL.md, references/, assets/) carries a ledger-id citation any more: bare `(IMP-NNN)` / `(LSN-NNN)` parentheticals are gone, history sentences keep their rule and their reason without the ticket, close-card examples show the `LSN-NNN` placeholder; `lint_context_budget.py` counts IMP- and LSN- ids with a ceiling of 0 per skill (ledger IMP-182).
+
 ## 1.21 (2026-09-17) — The re-run delta review's consolidated summary rides inside the decision question, and the REFINE row scopes a re-run before the merge
 
 Ledger IMP-137 (AUTHORING §18). upstream-reconciliation.md's Step 4 presented the consolidated summary and asked for the decision in the same turn — the seven skills that delegate their delta review here inherited it. The summary now rides in the decision question's text and option descriptions (or the turn ends with it and takes a typed reply), and the reference cites §18. Pinned by prd's `_smoke/channel_rule_selftest.py`.

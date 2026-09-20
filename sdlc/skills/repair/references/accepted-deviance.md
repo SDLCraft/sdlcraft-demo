@@ -4,7 +4,7 @@ Read this when an upstream artifact's validator exits non-zero during a skill's
 input gate (Phase 2, or `code`'s Preconditions), or when a downstream-rejection
 rule in a `merge-validate.md` would reject an artifact for that reason. This
 file is the single statement of the rule; every skill's gate points here
-instead of carrying its own copy (ledger IMP-104).
+instead of carrying its own copy.
 
 ## The rule
 
@@ -27,7 +27,7 @@ that has all three of:
 The check then counts as passing while its count stays at `N`, and fails again
 the moment the count moves, in either direction. Without this exception a
 project with one permanently accepted validator error could never run the
-stages below it again (ledger IMP-052, IMP-081).
+stages below it again.
 
 ## The gate command
 
@@ -45,7 +45,7 @@ is accepted.
 
 **Never `--quick`.** That depth runs only the cross-artifact linter; it says
 nothing about any single artifact's validator, accepted or red, so a gate that
-reads it proceeds on a broken upstream (ledger IMP-081).
+reads it proceeds on a broken upstream.
 
 **A finding the doctor did not apply.** When a `wontfix` finding pins
 `expected_count` for the artifact but its `detected_by` is empty or names a

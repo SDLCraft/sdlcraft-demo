@@ -140,7 +140,7 @@ complete.
 a "what changed" card). Match their shape; do not invent a third. Both carry
 `Status:` like every other card, and `lint_output_style.py` fails a card
 template without one, or one that prints the findings queue's state or field
-names (ledger IMP-154).
+names.
 
 ## What not to say
 
@@ -182,8 +182,8 @@ act on one by one and cannot obtain any other way — the item delta
 `docs_index.py --drift` prints for a reconcile, the residue the user picks the
 new items from, the candidates an ambiguous symbol must be qualified against.
 Those print whole, however long; the reconcile form says "verbatim" and means
-it. Two ids hidden behind a `(+2 more)` once needed edits nobody made (ledger
-IMP-097). The scripts' shared `join_ids(ids, limit)` helper takes
+it. Two ids hidden behind a `(+2 more)` once needed edits nobody made. The
+scripts' shared `join_ids(ids, limit)` helper takes
 `len(ids)` at such a site.
 
 ## Bad and good, from the real corpus

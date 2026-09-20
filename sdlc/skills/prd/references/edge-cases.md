@@ -36,7 +36,7 @@ the happy path.
     numbered recipe below), then offer resume/restart/discard.
   - `status: complete` or `aborted` **and the output artifact exists** → an
     update flow: scope it per
-    `sdlc/skills/ux/references/upstream-reconciliation.md`'s REFINE row
+    `${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md`'s REFINE row
     (open only the named themes, the §7 delta items, and the non-confirmed
     set; confirm the rest in one summary), then Phase 7's merge.
   - `status: complete` or `aborted` **and the output artifact is ABSENT** →
@@ -51,7 +51,7 @@ the happy path.
   default. A state file is progress bookkeeping; the output yaml holds the
   answers. Discarding a completed multi-theme interview for a version bump
   is the one outcome the recipe exists to prevent (seva-servant hand-migrated
-  twice, ledger IMP-033). The recipe:
+  twice). The recipe:
   1. Set `skill_version` to this file's footer value.
   2. Add every baseline key the current state contract defines that the
      file lacks, with its empty default: `metrics: {}`, `lesson_notes: []`,
@@ -71,7 +71,7 @@ the happy path.
      `last_ids_by_product[<slug>]`) to `max(state counter, highest id
      present on disk — the canonical file and every one of its shards)`,
      per AUTHORING §5. A counter frozen across this step is how a
-     hand-edited artifact collides ids at the next mint (ledger IMP-174).
+     hand-edited artifact collides ids at the next mint.
   6. Append `migrations: [{from, to, at, added: [<keys>], retired_themes:
      [<ids>]}]` and bump `metrics.resumes`.
   7. Then offer the normal prompt with **resume at position 1**, saying in

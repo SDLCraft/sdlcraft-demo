@@ -460,7 +460,7 @@ any other spelling makes the item invisible to them: it still parses to the
 same string and still validates, but the codegen packet builder reads no
 statement for it and every worker implementing it builds with no requirement
 text at all. `validate_schema.py` refuses the other spellings from
-`prd_version` 2.0 (ledger IMP-159).
+`prd_version` 2.0.
 
 Then ask:
 

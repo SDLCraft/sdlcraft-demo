@@ -34,7 +34,13 @@ Usage:
                         # other mode -> open, resolution stripped, its
                         # artifacts_touched folded into a new evidence line
                         # so the walk record is not simply discarded.
-    findings.py validate
+    findings.py validate [--upgrade]
+                        # --upgrade: when every gated check already passes
+                        # with ZERO warnings, raise findings_file_version to
+                        # the current floor (NEW_FILE_VERSION) and write it;
+                        # a no-op if already there, refused while any warning
+                        # remains. The one sanctioned writer of this field
+                        # besides a fresh empty queue.
     findings.py stats
   Global: [--project-root <dir>] [--path <queue path>] (before or after the verb)
 
@@ -85,7 +91,13 @@ FND_RE = re.compile(r"^FND-\d{3,}$")
 RAISED_BY_RE = re.compile(r"^(sdlc-[a-z0-9-]+|user)$")
 MAX_EVIDENCE = 5
 MAX_EVIDENCE_LEN = 300
-NEW_FILE_VERSION = "2"
+# IMP-196: the floor a fresh queue starts at, and the target `validate
+# --upgrade` raises an existing queue to once every gated check on it passes
+# with ZERO warnings. Was "2"; raised to "3" alongside validate_findings.py's
+# ARTIFACTS_TOUCHED_GATED_VERSION / SITES_CONSIDERED_GATED_VERSION so a fresh
+# queue is born past both floors and `--upgrade` has somewhere to raise an
+# older one TO.
+NEW_FILE_VERSION = "3"
 
 # Statuses a fresh `add` deduplicates against: a defect nobody has closed yet.
 # The doctor sweep widens this (see doctor.py) because it re-runs the same
@@ -334,7 +346,8 @@ def owed_findings(data: Dict[str, Any], artifact: str) -> List[Dict[str, Any]]:
             continue
         handoff = res.get("handoff") if isinstance(res.get("handoff"), list) else []
         notes = [{"key": h.get("key"), "note": str(h.get("note")).strip(),
-                  "basis": str(h.get("basis") or "unstated")}
+                  "basis": str(h.get("basis") or "unstated"),
+                  "retired": [str(t) for t in (h.get("retired") or []) if str(t).strip()]}
                  for h in handoff
                  if isinstance(h, dict) and _artifact_name(h.get("artifact")) == name
                  and str(h.get("note") or "").strip()]
@@ -815,6 +828,10 @@ def _print_owed(data: Dict[str, Any], artifact: str, as_json: bool) -> int:
             # unstated) = verify against the cited artifact before offering it.
             print(f"           handoff {h.get('key') or '(whole file)'} [{h.get('basis') or 'unstated'}]: "
                   f"{h['note'][:220]}")
+            if h.get("retired"):
+                # The literal token(s), not an authored consumer list (IMP-193) -
+                # the reconcile sweeps its own artifact family for these itself.
+                print(f"                    retired: {', '.join(h['retired'])}")
     return 0
 
 
@@ -902,8 +919,54 @@ def cmd_reopen(args) -> int:
     return 0
 
 
+def cmd_validate_upgrade(path: Path) -> int:
+    """Raise this queue's OWN findings_file_version to NEW_FILE_VERSION - but
+    only when it already validates with ZERO errors AND zero warnings, gated
+    or not (ledger IMP-196: "the floor gets a way up"). Today nothing ever
+    raises an existing queue: a fresh queue is born at NEW_FILE_VERSION, but
+    an older project's queue sits below it forever, so every gated check on
+    it stays a warning nobody has to fix. This is the one sanctioned writer of
+    findings_file_version besides a fresh `empty_queue()` - never a partial
+    raise, never on a queue that still owes a fix."""
+    vf = validator_module()
+    try:
+        data = load_findings(path)
+    except (OSError, yaml.YAMLError, ValueError) as e:
+        print(f"[FAIL] cannot read {path}: {e}", file=sys.stderr)
+        return 2
+    doc, errors, warnings = vf.validate_raw(data, str(path))
+    current = str(data.get("findings_file_version") or "1")
+    if doc is None or errors:
+        print(f"[FAIL] not upgraded - {path} does not pass validation yet "
+              f"({len(errors)} problem(s)); run `findings.py validate` for the detail, fix them, "
+              f"then retry --upgrade.", file=sys.stderr)
+        return 1
+    if warnings:
+        print(f"[FAIL] not upgraded - {path} validates but still carries {len(warnings)} warning(s); "
+              f"raising findings_file_version from {current!r} to {NEW_FILE_VERSION!r} needs ZERO, "
+              f"not just no errors - every gated check must actually be clean, not merely "
+              f"not-yet-blocking. First: {warnings[0]}", file=sys.stderr)
+        return 1
+    if vf.file_version_major({"findings_file_version": current}) >= \
+            vf.file_version_major({"findings_file_version": NEW_FILE_VERSION}):
+        print(f"[OK] {path} is already at findings_file_version {current!r} "
+              f"(>= {NEW_FILE_VERSION!r}) - nothing to raise.")
+        return 0
+    data["findings_file_version"] = NEW_FILE_VERSION
+    try:
+        dump_findings(data, path)
+    except OSError as e:
+        print(f"[FAIL] cannot write {path}: {e}", file=sys.stderr)
+        return 2
+    print(f"[OK] {path} raised from findings_file_version {current!r} to {NEW_FILE_VERSION!r} - "
+          f"every gated check passed with zero warnings.")
+    return 0
+
+
 def cmd_validate(args) -> int:
     path = _queue_path(args)
+    if getattr(args, "upgrade", False):
+        return cmd_validate_upgrade(path)
     validator = None
     for cand in _validator_candidates():
         if cand.is_file():
@@ -1071,6 +1134,11 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_reopen)
 
     p = sub.add_parser("validate", help="Run validate_findings.py on the queue.")
+    p.add_argument("--upgrade", action="store_true",
+                   help="Instead of just reporting, raise findings_file_version to the current "
+                        "floor (NEW_FILE_VERSION) when the queue already passes every gated check "
+                        "with ZERO warnings; a no-op if already there, refused (exit 1) while any "
+                        "warning remains.")
     _add_global_opts(p, sub=True)
     p.set_defaults(func=cmd_validate)
 

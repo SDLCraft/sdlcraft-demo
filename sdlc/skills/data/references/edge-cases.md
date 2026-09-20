@@ -26,7 +26,7 @@ UX context is *strongly recommended* but not strictly required. If it's
 missing:
 
 1. Resolve applicability first
-   (`sdlc/skills/prd/references/optional-stages.md`). When
+   (`${CLAUDE_SKILL_DIR}/../prd/references/optional-stages.md`). When
    `PRD.pipeline_scope.ux.applicable` is `false`, or a present `UX.yaml` says
    `metadata.applicability: not_applicable`, the absence is deliberate —
    **ask nothing** and skip straight to step 3. When there is no scope entry,
@@ -214,7 +214,7 @@ For projects with hundreds of files in `models/` or `migrations/`:
 The user updates `docs/PRD.yaml` or `docs/UX.yaml` (re-run or hand-edit), then
 re-runs `/sdlc:data`. The existing DATA-MODEL is now stale. Phase 2's
 **upstream-change detection** drives the reconciliation per the cross-skill §7
-contract (`sdlc/skills/ux/references/upstream-reconciliation.md`):
+contract (`${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md`):
 
 1. Run `python .claude/sdlc/docs_index.py --drift docs/DATA-MODEL.yaml`
    (exit 1 = at least one upstream moved; exit 0 = fresh). When the helper is

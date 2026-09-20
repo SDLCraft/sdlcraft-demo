@@ -104,7 +104,7 @@ Classify `$ARGUMENTS`:
    upstream-drift check in Phase 2 before the interview.
 2. **`--reconcile`** → the **reconcile form**: the upstream-change review of
    `docs/API.yaml` and nothing else — no theme interview, no structural
-   questions. Follow `sdlc/skills/ux/references/upstream-reconciliation.md` →
+   questions. Follow `${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md` →
    "The `--reconcile` form" (steps 1–8, and this skill's row in its specifics
    table), then Phases 7–8 below. A resource the review adds is authored
    through the per-resource drill (theme 10) into its own
@@ -125,7 +125,7 @@ Before doing anything else, check for
   > like to **resume**, **restart** (discard previous answers), or
   > **discard** (delete state and exit)?"
 - If `status: complete` or `aborted` and `docs/API.yaml` exists, scope the
-  update — see `sdlc/skills/ux/references/upstream-reconciliation.md`'s
+  update — see `${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md`'s
   REFINE row (open only the named themes, the §7 delta items, and the
   non-confirmed set; confirm the rest in one summary) — then
   `references/merge-validate.md`.
@@ -170,7 +170,7 @@ fallback this file gives for a missing `docs_index.py` applies to it.
      `python "${CLAUDE_SKILL_DIR}/../repair/doctor.py" --docs-dir docs --artifact docs/PRD.yaml`
      reports the check `accepted (N, unchanged)`, the project accepted that
      deviance — proceed (never `--quick`; rule:
-     `sdlc/skills/repair/references/accepted-deviance.md`). The same holds for
+     `${CLAUDE_SKILL_DIR}/../repair/references/accepted-deviance.md`). The same holds for
      every upstream validator this phase runs below.
    - Extract the fields the API skill needs:
      - `security_compliance.auth_model` → preliminary `auth.schemes`
@@ -202,7 +202,7 @@ fallback this file gives for a missing `docs_index.py` applies to it.
 
 2. **`docs/UX.yaml`** + all `docs/UX__<surface>.yaml` — required **unless UX
    does not apply to this project**. Resolve that first, per the three-step
-   rule in `sdlc/skills/prd/references/optional-stages.md`:
+   rule in `${CLAUDE_SKILL_DIR}/../prd/references/optional-stages.md`:
 
    ```bash
    python "${CLAUDE_SKILL_DIR}/../ux/validate_schema.py" --path docs/UX.yaml
@@ -291,7 +291,7 @@ python .claude/sdlc/docs_index.py --drift docs/API.yaml
 ```
 
 Exit 1 (drift) → run the consolidated **delta-review pass before the theme
-interview** per `sdlc/skills/ux/references/upstream-reconciliation.md`: for
+interview** per `${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md`: for
 each changed upstream classify the delta (added / removed / modified ids),
 and persist progress in `state.delta_review` (`{upstreams, decisions,
 unresolved}`) so a resume continues instead of restarting. The per-item
@@ -326,7 +326,7 @@ that `python "${CLAUDE_SKILL_DIR}/../repair/findings.py" list --owed-by
 docs/API.yaml` returns is waiting on this very run — its owed re-run is what
 you are doing. Leave it out of the question and read it as the reason for the
 change: its `fix` and `handoff` notes (canonical:
-`sdlc/skills/ux/references/upstream-reconciliation.md` → "The `--reconcile`
+`${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md` → "The `--reconcile`
 form", step 3).
 
 **Before dropping or renaming an emitted id** (an OPR endpoint id, a
@@ -336,23 +336,9 @@ absent) — downstream ARCH/TEST/TASKS artifacts may already cite it.
 
 ### Phase 3 (first step) — Repo evidence
 
-Before seeding anything, look at what the project already has. On a greenfield
-project this finds nothing and costs one command; on a **brownfield** one it is
-the best evidence available, and this skill used to ignore it entirely.
-
 ```bash
 python .claude/sdlc/repo_scan.py --domain api --json
 ```
-
-Helper absent (the project never ran `/sdlc:setup`) → skip silently and seed
-from the upstream artifacts alone. Never block the run on it.
-
-It returns OpenAPI/Swagger documents, `.proto` files, GraphQL SDL, route decorators and `urls.py` — each hit a `path`, `line`
-and one-line `excerpt`. Fold them into the pre-fill map below as **`⚠ inferred`
-candidates**, never as answers: cite `<path>:<line>` in the `_rationale` sibling
-of whatever field the evidence fed, confirm each one individually (the canonical
-flow forbids batch-accepting inferred values), and pass on `truncated` /
-`capped_signals` as "this is a sample of a large repo, not an inventory".
 
 An existing OpenAPI document is the single best pre-fill this skill can get —
 read it for the resource inventory and operations rather than re-deriving them
@@ -360,7 +346,7 @@ from surfaces. Finding route decorators but no spec means the API exists and is
 undocumented, which is worth saying out loud.
 
 Full rules, including what to do when the repo contradicts an upstream
-artifact: `sdlc/skills/setup/references/repo-evidence.md`.
+artifact: `${CLAUDE_SKILL_DIR}/../setup/references/repo-evidence.md`.
 
 ### Phase 3 — Idea capture (lightweight)
 
@@ -415,7 +401,7 @@ These determine the *shape* of the API output:
    without an `ls` and without asking the user. The validator errors when
    the two disagree, and warns when a legacy `api_kind: none` file with no
    `external_dependencies` carries no marker. Mechanics:
-   `sdlc/skills/prd/references/optional-stages.md`.
+   `${CLAUDE_SKILL_DIR}/../prd/references/optional-stages.md`.
 
 3. **`transport_styles`** — multi-select from `rest, graphql, grpc,
    websocket, server_sent_events, webhooks_out`. Pre-fill: `[rest]` is
@@ -540,7 +526,7 @@ It writes `{file, session_id, last_updated, sha256, items}` per upstream; the
 hand-written `{file, sha256}` entry is a sha-only stamp: `--drift` can only
 recover its old side from git or fall back to the residue, and `--stale` warns
 about it. Provenance is file-granular, so a shard read but not recorded is
-invisible to every drift check (ledger IMP-102). Helper absent → the plugin's
+invisible to every drift check. Helper absent → the plugin's
 copy, `python "${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs
 --stamp …` (it writes only the artifact it is given). Replace-on-write. See
 CLAUDE.md §7.
@@ -607,11 +593,11 @@ defect in the lessons queue — never as a note, a bullet or a "resolved" sectio
 in `CLAUDE.md`. See `references/merge-validate.md`.
 
 Then: set `status: complete` in the state
-file (keep the file — audit trail), then **refresh the navigation
-index** (`python .claude/sdlc/docs_index.py`; no-op if the project never
-ran `/sdlc:setup` — the freshly-installed hook isn't active until the
-next session, so the explicit refresh keeps `INDEX.yaml` current now).
-Optionally confirm the write introduced no dangling id references:
+file (keep the file — audit trail), then **refresh the navigation index**
+— resolve the copy per `helper-resolution.md`: installed `.claude/sdlc/docs_index.py`
+→ run it; own-toolchain (marker present, no `docs_index` helper) → run the
+project's own docs-hook command from `.claude/settings.json` and name it;
+no marker → nothing to run. Optionally confirm no dangling id references:
 `python .claude/sdlc/docs_index.py --check` (skip when the helper is
 absent).
 
@@ -642,22 +628,20 @@ without anyone writing them down by hand. Harmless no-op if it is not installed.
 
 Close by telling the user where the artifacts live and what comes next:
 
-**Self-review & record the run** (CLAUDE.md 15; doctrine:
-`sdlc/skills/lesson/references/lessons-capture.md`). First drain `state.lesson_notes` (mid-run observations — that file →
-"Mid-run: note now, record at close"), then answer the self-review questions
-from that file for this run. Each yes that matches a raising condition
-becomes one `lessons.py add` (at most 2 per run unless one is a `blocker`;
-drained notes count toward the cap). Then record the run:
+**Self-review & record the run** (CLAUDE.md 15; doctrine and the self-review
+questions: `${CLAUDE_SKILL_DIR}/../lesson/references/lessons-capture.md` → "Mid-run:
+note now, record at close"). Drain `state.lesson_notes`, answer the self-review for
+this run (at most 2 `lessons.py add` per run unless one is a `blocker`; drained
+notes count toward the cap), then `python .claude/sdlc/lessons.py record-run --skill api --plugin-root "${CLAUDE_SKILL_DIR}/../.."`
+— best-effort: a non-zero exit is one `Attention:` clause; helper absent, skip silently.
 
-```bash
-python .claude/sdlc/lessons.py record-run --skill api --plugin-root "${CLAUDE_SKILL_DIR}/../.."
-```
-
-Best-effort: a non-zero exit becomes one `Attention:` clause in the card;
-helper absent (project never ran `/sdlc:setup`) — skip silently.
+**Commit the run** (CLAUDE.md 20; the message rules and what is staged:
+`${CLAUDE_SKILL_DIR}/../setup/references/auto-commit.md`) — the last action before the card, on every exit path, never a blocker:
+`python .claude/sdlc/autocommit.py commit --skill api --invocation "<the form the dispatch resolved, as typed>" --summary "<one line: what changed, in the user's words>"`
+Its one printed line is the card's `Commit:` row; off, or helper absent → no row.
 
 **Close with the card** (CLAUDE.md 14; canonical shape:
-`sdlc/skills/prd/references/reporting-to-the-user.md`). The user reading this
+`${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`). The user reading this
 knows only "there is a pipeline and I run it in order", so answer their three
 questions and nothing else: did it work, can I run the next skill, what do I
 type next.
@@ -668,6 +652,7 @@ Wrote:     docs/API.yaml + docs/API__*.yaml ({the one count that matters})
 Status:    complete - /sdlc:arch can run it
 Attention: {what needs a decision, in the user's words}
 Findings:  {N recorded (FND-NNN, ...) -> /sdlc:repair}
+Commit:    {a1b2c3d  /sdlc:api → <summary> | nothing to commit | not committed - <reason> — only when auto-commit is on}
 Next:      {the computed next invocation}   ← in a NEW session
 Why new:   the artifacts and state files on disk are the handoff, not this
            transcript.
@@ -676,7 +661,7 @@ Why new:   the artifacts and state files on disk are the handoff, not this
 **Compute the `Next:` row; never copy the example** — the card above is a
 shape, and its `Next:` literal is an example, never a value to print
 through. Procedure and successor map:
-`sdlc/skills/prd/references/reporting-to-the-user.md`
+`${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`
 (CLAUDE.md 14). For `/sdlc:api` it resolves to, first match wins:
 
 - **`docs/` artifact is `draft`, the user typed `EXIT`, or the validator is not
@@ -696,7 +681,7 @@ through. Procedure and successor map:
 
 Rules: omit any row with nothing to say (never write "no warnings"). Add a
 `Lessons:` row only when this run recorded at least one — e.g. `Lessons: 1
-recorded (LSN-004) - about this skill, for its maintainer; nothing for you to
+recorded (LSN-NNN) - about this skill, for its maintainer; nothing for you to
 do` — and never print "no lessons". Add the `Findings:` row only when this
 run recorded findings or open findings name an artifact this skill consumed —
 e.g. `Findings: 2 recorded (FND-011, FND-012) -> /sdlc:repair` — and never
@@ -870,4 +855,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.13"
+skill_version: "1.15"

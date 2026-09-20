@@ -123,11 +123,24 @@ addressed; never re-record to answer one — that makes a duplicate.
 
 ### 5 — Close
 
+**Commit the run** (CLAUDE.md 20; the message rules and what is staged:
+`${CLAUDE_SKILL_DIR}/../setup/references/auto-commit.md`) — before the card, never a
+blocker. Only the lessons queue and the marker are staged: this skill runs in
+ambient sessions, so a hand edit elsewhere is never swept into its commit.
+
+```bash
+python .claude/sdlc/autocommit.py commit --skill lesson --invocation "/sdlc:lesson" \
+  --summary "LSN-NNN recorded - <kind> in sdlc-<skill>"
+```
+
+Its one printed line is the card's `Commit:` row; off, or helper absent → no row.
+
 ```
 -- /sdlc:lesson - recorded ---------------------------
-Wrote:     LSN-007 about /sdlc:test (question_quality, degraded)
+Wrote:     LSN-NNN about /sdlc:test (question_quality, degraded)
 Status:    for the plugin maintainer - nothing in this project changes
 Sharing:   held for the next batch (this project shares lessons automatically)
+Commit:    a1b2c3d  /sdlc:lesson → LSN-NNN recorded - question_quality in sdlc-test
 Next:      nothing to run - the maintainer collects this file
 ```
 
@@ -167,4 +180,4 @@ defect is an `LSN-NNN`, and all of them surface, generated, in
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.14"
+skill_version: "1.16"

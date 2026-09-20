@@ -107,7 +107,7 @@ Before doing anything else, check for `.claude/skills-state/sdlc-prd.state.yaml`
   session from `<last_updated>`. Would you like to **resume**, **restart**
   (discard previous answers), or **discard** (delete state and exit)?"
 - If `status: complete` or `aborted` and `docs/PRD.yaml` exists, scope the
-  update — see `sdlc/skills/ux/references/upstream-reconciliation.md`'s
+  update — see `${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md`'s
   REFINE row (open only the named themes, the §7 delta items, and the
   non-confirmed set; confirm the rest in one summary) — then Phase 7's merge.
 - If `status: complete` or `aborted` and `docs/PRD.yaml` is ABSENT, only
@@ -229,7 +229,7 @@ with that id, never under an improvised one (`idea_check`, `idea_summary`).
 The inventory offers it no suggested answers, so the maintainer's digest
 knows free text is its designed answer; an improvised id lands in the
 "asked by an agent, not from the inventory" bucket where nobody can act on
-it (ledger IMP-067).
+it.
 
 ### Phase 4 — Structural questions
 
@@ -492,12 +492,10 @@ artifact's own `WRN-NNN` list, a spec defect in the findings queue, a skill
 defect in the lessons queue — never as a note, a bullet or a "resolved" section
 in `CLAUDE.md`. See `references/merge-validate.md`.
 
-**Refresh the navigation index.** If `.claude/sdlc/docs_index.py` exists (the
-project ran `/sdlc:setup`), run `python .claude/sdlc/docs_index.py` after
-writing `docs/PRD.yaml` so `docs/INDEX.yaml` reflects the new content right
-away. The setup hook also regenerates it on every `docs/*.yaml` write, but a
-hook added during the current session only activates next session — running it
-here closes that gap. Harmless no-op if the generator isn't installed.
+**Refresh the navigation index.** Resolve the copy per `helper-resolution.md`:
+the installed `.claude/sdlc/docs_index.py` if present, run it; own-toolchain
+(marker present, no `docs_index` helper) → run the project's own docs-hook
+command from `.claude/settings.json` and name it; no marker → nothing to run.
 
 **Refresh the statusboard.** Run `python .claude/sdlc/statusboard.py` in the
 same breath. It regenerates `.claude/rules/sdlc-statusboard.md` (loaded into
@@ -509,19 +507,12 @@ Then: set `status: complete` in the state
 file (do not delete it — it's an audit trail), tell the user where the
 artifacts live, and point at what comes next:
 
-**Self-review & record the run** (CLAUDE.md 15; doctrine:
-`sdlc/skills/lesson/references/lessons-capture.md`). First drain `state.lesson_notes` (mid-run observations — that file →
-"Mid-run: note now, record at close"), then answer the self-review questions
-from that file for this run. Each yes that matches a raising condition
-becomes one `lessons.py add` (at most 2 per run unless one is a `blocker`;
-drained notes count toward the cap). Then record the run:
-
-```bash
-python .claude/sdlc/lessons.py record-run --skill prd --plugin-root "${CLAUDE_SKILL_DIR}/../.."
-```
-
-Best-effort: a non-zero exit becomes one `Attention:` clause in the card;
-helper absent (project never ran `/sdlc:setup`) — skip silently.
+**Self-review & record the run** (CLAUDE.md 15; doctrine and the self-review
+questions: `${CLAUDE_SKILL_DIR}/../lesson/references/lessons-capture.md` → "Mid-run:
+note now, record at close"). Drain `state.lesson_notes`, answer the self-review for
+this run (at most 2 `lessons.py add` per run unless one is a `blocker`; drained
+notes count toward the cap), then `python .claude/sdlc/lessons.py record-run --skill prd --plugin-root "${CLAUDE_SKILL_DIR}/../.."`
+— best-effort: a non-zero exit is one `Attention:` clause; helper absent, skip silently.
 
 **Drain `finding_notes`** (CLAUDE.md 13). `prd` consumes no upstream
 artifact, so nothing auto-raises at close — but a user can describe a defect
@@ -538,8 +529,13 @@ Cap: 3 per run unless one is blocking. Helper absent (project never ran
 on **every** exit path, EXIT included. When any finding was recorded, the
 close card gains a `Findings:` row.
 
+**Commit the run** (CLAUDE.md 20; the message rules and what is staged:
+`${CLAUDE_SKILL_DIR}/../setup/references/auto-commit.md`) — the last action before the card, on every exit path, never a blocker:
+`python .claude/sdlc/autocommit.py commit --skill prd --invocation "<the form the dispatch resolved, as typed>" --summary "<one line: what changed, in the user's words>"`
+Its one printed line is the card's `Commit:` row; off, or helper absent → no row.
+
 **Close with the card** (CLAUDE.md 14; canonical shape:
-`sdlc/skills/prd/references/reporting-to-the-user.md`). The user reading this
+`${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`). The user reading this
 knows only "there is a pipeline and I run it in order", so answer their three
 questions and nothing else: did it work, can I run the next skill, what do I
 type next.
@@ -549,13 +545,14 @@ type next.
 Wrote:     docs/PRD.yaml ({the one count that matters})
 Status:    complete - /sdlc:ux can run it
 Attention: {what needs a decision, in the user's words}
+Commit:    {a1b2c3d  /sdlc:prd → <summary> | nothing to commit | not committed - <reason> — only when auto-commit is on}
 Next:      {the computed next invocation}   ← in a NEW session
 Why new:   the artifacts and state files on disk are the handoff, not this
            transcript.
 ```
 
 **Compute the `Next:` row; never copy the example.** Procedure and successor
-map: `sdlc/skills/prd/references/reporting-to-the-user.md`
+map: `${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`
 (CLAUDE.md 14). For `/sdlc:prd` it resolves to:
 
 - **`docs/` artifact is `draft`, the user typed `EXIT`, or the validator is not
@@ -568,7 +565,7 @@ map: `sdlc/skills/prd/references/reporting-to-the-user.md`
 
 Rules: omit any row with nothing to say (never write "no warnings"). Add a
 `Lessons:` row only when this run recorded at least one — e.g. `Lessons: 1
-recorded (LSN-004) - about this skill, for its maintainer; nothing for you to
+recorded (LSN-NNN) - about this skill, for its maintainer; nothing for you to
 do` — and never print "no lessons". Add a `Findings:` row only when the
 Phase 8 drain recorded at least one — e.g. `Findings: 1 recorded (FND-007)
 -> /sdlc:repair` — and never print "no findings".
@@ -717,4 +714,4 @@ The interview is potentially long. Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.19"
+skill_version: "1.21"

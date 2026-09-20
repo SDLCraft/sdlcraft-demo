@@ -17,7 +17,7 @@ skill runs. Behaviour:
   project accepted that exact deviance:
   `python "${CLAUDE_SKILL_DIR}/../repair/doctor.py" --docs-dir docs --artifact docs/<that file>`
   reports every failing check as `accepted (N, unchanged)`; then proceed
-  (never `--quick`; rule: `sdlc/skills/repair/references/accepted-deviance.md`).
+  (never `--quick`; rule: `${CLAUDE_SKILL_DIR}/../repair/references/accepted-deviance.md`).
 
 The skill never partially-runs against a partially-validated upstream
 chain (an accepted deviance is not partial validation: its count is pinned
@@ -30,7 +30,7 @@ The user re-invokes `/sdlc:arch` (or `/sdlc:arch <container>`) after the output
 already exists, because `docs/PRD.yaml`, `docs/UX.yaml`,
 `docs/DATA-MODEL.yaml`, or `docs/API.yaml` changed in between. Phase 2's
 **upstream-change detection** drives the reconciliation per the cross-skill §7
-contract (`sdlc/skills/ux/references/upstream-reconciliation.md`):
+contract (`${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md`):
 
 1. Read the active output's `metadata.upstream_provenance`. System mode reads
    `ARCH.yaml`'s; container mode reads the specific `ARCH__<container>.yaml`'s —
@@ -235,7 +235,7 @@ the skill:
    > "sdlc-arch v1.0 does not support multi-product (monorepo) mode.
    > Author one `docs/ARCH.yaml` (and one set of
    > `docs/ARCH__<container>.yaml`) per product manually, or wait for
-   > sdlc-arch v2.0. See sdlc/skills/arch/references/edge-cases.md."
+   > sdlc-arch v2.0. See ${CLAUDE_SKILL_DIR}/../arch/references/edge-cases.md."
 
 3. Asks the user whether they want to proceed *anyway* against the
    monorepo PRD (treating one product as "the" product) or abort.

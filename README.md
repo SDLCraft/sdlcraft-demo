@@ -10,7 +10,7 @@ This is the **demo edition** (MIT). It takes a project from idea to a complete,
 validated architecture. The full edition, SDLCraft, continues from there to
 tested code — see [Editions](#editions).
 
-> Pre-1.0 (version 0.9.14): expect the skills to keep changing.
+> Pre-1.0 (version 0.9.15): expect the skills to keep changing.
 
 ## Install
 
@@ -202,6 +202,7 @@ In the consumer project's repo root:
 | `.claude/sdlc/lessons.py` | the run/lesson recorder installed by `/sdlc:setup`; also the opt-in sender (`consent`, `export --send`) |
 | `.claude/sdlc/findings.py` (+ `validate_findings.py`) | the findings-queue writer + its validator models, for recording a spec defect noticed outside a skill run |
 | `.claude/sdlc/bump_artifact.py` | the `metadata.<name>_version` + changelog bumper artifact skills and `repair` share |
+| `.claude/sdlc/autocommit.py` | the opt-in close-step committer: when you said yes at `/sdlc:setup`, every run commits its own files as `<the command you typed> → <what changed>` (see below) |
 | `.claude/rules/sdlc-output-glossary.md` | plain-language meanings for the words the skills print (from `/sdlc:setup`) |
 | `.claude/rules/sdlc-lessons.md` | when and how to record a lesson (from `/sdlc:setup`) |
 | `.claude/rules/sdlc-findings.md` | when and how to record a finding — the ambient analog of the lessons rule (from `/sdlc:setup`) |
@@ -216,6 +217,38 @@ The scripts under `.claude/sdlc/` are committed, repo-relative copies on
 purpose: the index hook, the `docs_index.py --check` CI gate, and lessons
 capture keep working for collaborators and CI that do not have the plugin
 installed, and they upgrade only when `/sdlc:setup` is deliberately re-run.
+
+## Committing each run automatically
+
+`/sdlc:setup` asks once whether every `/sdlc:*` run should commit its own
+files when it finishes. **Off until you say yes.** Your answer lives in
+`.claude/sdlc/sdlc-plugin.json` beside the sharing answer, and a re-run never
+resets it.
+
+When on, each run ends with one `git commit` covering only the pipeline's own
+files — the spec it wrote under `docs/`, `docs/INDEX.yaml`, its state file and
+the shared queues under `.claude/skills-state/`, the generated statusboard,
+and the source files a code-generation run produced — with the subject
+
+```
+<the command you typed> → <what changed>
+/sdlc:data --reconcile → DATA-MODEL 2.3 reconciled against PRD 1.4 - ENT-014 added
+```
+
+The arrow is the marker: the command carries its own colon, and nobody types
+`→` into a subject by hand, so `git log --grep='→'` lists exactly the
+pipeline's commits. It never pushes, never stages anything else, never
+rewrites history, and skips the commit when nothing changed; other changes in
+your working tree are left as they are. A run that ended early (you typed
+`EXIT`) commits its draft too, marked as such, so nothing sits uncommitted.
+Anything that stops a commit — no git identity, a hook that refused — is one
+line on the close card, never a failed run.
+
+```bash
+python .claude/sdlc/autocommit.py mode            # what is it set to?
+python .claude/sdlc/autocommit.py mode --set off  # stop it
+SDLC_AUTO_COMMIT=off                              # override for one session
+```
 
 ## Feeding back lessons
 

@@ -194,7 +194,7 @@ delta-review (added / removed / modified PRD ids) *before* the interview. This
 is the cross-skill §7 contract; the stale-ref prompt above is the "removed"
 branch of it, and the "added" offer is the "added" branch. A content hash also
 catches hand-edits that no `session_id` check would. Full mechanics:
-`sdlc/skills/ux/references/upstream-reconciliation.md`.
+`${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md`.
 
 ## Validation failures
 

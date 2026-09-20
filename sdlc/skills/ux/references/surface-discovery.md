@@ -100,7 +100,7 @@ via 1c) the delta review reports as **added** goes through 1b/1c *before*
 its incorporate / ignore / defer prompt, and the candidate it yields is that
 prompt's position-1 option (`upstream-reconciliation.md` Step 4). An added
 FR that skips this step arrives as a bare three-way decision, which is how
-a command clause gets deferred unseen (ledger IMP-076, aicf LSN-056).
+a command clause gets deferred unseen.
 
 ### 1c — `PRD.data_model.key_entities` (ENT-###) — entity-driven surfaces
 

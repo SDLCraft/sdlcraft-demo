@@ -115,8 +115,8 @@ resolves toward "surface it and ask", not "make a reasonable guess".
   subprocess) → do not mark anything `resolved`. Leave the finding `open`, record
   what could not be verified in its `evidence` (the queue's bounded slot for
   partial progress), and say what the user should run. A surgical fix parked with
-  a resolution block the queue validator refuses is the defect ledger IMP-131
-  removed — only a re-invoke in progress may sit `triaged`.
+  a resolution block the queue validator refuses is exactly the defect this
+  rule removed — only a re-invoke in progress may sit `triaged`.
 
 ## Session
 

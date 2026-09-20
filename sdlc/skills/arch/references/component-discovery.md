@@ -458,7 +458,7 @@ are name-addressed.)
 
 `component_inventory` is a `critical synthesis: true` theme. After the
 per-item loop closes, run a dynamic scope-completeness sweep (canonical
-spec: `sdlc/skills/prd/references/importance-flows.md`). Reflect on:
+spec: `${CLAUDE_SKILL_DIR}/../prd/references/importance-flows.md`). Reflect on:
 
 1. **The draft component list** — are layers missing (controller without
    a service, repository without a client)? Is one component doing two

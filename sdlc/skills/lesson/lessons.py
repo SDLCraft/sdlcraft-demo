@@ -779,22 +779,51 @@ def find_prefix_skill(plugin_root, skill, where_file):
     return None
 
 
-def same_subject(a: dict, b: dict) -> bool:
-    """The blocking keys: the same skill and the same file, or no comparison.
+def resolve_subject(lesson: dict, plugin_root=None) -> "tuple[str, str]":
+    """(owner_skill, resolved_file) - the file this lesson is REALLY about.
+
+    Own-skill `strip_skill_prefix` first; when that left `where.file`
+    unchanged (no prefix matching the lesson's OWN skill), fall back to
+    `find_prefix_skill` so a where.file legitimately prefixed with a
+    DIFFERENT real skill folder resolves to that folder's owner, not the
+    filed skill. Mirrors `lesson_hints`'s existing two-step resolution
+    (ledger IMP-179). `plugin_root=None` (no skill folder set known) skips
+    the fallback and returns the filed skill unchanged - no hidden default
+    root, so a caller that never passes one keeps today's own-skill-only
+    behaviour.
+    """
+    skill = str(lesson.get("skill") or "")
+    where_file = (lesson.get("where") or {}).get("file")
+    resolved = strip_skill_prefix(skill, where_file)
+    raw = str(where_file or "").replace("\\", "/")
+    if plugin_root and resolved == raw:
+        hit = find_prefix_skill(plugin_root, skill, where_file)
+        if hit:
+            return hit
+    return skill, resolved
+
+
+def same_subject(a: dict, b: dict, plugin_root=None) -> bool:
+    """The blocking keys: the same OWNER skill and the same file, or no
+    comparison.
 
     Cheap to check and it is what makes an all-pairs sweep affordable as the
-    inbox grows.
+    inbox grows. Resolved via `resolve_subject` so a where.file prefixed
+    with a DIFFERENT real skill folder lines up with a lesson filed
+    directly under that folder's own skill, not just a same-filed-skill
+    pair (ledger IMP-179; `plugin_root` is required for the cross-skill
+    fallback - `None` keeps the own-skill-only comparison).
     """
-    if str(a.get("skill") or "") != str(b.get("skill") or ""):
+    skill_a, fa = resolve_subject(a, plugin_root)
+    skill_b, fb = resolve_subject(b, plugin_root)
+    if skill_a != skill_b:
         return False
-    fa = strip_skill_prefix(a.get("skill"), (a.get("where") or {}).get("file"))
-    fb = strip_skill_prefix(b.get("skill"), (b.get("where") or {}).get("file"))
     return bool(fa) and fa == fb
 
 
-def similarity(a: dict, b: dict, a_tokens=None, b_tokens=None) -> float:
+def similarity(a: dict, b: dict, a_tokens=None, b_tokens=None, plugin_root=None) -> float:
     """0..1 that two lessons report the same defect. 0 when subjects differ."""
-    if not same_subject(a, b):
+    if not same_subject(a, b, plugin_root=plugin_root):
         return 0.0
     ta = a_tokens if a_tokens is not None else lesson_tokens(a)
     tb = b_tokens if b_tokens is not None else lesson_tokens(b)
@@ -854,20 +883,23 @@ def stamp_recurrence(prior: dict, fresh: dict) -> dict:
     return prior
 
 
-def find_recurrence(queue: dict, lesson: dict, threshold: float = SIM_STRONG):
+def find_recurrence(queue: dict, lesson: dict, threshold: float = SIM_STRONG,
+                     plugin_root=None):
     """The open lesson in `queue` this one is a repeat of, or None.
 
     Mirrors findings.py's find_recurrence: same question, same answer shape.
     The threshold is SIM_STRONG rather than SIM_PROPOSE because this one acts
     on its own - a wrong bump silently merges two real defects, where a wrong
-    cluster proposal is just rejected by the maintainer.
+    cluster proposal is just rejected by the maintainer. `plugin_root`
+    (ledger IMP-179) lets a same-project resend filed under a cross-skill
+    where.file prefix still be caught here, not only by the clusterer.
     """
     best, best_score = None, 0.0
     tokens = lesson_tokens(lesson)
     for existing in queue.get("lessons", []):
         if not isinstance(existing, dict) or existing is lesson:
             continue
-        score = similarity(lesson, existing, a_tokens=tokens)
+        score = similarity(lesson, existing, a_tokens=tokens, plugin_root=plugin_root)
         if score >= threshold and score > best_score:
             best, best_score = existing, score
     return (best, best_score) if best else (None, 0.0)
@@ -1910,7 +1942,7 @@ def cmd_add(args) -> int:
     # escape hatch when the match is wrong.
     prior, score = (None, 0.0)
     if not getattr(args, "allow_duplicate", False):
-        prior, score = find_recurrence(queue, lesson)
+        prior, score = find_recurrence(queue, lesson, plugin_root=plugin_root)
 
     if getattr(args, "dry_run", False):
         if prior is not None:

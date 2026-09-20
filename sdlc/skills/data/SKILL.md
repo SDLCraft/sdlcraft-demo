@@ -114,7 +114,7 @@ Classify `$ARGUMENTS`:
 2. **`--reconcile`** → the **reconcile form**: the upstream-change review of
    `docs/DATA-MODEL.yaml` and nothing else — no entity interview, no
    structural questions. Follow
-   `sdlc/skills/ux/references/upstream-reconciliation.md` → "The
+   `${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md` → "The
    `--reconcile` form" (steps 1–8, and this skill's row in its specifics
    table), then Phases 7–8 below. A new entity gets the per-entity drill and
    its own sub-model sweep only; a change that would switch the storage
@@ -135,7 +135,7 @@ Before doing anything else, check for `.claude/skills-state/sdlc-data.state.yaml
   > **discard** (delete state and exit)?"
 - If `status: complete` or `aborted` and `docs/DATA-MODEL.yaml` exists,
   scope the update — see
-  `sdlc/skills/ux/references/upstream-reconciliation.md`'s REFINE row (open
+  `${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md`'s REFINE row (open
   only the named themes, the §7 delta items, and the non-confirmed set;
   confirm the rest in one summary) — then Phase 7's *merge* behavior.
 - If `status: complete` or `aborted` and `docs/DATA-MODEL.yaml` is ABSENT,
@@ -170,7 +170,7 @@ Required upstream artifacts:
    running `/sdlc:prd` first.
 2. **`docs/UX.yaml`** — strongly recommended (used for surface coverage and
    entity-field discovery), never required. Resolve applicability with the
-   three-step rule in `sdlc/skills/prd/references/optional-stages.md`:
+   three-step rule in `${CLAUDE_SKILL_DIR}/../prd/references/optional-stages.md`:
    present-and-applicable → read it; present with
    `metadata.applicability: not_applicable`, or absent with
    `PRD.pipeline_scope.ux.applicable: false` → continue without UX context,
@@ -213,7 +213,7 @@ project never ran `/sdlc:setup`), fall back to comparing each recorded
 `docs_index.py --hash <file>` prints). For every changed upstream, classify
 the delta (added / removed / modified ids) and run the **delta-review pass
 before the entity interview** per
-`sdlc/skills/ux/references/upstream-reconciliation.md` (CLAUDE.md §7); every
+`${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md` (CLAUDE.md §7); every
 per-item prompt there carries the extra option "the upstream is wrong —
 record a finding for /sdlc:repair" (see "Findings capture" below). Track
 progress in `state.delta_review`. This supersedes the older
@@ -242,7 +242,7 @@ that `python "${CLAUDE_SKILL_DIR}/../repair/findings.py" list --owed-by
 docs/DATA-MODEL.yaml` returns is waiting on this very run — its owed re-run is
 what you are doing. Leave it out of the question and read it as the reason for
 the change: its `fix` and `handoff` notes (canonical:
-`sdlc/skills/ux/references/upstream-reconciliation.md` → "The `--reconcile`
+`${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md` → "The `--reconcile`
 form", step 3).
 
 **Thin-upstream capture.** While building the pre-fill map, note every
@@ -260,23 +260,9 @@ helper is absent). Every listed site must be reconciled in the same pass —
 
 ### Phase 3 (first step) — Repo evidence
 
-Before seeding anything, look at what the project already has. On a greenfield
-project this finds nothing and costs one command; on a **brownfield** one it is
-the best evidence available, and this skill used to ignore it entirely.
-
 ```bash
 python .claude/sdlc/repo_scan.py --domain data --json
 ```
-
-Helper absent (the project never ran `/sdlc:setup`) → skip silently and seed
-from the upstream artifacts alone. Never block the run on it.
-
-It returns migrations, `schema.prisma`, `CREATE TABLE` statements, ORM/pydantic models, TypeScript interfaces and database services declared in compose files — each hit a `path`, `line`
-and one-line `excerpt`. Fold them into the pre-fill map below as **`⚠ inferred`
-candidates**, never as answers: cite `<path>:<line>` in the `_rationale` sibling
-of whatever field the evidence fed, confirm each one individually (the canonical
-flow forbids batch-accepting inferred values), and pass on `truncated` /
-`capped_signals` as "this is a sample of a large repo, not an inventory".
 
 These are the strongest entity candidates there are — an existing table or model
 names a real entity. It does **not** follow that its current shape is right:
@@ -285,7 +271,7 @@ seed the name, then run the normal per-entity drill-down. An existing store in
 confirm against the PRD's stated preference.
 
 Full rules, including what to do when the repo contradicts an upstream
-artifact: `sdlc/skills/setup/references/repo-evidence.md`.
+artifact: `${CLAUDE_SKILL_DIR}/../setup/references/repo-evidence.md`.
 
 ### Phase 3 — Entity-candidate discovery
 
@@ -543,8 +529,7 @@ The selected `state.storage_paradigm` decides which themes run:
      the discriminator (blocking from `data_model_version` 3.0); `code`
      renders a tagged union, `test` seeds one case per variant. Before this
      slot existed a union could only be flattened, or smuggled in as a
-     private extension that failed the required-`fields` check forever
-     (ledger IMP-080).
+     private extension that failed the required-`fields` check forever.
 
    **Decompose, don't skim.** For every entity, recurse into its field types:
    any field whose type is a custom model (directly, in a `list[...]`/`dict[...]`,
@@ -665,7 +650,7 @@ It writes `{file, session_id, last_updated, sha256, items}` per upstream; the
 hand-written `{file, sha256}` entry is a sha-only stamp: `--drift` can only
 recover its old side from git or fall back to the residue, and `--stale` warns
 about it. Provenance is file-granular, so a shard read but not recorded is
-invisible to every drift check (ledger IMP-102). Helper absent → the plugin's
+invisible to every drift check. Helper absent → the plugin's
 copy, `python "${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs
 --stamp …` (it writes only the artifact it is given). Replace-on-write. See
 CLAUDE.md §7.
@@ -691,13 +676,13 @@ defect in the lessons queue — never as a note, a bullet or a "resolved" sectio
 in `CLAUDE.md`. See `references/merge-validate.md`.
 
 **Refresh the navigation index.** `DATA-MODEL.yaml` is the largest artifact in
-the tree, so a current `docs/INDEX.yaml` matters most here. If
-`.claude/sdlc/docs_index.py` exists (the project ran `/sdlc:setup`), run
-`python .claude/sdlc/docs_index.py` after writing the file so downstream
-`api`/`arch` can slice it immediately. The setup hook also does this, but a hook
-added mid-session only activates next session. Harmless no-op if not installed.
-Optionally confirm the write introduced no dangling references before closing:
-`python .claude/sdlc/docs_index.py --check` (same guard).
+the tree, so a current `docs/INDEX.yaml` matters most here. Resolve the copy per
+`helper-resolution.md`: installed `.claude/sdlc/docs_index.py` → run it after
+writing so downstream `api`/`arch` slice it right away; own-toolchain (marker
+present, no `docs_index` helper) → run the project's own docs-hook command from
+`.claude/settings.json` and name it; no marker → nothing to run. Optionally
+confirm no dangling references: `python .claude/sdlc/docs_index.py --check`
+(skip when the helper is absent).
 
 **Refresh the statusboard.** Run `python .claude/sdlc/statusboard.py` in the
 same breath. It regenerates `.claude/rules/sdlc-statusboard.md` (loaded into
@@ -718,22 +703,20 @@ Then: set `status: complete` in the state
 file (do not delete it — it's an audit trail), tell the user where the
 artifacts live, and point at what comes next:
 
-**Self-review & record the run** (CLAUDE.md 15; doctrine:
-`sdlc/skills/lesson/references/lessons-capture.md`). First drain `state.lesson_notes` (mid-run observations — that file →
-"Mid-run: note now, record at close"), then answer the self-review questions
-from that file for this run. Each yes that matches a raising condition
-becomes one `lessons.py add` (at most 2 per run unless one is a `blocker`;
-drained notes count toward the cap). Then record the run:
+**Self-review & record the run** (CLAUDE.md 15; doctrine and the self-review
+questions: `${CLAUDE_SKILL_DIR}/../lesson/references/lessons-capture.md` → "Mid-run:
+note now, record at close"). Drain `state.lesson_notes`, answer the self-review for
+this run (at most 2 `lessons.py add` per run unless one is a `blocker`; drained
+notes count toward the cap), then `python .claude/sdlc/lessons.py record-run --skill data --plugin-root "${CLAUDE_SKILL_DIR}/../.."`
+— best-effort: a non-zero exit is one `Attention:` clause; helper absent, skip silently.
 
-```bash
-python .claude/sdlc/lessons.py record-run --skill data --plugin-root "${CLAUDE_SKILL_DIR}/../.."
-```
-
-Best-effort: a non-zero exit becomes one `Attention:` clause in the card;
-helper absent (project never ran `/sdlc:setup`) — skip silently.
+**Commit the run** (CLAUDE.md 20; the message rules and what is staged:
+`${CLAUDE_SKILL_DIR}/../setup/references/auto-commit.md`) — the last action before the card, on every exit path, never a blocker:
+`python .claude/sdlc/autocommit.py commit --skill data --invocation "<the form the dispatch resolved, as typed>" --summary "<one line: what changed, in the user's words>"`
+Its one printed line is the card's `Commit:` row; off, or helper absent → no row.
 
 **Close with the card** (CLAUDE.md 14; canonical shape:
-`sdlc/skills/prd/references/reporting-to-the-user.md`). The user reading this
+`${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`). The user reading this
 knows only "there is a pipeline and I run it in order", so answer their three
 questions and nothing else: did it work, can I run the next skill, what do I
 type next.
@@ -743,6 +726,7 @@ type next.
 Wrote:     docs/DATA-MODEL.yaml ({the one count that matters})
 Status:    complete - /sdlc:api can run it
 Attention: {what needs a decision, in the user's words}
+Commit:    {a1b2c3d  /sdlc:data → <summary> | nothing to commit | not committed - <reason> — only when auto-commit is on}
 Next:      {the computed next invocation}   ← in a NEW session
 Why new:   the artifacts and state files on disk are the handoff, not this
            transcript.
@@ -750,7 +734,7 @@ Why new:   the artifacts and state files on disk are the handoff, not this
 
 **Compute the `Next:` row; never copy the example** — the literal above is a
 shape, and printing it unchanged means you guessed, not reported. Procedure
-and successor map: `sdlc/skills/prd/references/reporting-to-the-user.md`
+and successor map: `${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`
 (CLAUDE.md 14). For `/sdlc:data` it resolves to:
 
 - **`docs/` artifact is `draft`, the user typed `EXIT`, or the validator is not
@@ -764,7 +748,7 @@ and successor map: `sdlc/skills/prd/references/reporting-to-the-user.md`
 
 Rules: omit any row with nothing to say (never write "no warnings"). Add a
 `Lessons:` row only when this run recorded at least one — e.g. `Lessons: 1
-recorded (LSN-004) - about this skill, for its maintainer; nothing for you to
+recorded (LSN-NNN) - about this skill, for its maintainer; nothing for you to
 do` — and never print "no lessons". Add a `Findings:` row only when this run
 recorded findings or open ones name an input — the ids plus one consequence
 clause, e.g. `Findings: 2 recorded (FND-011, FND-012) -> /sdlc:repair` — and
@@ -956,4 +940,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.18"
+skill_version: "1.20"

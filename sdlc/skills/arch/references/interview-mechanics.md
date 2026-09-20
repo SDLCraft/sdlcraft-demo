@@ -103,7 +103,7 @@ Two distinct kinds of synthesis theme exist in arch:
    sweep** that draws on every upstream ID family to catch missed
    items. See `references/container-discovery.md` /
    `references/component-discovery.md` for the per-theme sweep spec, and
-   `sdlc/skills/prd/references/importance-flows.md` for the canonical
+   `${CLAUDE_SKILL_DIR}/../prd/references/importance-flows.md` for the canonical
    procedure (anti-padding rule, 2-pass cap, defer-to-`WRN-NNN`).
 2. **Edge derivation** — `cross_container_edges` and
    `internal_and_external_edges` generate a candidate edge list,

@@ -208,6 +208,19 @@ def read_edition(root):
     return edition, (str(marker["pro_url"]) if marker.get("pro_url") else None)
 
 
+def read_auto_commit(root):
+    """True when the project opted in to every skill run committing its own
+    files at close (setup's marker, `auto_commit.mode`). A missing or older
+    marker is off, so nothing about the board changes for it."""
+    marker = load(root / MARKER_REL) or {}
+    block = marker.get("auto_commit")
+    return isinstance(block, dict) and block.get("mode") == "on"
+
+
+AUTO_COMMIT_LINE = ("Every `/sdlc:*` run commits its own files when it closes "
+                    "(`python .claude/sdlc/autocommit.py mode` to change that).")
+
+
 def _older(installed, running):
     """Dotted numbers compare part by part as integers (0.10.0 > 0.9.14);
     anything that does not parse counts as older when the two differ."""
@@ -660,6 +673,8 @@ def render_tier1(data, stamp):
               "were installed by plugin %s and the plugin in use is newer, so skills "
               "run its own copies. Run `/sdlc:setup` once to update them."
               % data["setup_lag"], ""]
+    if data.get("auto_commit"):
+        L += [AUTO_COMMIT_LINE, ""]
 
     L += ["## Pipeline", "",
           "| Stage | Artifact | Status | v | Open caveats |",
@@ -804,6 +819,8 @@ def render_tier2(data, stamp):
          "",
          "The ambient summary is `%s`; this file is everything behind it."
          % TIER1_REL, ""]
+    if data.get("auto_commit"):
+        L += [AUTO_COMMIT_LINE, ""]
 
     L += ["## Pipeline", "",
           "| Stage | Artifact | Status | Version | Shards |", "|---|---|---|---|---|"]
@@ -926,6 +943,7 @@ def gather(root, plugin_root=None):
         "integrity": collect_integrity(docs), "lessons": collect_lessons(state),
         "next": next_step(pipeline, findings, blocked, questions, pro_url, edition),
         "setup_lag": setup_lag,
+        "auto_commit": read_auto_commit(root),
     }
 
 

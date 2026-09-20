@@ -90,7 +90,7 @@ Neither mode writes `CLAUDE.md` — see "CLAUDE.md is not this skill's to write"
 `metadata.arch_version` (system file) and `metadata.arch_container_version`
 (container files) each stamp `"2.0"` (or higher) on a new write — the
 version-gated blocking checks (cross-checks #21-#24, the reason-less
-`non_container_features` escape — CLAUDE.md section 10, ledger IMP-129) arm
+`non_container_features` escape — CLAUDE.md section 10) arm
 only at/above 2.0; an older stamp silently degrades every one of them to a
 warning instead of dead code nothing ever reaches. The update flow on an
 existing artifact bumps the version's minor number and never crosses a
@@ -131,7 +131,7 @@ This validates:
      appears in some container's `implements_requirements`, OR in the
      top-level `deferrals` list with a reason, OR — **below
      `arch_version` 2.0 only** — in the reason-less legacy
-     `ARCH.yaml.non_container_features` list (IMP-129: at/above the floor
+     `ARCH.yaml.non_container_features` list (at/above the floor
      that bare escape no longer counts as coverage and blocks like any
      other uncovered FR; below it, it still warns `[deferral hygiene]`,
      "honoured one more schema version"). Skipped when `docs/PRD.yaml` is
@@ -292,7 +292,7 @@ This validates:
     internal/external edge's `via_unit`, an `entrypoint`-kind unit, a
     framework-invoked component archetype, a non-callable kind (module /
     content / tooling), a sibling unit's contract text naming it, or a
-    top-level `deferrals` entry all count as reached — as does (IMP-126) a
+    top-level `deferrals` entry all count as reached — as does a
     via_unit-less `calls` edge into a component with exactly one callable
     unit (unambiguous); into a component with two or more it collapses to
     ONE grouped advisory naming the component, never one row per unit. A
@@ -305,7 +305,7 @@ This validates:
     (`arch_version` for #24's system half, `arch_container_version` per
     container file) and WARN below it; the INT coverage gate (#31) errors at
     `arch_version >= 2.0`; the reason-less `non_container_features` escape
-    (IMP-129) errors at the same floor instead of warning. An artifact
+    errors at the same floor instead of warning. An artifact
     stamped complete by an older skill version never flips red on upgrade —
     the findings print under WARNINGS with a note naming the floor.
 
@@ -403,7 +403,7 @@ Document this so test/task/deploy can enforce it:
 > non-zero.** The one exception is to the exit code, never to the status: a
 > failure every check of which `doctor.py --artifact docs/ARCH.yaml` reports as
 > accepted deviance does not reject
-> (`sdlc/skills/repair/references/accepted-deviance.md`).
+> (`${CLAUDE_SKILL_DIR}/../repair/references/accepted-deviance.md`).
 
 The same applies to each `docs/ARCH__<container>.yaml`. A draft container
 file means that container has not been confirmed and is not safe to
@@ -414,4 +414,4 @@ generate code from.
 > the validator prints gets translated, not pasted: coverage gaps, warnings and
 > cross-check findings become one plain sentence each (what happened, why it
 > matters, what to do). See CLAUDE.md section 14 and
-> `sdlc/skills/prd/references/reporting-to-the-user.md`.
+> `${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`.

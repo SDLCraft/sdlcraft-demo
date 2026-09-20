@@ -57,7 +57,7 @@ in it.
   `${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks), else the text-level
   hash `sha256(read_text(encoding='utf-8').encode()).hexdigest()[:16]` —
   never raw bytes (a byte hash differs between CRLF and LF checkouts). See
-  CLAUDE.md §7 and `sdlc/skills/ux/references/upstream-reconciliation.md`.
+  CLAUDE.md §7 and `${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md`.
 - **status**:
   - `complete` only when all required fields are filled, the validator passes
     `[OK]`, composition is consistent, and every `to_be_generated` asset is
@@ -69,7 +69,7 @@ in it.
 
 `metadata.design_version` (DESIGN.yaml): a NEW write stamps `"2.0"` or
 higher — the prose-only deferral fallback (a bare `design_warnings` mention,
-reported as `[deferral hygiene]`, ledger IMP-019) retires at/after 2.0, and
+reported as `[deferral hygiene]`) retires at/after 2.0, and
 an older stamp silently keeps the fallback live instead of retiring it
 (CLAUDE.md §10). The update flow on an existing artifact bumps the version's
 minor number and never crosses a floor by itself — moving 1.x → 2.0 needs an
@@ -157,11 +157,11 @@ Downstream skills/agents MUST reject the design artifacts if
 `DESIGN.yaml.metadata.status != "complete"` OR the validator exits non-zero.
 The one exception is to the exit code, never to the status: a failure every
 check of which `doctor.py --artifact docs/DESIGN.yaml` reports as accepted
-deviance does not reject (`sdlc/skills/repair/references/accepted-deviance.md`).
+deviance does not reject (`${CLAUDE_SKILL_DIR}/../repair/references/accepted-deviance.md`).
 
 > **Field-level errors are the one thing you show verbatim** — the field path
 > *is* the fix, so paraphrasing it costs the user the answer. Everything else
 > the validator prints gets translated, not pasted: coverage gaps, warnings and
 > cross-check findings become one plain sentence each (what happened, why it
 > matters, what to do). See CLAUDE.md section 14 and
-> `sdlc/skills/prd/references/reporting-to-the-user.md`.
+> `${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`.

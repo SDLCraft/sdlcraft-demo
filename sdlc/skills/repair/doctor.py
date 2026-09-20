@@ -32,6 +32,11 @@ What a check's output means here:
   * Only lines under a BLOCKING section header (MUST FIX / BROKEN REFERENCES /
     WHAT FAILED / TO FINISH IT) are defects. Lines under WARNINGS or
     "Not checked yet" are never turned into findings by default.
+  * A check whose child process itself raised (an uncaught Python traceback,
+    a tool crash rather than a defect report) stays FAILED - the exit code
+    and `--quick` still say so - but mints no finding: the row's detail says
+    "the validator itself raised (tool crash) - no finding minted; fix the
+    environment and re-run" instead of a raw traceback dump.
   * Each check also reports how many WARNINGS it printed (exit-neutral).
     --warnings-as-findings records the cross-artifact subset of those as
     findings: task [check 20] (a task embed no longer matches its source) and
@@ -94,6 +99,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -256,10 +262,19 @@ def run_bare(cmd: List[str], cwd: Optional[Path] = None) -> Tuple[int, str]:
     subprocess gives us the child's real returncode, which is the whole point:
     the shell idiom this replaces (`cmd | tail`) reports the LAST pipeline
     stage's status and silently hides a red validator.
+
+    `encoding="utf-8"` above only controls how THIS process decodes the bytes
+    it receives - it does nothing for the CHILD's own stdout/stderr encoding,
+    which defaults to the console codepage on Windows. Without PYTHONUTF8 in
+    the child's env, a validator that prints a non-cp1252 character (e.g. an
+    arrow in a diff) crashes with an uncaught UnicodeEncodeError instead of
+    finishing (ledger IMP-190). findings.py's cmd_validate and run_smoke.py's
+    _env() already set this; mirrored here.
     """
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", cwd=str(cwd) if cwd else None)
+                           errors="replace", cwd=str(cwd) if cwd else None,
+                           env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
     except OSError as e:
         return 2, f"could not execute: {e}"
     return r.returncode, ((r.stdout or "") + (r.stderr or "")).strip()
@@ -357,7 +372,16 @@ def fallback_lines(text: str) -> List[str]:
             section = "next"
             continue
         if section in ("warnings", "next"):
-            continue
+            if section == "warnings" and not (ITEM_RE.match(line) or DETAIL_RE.match(line)):
+                # A WARNINGS header covers only its own `- `/`  * ` item
+                # lines. Without this, `section` never resets on anything but
+                # another header/NEXT match, so a crash whose traceback
+                # follows a WARNINGS block was silently dropped along with
+                # the warnings themselves - the only surviving evidence was
+                # whatever came before the header (ledger IMP-190).
+                section = None
+            else:
+                continue
         out.append(line[:MAX_EVIDENCE_LEN])
     verdict = [ln for ln in out if ln.startswith("[FAIL]")]
     rest = [ln for ln in out if not ln.startswith("[FAIL]")]
@@ -956,6 +980,33 @@ def apply_awaiting(checks: List[Check], data: Dict[str, Any]) -> None:
 # Findings emission
 # --------------------------------------------------------------------------
 
+TRACEBACK_MARKER = "Traceback (most recent call last):"
+CRASH_DETAIL = ("the validator itself raised (tool crash) - no finding "
+                "minted; fix the environment and re-run")
+
+
+def is_tool_crash(check: Check) -> bool:
+    """A failing check whose child process itself raised (an uncaught Python
+    exception), never a validator reporting a real artifact defect: minting
+    a `validator_error` finding from it files a tool-environment failure as
+    a spec defect the artifact never had (ledger IMP-190). The check still
+    counts as FAILED - the doctor's exit stays 1 and `--quick` stays red, so
+    a systemic problem (e.g. every child crashing) is never silently green -
+    it just mints nothing and prints its own detail line (CRASH_DETAIL)
+    instead of the raw traceback dump.
+
+    Detected by CPython's own fixed traceback header, verbatim - stable
+    across versions. A broader compound test (exit != 0 AND no line opens
+    with an allowed verdict tag AND no `ERROR:` line) was drafted and
+    narrowed: `code/validate_schema.py`'s exit-2 'cannot read' path prints
+    `[FAIL] cannot read or parse ...`, never an `ERROR:` line, so the
+    compound test would have needed the verdict-tag half to still classify
+    it correctly, and the simpler signal alone already covers every
+    reproduced crash without that risk.
+    """
+    return TRACEBACK_MARKER in check.output
+
+
 def kind_for(check: Check) -> str:
     if check.name.startswith("crosscheck"):
         return "crosscheck_broken_ref"
@@ -1103,7 +1154,7 @@ def emit_findings(path: Path, checks: List[Check], docs: Path,
             held += 1
             continue
         cands: List[Dict[str, Any]] = []
-        if c.failed:
+        if c.failed and not is_tool_crash(c):
             cands += failure_entries(c, docs)
         if warnings_as_findings:
             cands += warning_entries(c, docs)
@@ -1210,8 +1261,9 @@ def artifact_provenance(docs: Path, path: Path, hasher: Hasher):
     return rows
 
 
-def resolved_reinvoke_findings(data: Dict[str, Any]) -> List[Tuple[str, List[str]]]:
-    """(fnd_id, owed artifact names) for every RESOLVED re-invoke finding.
+def resolved_reinvoke_findings(data: Dict[str, Any]) -> List[Tuple[str, List[str], List[str]]]:
+    """(fnd_id, owed artifact names, artifacts_touched) for every RESOLVED
+    re-invoke finding.
 
     `awaiting_registry`/`owed_findings` stop tracking a re-invoke finding the
     moment it closes (`AWAITING_STATUSES` is open/triaged only), so a chain
@@ -1219,16 +1271,30 @@ def resolved_reinvoke_findings(data: Dict[str, Any]) -> List[Tuple[str, List[str
     invisible to every owed-work reader the instant the finding is marked
     resolved (ledger IMP-158). `owed_artifacts` itself has no status
     condition; only `mode` gates it, so a resolved finding qualifies exactly
-    like an open one would."""
-    out: List[Tuple[str, List[str]]] = []
+    like an open one would. `artifacts_touched` rides along (ledger IMP-195)
+    so `resolved_stale_registry` can tell "this finding's own fix drifted
+    again" from "an unrelated upstream moved after this finding closed" -
+    still resolved-only, still owed_artifacts-sourced names, extended rather
+    than replaced."""
+    out: List[Tuple[str, List[str], List[str]]] = []
     for f in data.get("findings") or []:
         if not isinstance(f, dict) or f.get("status") != "resolved":
             continue
         res = f.get("resolution") if isinstance(f.get("resolution"), dict) else None
         names = fq.owed_artifacts(res)
         if names:
-            out.append((str(f.get("fnd_id")), names))
+            touched = [str(a) for a in (res.get("artifacts_touched") or [])] if res else []
+            out.append((str(f.get("fnd_id")), names, touched))
     return out
+
+
+def _family_stem(name: str) -> str:
+    """The artifact family a name belongs to, shard or system file alike:
+    `ARCH__demo-api.yaml` and `ARCH.yaml` both stem to `ARCH`, so a
+    resolution naming the system file still covers a shard's drift and a
+    resolution naming a shard still covers the system file's (ledger
+    IMP-195)."""
+    return artifact_key(name).rsplit(".", 1)[0].split("__", 1)[0]
 
 
 def resolved_stale_registry(docs: Path, data: Dict[str, Any],
@@ -1242,16 +1308,31 @@ def resolved_stale_registry(docs: Path, data: Dict[str, Any],
     looks identical from here, and this makes no claim about WHY the chain
     never happened.
 
+    Gated on the resolution's own `artifacts_touched` (ledger IMP-195): the
+    drifted upstream must belong to the same FAMILY (shard and system file
+    stem alike, `_family_stem`) as something the resolution actually
+    touched, or the hint is unrelated upstream churn, not this finding's
+    problem - offering it for re-litigation is worse than saying nothing.
+    An empty `artifacts_touched` (schema-legal, a legacy resolution) falls
+    back to today's unfiltered hint, silently: there is nothing to narrow
+    against.
+
     The caller merges this into `emit_findings`' `owed` registry BEFORE its
     per-check loop, so a failing check on such an artifact is HELD rather than
     minted as a fresh finding - the `reopen` hint stays the only channel; a
-    second, handoff-less finding about the same gap is not a second answer."""
+    second, handoff-less finding about the same gap is not a second answer.
+    Narrowing this registry means a check on an artifact whose drift is NOT
+    traced to the resolution's own touched files no longer gets held here -
+    it flows through emit_findings' ordinary logic instead, correct per the
+    lesson (unrelated drift earns its own finding, not silence under a
+    closed one)."""
     reg: Dict[str, Tuple[str, str]] = {}
     findings = resolved_reinvoke_findings(data)
     if not findings:
         return reg
     hasher = hasher or Hasher(docs)
-    for fnd_id, names in findings:
+    for fnd_id, names, touched in findings:
+        touched_families = {_family_stem(a) for a in touched}
         for name in names:
             key = artifact_key(name)
             if key in reg:
@@ -1266,6 +1347,8 @@ def resolved_stale_registry(docs: Path, data: Dict[str, Any],
             if bad is None:
                 continue
             up, recorded, current = bad
+            if touched_families and _family_stem(up) not in touched_families:
+                continue
             detail = (f"was built against docs/{up}, which is no longer in docs/" if current is None
                       else f"was built against docs/{up}@{recorded}, now @{current}")
             reg[key] = (fnd_id, f"{fnd_id} should be reopened: docs/{name} {detail}, but the "
@@ -1486,7 +1569,7 @@ def main() -> int:
               + (f" - the first names {c.located}" if c.located else "")
               + (f" - {c.awaiting}; known and scheduled, not recorded again" if c.awaiting else "")
               + ". What it printed:",
-              c.blocking or fallback_lines(c.output))
+              [CRASH_DETAIL] if is_tool_crash(c) else (c.blocking or fallback_lines(c.output)))
              for c in failed],
             [],
             blocking_header="WHAT FAILED",

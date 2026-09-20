@@ -2877,10 +2877,17 @@ def _moved_since_stamp(old: dict, new: dict) -> Optional[dict]:
     """What moved in one upstream between its recorded entry and the entry
     about to replace it: ``{changed, added, removed}`` item keys from the
     recorded items map, or ``{sha_only: True}`` when the old record had no
-    items map but a different hash. None when nothing moved."""
+    items map but a different hash - also when it HAD one but neither side
+    has any item to itemize (ledger IMP-185, LSN-090: an unindexed shard's
+    items map is always ``{}``, so a real edit and no edit are otherwise
+    indistinguishable). None when nothing moved."""
     old_items = old.get("items")
     if isinstance(old_items, dict):
         new_items = new.get("items") or {}
+        if not old_items and not new_items:
+            if old.get("sha256") and old.get("sha256") != new.get("sha256"):
+                return {"sha_only": True}
+            return None
         changed = sorted((k for k in old_items if k in new_items and old_items[k] != new_items[k]),
                          key=_id_sort_key)
         added = sorted((k for k in new_items if k not in old_items), key=_id_sort_key)
@@ -3156,19 +3163,23 @@ def _changelog_entries(path: Path) -> "list[str]":
     return out
 
 
-def _why_lines(docs_dir: Path, up_name: str, entry: dict) -> "list[str]":
-    """WHY an upstream moved, from its own changelog: the lines newer than the
-    version the stamp recorded - or, on a stamp that recorded no version, the
-    lines dated on or after its ``last_updated``. Empty when the stamp carries
-    neither, so nothing can be compared."""
+def _changelog_since(docs_dir: Path, up_name: str, entry: dict) -> "Optional[list[str]]":
+    """The upstream's own changelog lines newer than what the stamp recorded,
+    RAW (as written, never the ``_clip``ped print `_why_lines` renders) - the
+    basis for both ``_why_lines`` and the ``[changelog names this file]``
+    mark (ledger IMP-186), which must match the actual text, not a
+    truncated summary. ``None`` when the file is unreadable or the stamp
+    carries neither a version nor a parseable date to compare against - as
+    opposed to ``[]``, which means the file WAS comparable and nothing in
+    it is newer."""
     path = docs_dir / up_name
     if not path.is_file():
-        return []
+        return None
     recorded_v = _version_tuple(entry.get("version") or "")
     recorded_d = str(entry.get("last_updated") or "")[:10]
     by_date = recorded_v is None
     if by_date and not re.match(r"^\d{4}-\d{2}-\d{2}$", recorded_d):
-        return []
+        return None
     newer: list[str] = []
     for raw in _changelog_entries(path):
         m = _CHANGELOG_RE.match(raw.strip())
@@ -3181,6 +3192,47 @@ def _why_lines(docs_dir: Path, up_name: str, entry: dict) -> "list[str]":
             v = _version_tuple(m.group("ver"))
             if v is not None and v > recorded_v:
                 newer.append(raw.strip())
+    return newer
+
+
+def _changelog_names_target(newer: "list[str]", target_name: str) -> bool:
+    """Does the upstream's own changelog-since-stamp (``newer``, raw lines)
+    name the TARGET artifact reading it - not the changed item's own name/id
+    (``mark()``'s job), but the file consuming the upstream (ledger IMP-186,
+    the false ``re-stamp only`` a ``conventions.*`` edit earned because its
+    body is never quoted downstream by design, even though the SAME run
+    already prints the upstream's changelog line naming the reader).
+    Matched, word-boundary, on: the target's family stem (``UX``, ``API``,
+    ...) - true for the system file AND every shard of that family; the
+    target's own exact shard stem when it is one (``UX__cmd-init``); and the
+    invocation token ``/sdlc:<skill>``. A short stem can over-match prose
+    that names something merely adjacent - accepted (costs one extra review
+    question, never a silent re-stamp)."""
+    stem = target_name.split("__", 1)[0].rsplit(".", 1)[0]
+    skill = _STAGE_OF.get(stem)
+    tokens = [stem]
+    if "__" in target_name:
+        tokens.append(target_name.rsplit(".", 1)[0])
+    invocation = f"/sdlc:{skill}" if skill else None
+    for line in newer:
+        if invocation and invocation in line:
+            return True
+        for token in tokens:
+            if re.search(r"(?<![\w/-])" + re.escape(token) + r"(?![\w-])", line):
+                return True
+    return False
+
+
+def _why_lines(docs_dir: Path, up_name: str, entry: dict) -> "list[str]":
+    """WHY an upstream moved, from its own changelog: the lines newer than the
+    version the stamp recorded - or, on a stamp that recorded no version, the
+    lines dated on or after its ``last_updated``. Empty when the stamp carries
+    neither, so nothing can be compared."""
+    newer = _changelog_since(docs_dir, up_name, entry)
+    if newer is None:
+        return []
+    recorded_d = str(entry.get("last_updated") or "")[:10]
+    by_date = _version_tuple(entry.get("version") or "") is None
     if not newer:
         return ["why: its changelog has no entry since this file was stamped - the edit "
                 "carried no changelog line (a hand edit?)"]
@@ -3224,6 +3276,9 @@ def _stale_rows(docs_dir: Path) -> "tuple[list[dict], list[str]]":
         # decidable only where the stamp recorded an items map.
         reviewable: list[bool] = []
         art_skip: "Optional[list[tuple[int, int]]]" = None
+        # Same deferrals --drift reads for this target, so --stale agrees on
+        # the [deferred here] mark too (ledger IMP-187).
+        deferred = _parse_deferrals(lines, name.endswith(".json"))
         for e in entries:
             up = Path(str(e.get("file") or "")).name
             recorded = (e.get("sha256") or "")[:_SHA_LEN]
@@ -3243,9 +3298,17 @@ def _stale_rows(docs_dir: Path) -> "tuple[list[dict], list[str]]":
                 if isinstance(items, dict):
                     if art_skip is None:
                         art_skip = _artifact_scan_ranges(lines, name.endswith(".json"))
+                    try:
+                        recorded_capability = int(e["capability"]) if e.get("capability") is not None else 0
+                    except (TypeError, ValueError):
+                        recorded_capability = 0
+                    # Same changelog read --drift takes, so --stale agrees on
+                    # the [changelog names this file] mark too (ledger IMP-186).
+                    changelog_raw = _changelog_since(docs_dir, up, e) or []
                     _lines, relevant = _item_delta_lines(
                         index, docs_dir, up, items, index.refs_by_file.get(name, set()),
-                        "the stamp", lines, art_skip)
+                        "the stamp", lines, art_skip, recorded_capability, name, changelog_raw,
+                        deferred)
                     reviewable.append(relevant)
                 else:
                     reviewable.append(True)  # sha-only: cannot tell, so it is reviewed
@@ -3428,12 +3491,20 @@ def _cite_counts(lines: "list[str]", skip: "list[tuple[int, int]]", token: str) 
 
 def _artifact_scan_ranges(lines: "list[str]", is_json: bool) -> "list[tuple[int, int]]":
     """Line ranges a cite scan skips: the metadata block (its provenance
-    items map names every upstream item) and every changelog."""
+    items map names every upstream item), every changelog, and the top-level
+    ``deferrals`` / ``deferred_requirements`` block. Naming an id there is a
+    DEFERRAL, not a citation (ledger IMP-187): every structurally-deferred
+    entry repeats the item's own id/key as plain text (``_parse_deferrals``'s
+    contract), which would otherwise self-mask as ``[referenced here]``
+    through this same scan before the dedicated ``[deferred here]`` mark
+    ever gets a chance - the accurate reason, and its own lighter question,
+    would never surface."""
     sections = _scan_json(lines)[0] if is_json else _top_level_sections(lines)
     skip = list(_changelog_ranges(lines, sections, is_json))
-    meta = sections.get("metadata")
-    if meta is not None:
-        skip.append(meta)
+    for key in ("metadata", "deferrals", "deferred_requirements"):
+        rng = sections.get(key)
+        if rng is not None:
+            skip.append(rng)
     return skip
 
 
@@ -3441,7 +3512,10 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
                       old_items: "dict[str, str]", my_refs: "set[tuple[str, str]]",
                       basis: str, art_lines: "Optional[list[str]]" = None,
                       art_skip: "Optional[list[tuple[int, int]]]" = None,
-                      recorded_capability: Optional[int] = None) -> "tuple[list[str], bool]":
+                      recorded_capability: Optional[int] = None,
+                      target_name: str = "",
+                      changelog_lines: "Optional[list[str]]" = None,
+                      deferred: "Optional[set[str]]" = None) -> "tuple[list[str], bool]":
     """The per-family added / removed / changed-in-body lines of one upstream,
     diffed item by item against ``old_items`` (a stamp's items map, or the
     items of a revision recovered from git); ``basis`` names the old side.
@@ -3460,11 +3534,38 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
     stamp's items map could not have carried it either way - so it is pulled
     out into its own "index-new" line instead of the normal added-upstream
     count, and never makes the upstream's move "relevant" on its own.
+
+    ``target_name`` (the artifact THIS delta is being computed for) and
+    ``changelog_lines`` (the upstream's own raw changelog-since-stamp, from
+    ``_changelog_since`` - never recomputed here) drive the
+    ``[changelog names this file]`` mark (ledger IMP-186): when the
+    upstream's changelog already names the target, every changed-in-body
+    item of that upstream is marked, even one no structured field or prose
+    mention would otherwise catch (a ``conventions.*`` body edit, whose id is
+    never quoted downstream by design).
+
+    ``deferred`` (the TARGET's own structurally-deferred ids/keys, from
+    ``_parse_deferrals`` on the target's lines - never recomputed here)
+    drives the ``[deferred here]`` mark (ledger IMP-187): on a
+    validator-green artifact every item is targeted or deferred (AUTHORING
+    §6), so a changed-in-body item this target defers is not "unreferenced",
+    it is a standing decision whose reason the change may have outdated -
+    marked instead of silently re-stamped as reviewed.
+
     Returns ``(lines, relevant)``: ``relevant`` is False when nothing this
     artifact references or cites was removed or changed, so the upstream's
-    move owes a re-stamp, not a review."""
+    move owes a re-stamp, not a review. When BOTH ``old_items`` and the
+    current items are empty (an unindexed upstream, e.g. a UX shard's
+    cli_args/run.log content - ledger IMP-185, LSN-090), a real edit and no
+    edit are indistinguishable from this map alone; ``relevant`` is True and
+    the lines hedge exactly like the sha-only fallback, instead of the
+    "nothing moved" claim this file's own edit would otherwise earn."""
     out: list[str] = []
     current_items = items_of(index, docs_dir, up_name)
+    if not old_items and not current_items:
+        return ([f"neither the recorded snapshot nor {up_name}'s current content has any item "
+                 f"to itemize here - a real edit and no edit look identical from this file's "
+                 f"items map alone, so the two cannot be told apart; review the diff"], True)
     added_keys_all = [k for k in current_items if k not in old_items]
     index_new_keys: "list[str]" = []
     if recorded_capability is not None:
@@ -3477,6 +3578,7 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
     modified_keys = [k for k in old_items
                      if k in current_items and current_items[k] != old_items[k]]
     referenced = {r for _fam, r in my_refs}
+    changelog_hit = bool(target_name) and _changelog_names_target(changelog_lines or [], target_name)
 
     def mark(key: str) -> "tuple[str, bool]":
         bare = key.rsplit("/", 1)[-1]
@@ -3492,6 +3594,17 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
         if art_lines is None or not is_id:
             structured = structured or int(key in referenced or bare in referenced)
         bits = (["referenced here"] if structured else []) + ([f"cited in prose x{prose}"] if prose else [])
+        if not bits and changelog_hit:
+            # The upstream's OWN changelog already names this target - a
+            # conventions.* body edit (or anything else no structured field
+            # or prose mention would ever quote) is not "unreferenced", it is
+            # unindexed by design (ledger IMP-186).
+            bits = ["changelog names this file"]
+        if not bits and deferred and _deferred_match(key, deferred):
+            # The TARGET defers this item structurally - it is not
+            # "unreferenced", it is a standing decision the change may have
+            # outdated (ledger IMP-187).
+            bits = ["deferred here"]
         return (f"{key} [{', '.join(bits)}]" if bits else key), bool(bits)
 
     relevant = False
@@ -3541,7 +3654,9 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
 
 
 _RESTAMP_ONLY = ("nothing this file references or cites was removed or changed - re-stamp only "
-                 "(the owning skill's --reconcile form re-stamps it with no question)")
+                 "(the delta review needs no question; the owning skill still runs every "
+                 "update-run step its own SKILL.md owes - its checks before the review, and "
+                 "Phases 7-8)")
 
 
 def _stage_rank(name: str) -> Optional[int]:
@@ -3669,18 +3784,25 @@ def drift_report(docs_dir: Path, artifact: str) -> int:
             continue
         details = [f"recorded {recorded}, now {current}"]
         details.extend(_why_lines(docs_dir, up_name, entry))
+        # The RAW changelog-since-stamp (never the _clip'd print above) - the
+        # basis for the [changelog names this file] mark (ledger IMP-186).
+        changelog_raw = _changelog_since(docs_dir, up_name, entry) or []
         recorded_items = entry.get("items")
         try:
-            recorded_capability = int(entry["capability"]) if entry.get("capability") is not None else None
+            # A stamp with NO capability key at all predates the field itself
+            # (pre-1.20, ledger IMP-160/161) - not merely an old value, so it
+            # defaults to 0: every capability-gated family is then index-new,
+            # never a phantom "added upstream" (ledger IMP-185, LSN-097).
+            recorded_capability = int(entry["capability"]) if entry.get("capability") is not None else 0
         except (TypeError, ValueError):
-            recorded_capability = None
+            recorded_capability = 0
         if isinstance(recorded_items, dict):
             # Exact: the stamp recorded every item with its body hash, so the
             # delta is item by item - no git, no guessing from references.
             delta_lines, relevant = _item_delta_lines(
                 index, docs_dir, up_name, recorded_items, my_refs,
                 "the snapshot recorded at the last write", lines, art_skip,
-                recorded_capability)
+                recorded_capability, name, changelog_raw, deferred)
             details.extend(delta_lines)
             if not relevant:
                 details.append(_RESTAMP_ONLY)
@@ -3695,7 +3817,8 @@ def drift_report(docs_dir: Path, artifact: str) -> int:
             delta_lines, relevant = _item_delta_lines(
                 index, docs_dir, up_name, old_items, my_refs,
                 f"revision {str(rev)[:8]} of docs/{up_name}, recovered from git (its content "
-                f"matches the hash this stamp recorded)", lines, art_skip)
+                f"matches the hash this stamp recorded)", lines, art_skip,
+                deferred=deferred)
             details.extend(delta_lines)
             if not relevant:
                 details.append(_RESTAMP_ONLY)

@@ -7,6 +7,17 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.16 (2026-09-20) — Step 5 commits the lessons queue when the project opted in (auto-commit, CLAUDE.md 20)
+
+- Before the card: `python .claude/sdlc/autocommit.py commit --skill lesson --invocation "/sdlc:lesson" --summary "LSN-NNN recorded - <kind> in sdlc-<skill>"` — only the queue and the marker are staged, because this skill runs in ambient sessions and must never sweep a hand edit; the card gains a `Commit:` row. Pinned by `setup/_smoke/autocommit_lockstep_selftest.py`.
+
+## 1.15 (2026-09-19) — Cross-skill lesson subjects cluster by their owning skill, and the collector's digest keeps a project's relay-pulled lessons
+
+- `lessons.py`: `same_subject`/`similarity`/`find_recurrence` resolve a `where.file` prefixed with a DIFFERENT real skill folder to that folder's actual owner (`resolve_subject()`, reusing `find_prefix_skill`) whenever a plugin root is known - `cluster_lessons.py` and `cmd_add`'s own duplicate check both pass one now. Cross-skill prefixes resolve only when the plugin root is known (a skill run, or `--plugin-root`); with none, comparison stays own-skill-only as before. Pinned by `_smoke/lessons_selftest.py` (ledger IMP-179).
+- `collect_lessons.py`: a project registered in `sources.yaml` AND reporting through the relay no longer loses its relay-pulled lessons from the digest (the local-source loop extends the per-slug list instead of overwriting it), and the backlog park heuristic no longer reads `deferred or <x>` as a park verb. Pinned by `_smoke/collect_selftest.py` (ledger IMP-201).
+
+- No shipped runtime file (SKILL.md, references/, assets/) carries a ledger-id citation any more: bare `(IMP-NNN)` / `(LSN-NNN)` parentheticals are gone, history sentences keep their rule and their reason without the ticket, close-card examples show the `LSN-NNN` placeholder; `lint_context_budget.py` counts IMP- and LSN- ids with a ceiling of 0 per skill (ledger IMP-182).
+
 ## 1.14 (2026-09-17) — A where.file prefixed with another skill's folder is owned by that skill: the hint names it and the collector dates it there
 
 Ledger IMP-143. `find_prefix_skill()` recognises a where.file whose leading segment is ANOTHER real skill folder — only when the remainder exists on disk under it, so a repo's own `test/` directory is never mistaken for the test skill — and `lesson_hints` names that owner instead of the alphabetically-first basename match. `lessons/collect_lessons.py`'s `version_delta` keys `path` / `exists_now` / `commits` / `changed` on the owner, and its changelog half prints the OWNER's entries dated after the commit that introduced the lesson's plugin version — never "since <the reporting skill's version>" against the owner's unrelated scale — with the two print lines labelled by the owner's name; byte-identical rendering when owner and skill coincide. Two new selftest arms (`lessons_selftest.py`, `collect_selftest.py`), red at 1.13. The clustering half (`same_subject` compares the filed skill before any prefix is stripped) is IMP-179, open.

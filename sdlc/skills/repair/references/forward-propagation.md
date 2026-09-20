@@ -38,13 +38,24 @@ If the project never ran `/sdlc:setup` there is no index at all. Fall back to
 the resolution record that the radius was derived without the index.
 
 **The checklist.** Print the radius grouped by artifact, one line per inbound
-site, and carry it through Phase 4 as a checklist. A site leaves the list in
-exactly one of three ways — *edited*, *re-sliced* (a task embed moved by
-`reslice_embeds.py`), or *unaffected* with one clause saying why. A site that
-is none of the three at the end of Phase 4 is an incomplete propagation, and
-the finding does not close — SKILL.md Phase 6 says which state it waits in, per
+site, and carry it through Phase 4 as a checklist — then PERSIST it as
+`resolution.sites_considered`, one entry per artifact, instead of only
+printing a line the transcript throws away (a finding closed
+having edited one producer while two siblings restated the same field's shape
+in prose and a renderer guessed a fourth shape, because nothing required
+recording that those sites were even looked at). A site leaves the list in
+exactly one of four ways — *edited*, *re-sliced* (a task embed moved by
+`reslice_embeds.py`), *unaffected* with a `how` clause saying why (a sweep
+count stands in for the reason: `"sweep <token>: N hits"`), or *deferred*
+with a `reason` saying why it stays untouched on purpose. A site that is none
+of the four at the end of Phase 4 is an incomplete propagation, and the
+finding does not close — SKILL.md Phase 6 says which state it waits in, per
 mode: a `re-invoke` stays `triaged` carrying its block, a `surgical` fix is
-left `open` with its progress on one evidence line.
+left `open` with its progress on one evidence line. `sites_considered` is
+REQUIRED non-empty, from `findings_file_version` 3 (the same floor
+`artifacts_touched`'s own re-invoke check uses — one shared floor, not a
+second one), whenever `resolution.symbols_changed` is non-empty or `mode` is
+`re-invoke`; a surgical fix that changed no named symbol is exempt.
 
 ## Three modes
 
@@ -64,8 +75,8 @@ surgical edit that *should* have changed the set leaves a downstream artifact
 internally consistent but missing an item, and no validator will catch it —
 coverage gates only check the items that exist. Between `additive` and
 `re-invoke`, "in doubt" means one of the four criteria actually fails, not that
-the change feels big (aicf LSN-019 / LSN-040: one fully-determined TST routed
-to re-invoke cost two downstream interviews and discarded the walk). A finding
+the change feels big — one fully-determined TST routed to re-invoke cost two
+downstream interviews and discarded the walk. A finding
 stamped `recurrence_of` (repaired before, came back) starts with `re-invoke`
 in position 1 — never a refusal of the in-run modes, just a changed default.
 When such a finding's fix also meets the four-part criterion, `additive` leads
@@ -102,18 +113,27 @@ Nothing in this sequence is a hand edit to a task JSON.
 4. **Walk the rest of the checklist by hand — every inbound site that is not a
    task embed.** For each, apply the corresponding edit (a TST acceptance that
    quotes the old contract, an entity trace, a UX shard) with its own
-   `bump_artifact.py` call, or record why it is unaffected. Task embeds are
-   not edited here — step 6 moves them. **Retired-token sweep:** when the fix
-   REMOVES or RENAMES a named token (an input parameter, a CLI flag, a field,
-   an enum member, a literal), the reference graph cannot see the sites that
-   still use the old name — nothing references a name that no longer exists —
-   so sweep the corpus for it with a plain text search - `grep -rn <token>
+   `bump_artifact.py` call, or record why it is unaffected — and record the
+   disposition as a `sites_considered` entry either way ("The checklist"
+   above). Task embeds are
+   not edited here — step 6 moves them. **Token sweep:** when the fix
+   REMOVES, RENAMES, or ADDS a named token (an input parameter, a CLI flag, a
+   field, an enum member, a literal), the reference graph cannot see every
+   site that restates or should restate it — a removed/renamed name is
+   referenced by nothing (it no longer exists to point at), and an ADDED
+   field's shape is typically restated in prose by its siblings and readers
+   before any of them declares it as a structured reference `--refs` can
+   follow (one added field ended up as three disagreeing
+   prose tuples and a renderer's own fourth guess, because nothing swept for
+   the field's own name) — so sweep the corpus for it with a plain text
+   search - `grep -rn <token>
    docs/` (Grep over `docs/`; the index's `--find` matches symbols, not
-   prose, so it is not this sweep). Every hit joins the checklist and leaves it the
-   same three ways, changelog lines excepted; the typical miss is a sibling
-   test in the very file you just edited (aicf LSN-074: one run reconciled
-   five artifacts and shipped a test that still passed the removed
-   parameter). The close card names the token, the hit count and each hit's
+   prose, so it is not this sweep). Every hit joins the checklist — and
+   becomes its own `sites_considered` entry — leaving it the same four ways,
+   changelog lines excepted; the typical miss is a sibling test or a sibling
+   prose restatement in the very file you just edited — one run reconciled
+   five artifacts and shipped a test that still passed the removed parameter.
+   The close card names the token, the hit count and each hit's
    disposition.
 5. **Stamp every artifact you reconciled by hand, upstream-first.** A hand
    edit moves an artifact's content but not its `upstream_provenance`, so the
@@ -130,16 +150,16 @@ Nothing in this sequence is a hand edit to a task JSON.
    `${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks:
    `--hold-upstream` needs `docs_index.py` capability 6, an older install
    rejects it with exit 2, and the plugin's form is
-   `"${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs --stamp …`
-   (ledger IMP-108). Order matters twice. A
+   `"${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs --stamp …`.
+   Order matters twice. A
    stamp rewrites the stamped file's metadata and therefore its own hash, so
    stamp in pipeline order (ARCH before TEST-STRATEGY before a task shard) and
    never before the last hand edit to that file. And stamp BEFORE step 6: the
    re-slice stamps the task shard against the upstream bytes it sees, so a
    stamp that lands after it moves those bytes and puts the shard behind
-   again for a metadata-only write (aicf LSN-070 / LSN-073: stale rows 23 → 28
-   on artifacts the run had just reconciled, then a delta review over
-   nothing). A shard that consumed a hand-reconciled upstream the re-slice
+   again for a metadata-only write — stale rows 23 → 28 on artifacts the run
+   had just reconciled, then a delta review over nothing. A shard that
+   consumed a hand-reconciled upstream the re-slice
    does not touch gets its own `--stamp` after step 6.
 
    **What a stamp claims.** `upstream_provenance` records "this artifact was
@@ -155,18 +175,18 @@ Nothing in this sequence is a hand edit to a task JSON.
    pre-existing: docs/X vs docs/Y, owed to /sdlc:task <cid> --reconcile`) and
    route the reconcile in `Next:`. An artifact with no fresh reviewed pair is
    not stamped at all. The reconcile skills stamp freely because they review
-   the whole `--drift` delta; that is the difference (ledger IMP-099, aicf
-   LSN-080: a `ci_integration` fix landed in a TASKS.json that already owed a
-   TEST-STRATEGY reconcile — following the step would have forged it,
-   skipping it drew the "missed stamp" label).
+   the whole `--drift` delta; that is the difference — a `ci_integration` fix
+   landed in a TASKS.json that already owed a TEST-STRATEGY reconcile:
+   following the step would have forged it, skipping it drew the "missed
+   stamp" label.
 
    **Hold every recorded upstream this run did not review.** `--stamp`
    re-hashes EVERY upstream the artifact already records, not only the ones
    named: `--upstream` adds to that set, it never narrows it. A stamp for the
    one pair this run reviewed would otherwise mark every other recorded
    upstream reviewed too, a pre-existing pair's owed delta included, and
-   `--drift`, `--stale` and the statusboard would stop showing it (ledger
-   IMP-106). `--hold-upstream docs/<file>` keeps that entry byte-identical.
+   `--drift`, `--stale` and the statusboard would stop showing it.
+   `--hold-upstream docs/<file>` keeps that entry byte-identical.
    So: `--upstream` for each pair this run reviewed that was fresh before its
    first write, `--hold-upstream` for every other entry in the artifact's
    `metadata.upstream_provenance`.
@@ -196,7 +216,14 @@ Nothing in this sequence is a hand edit to a task JSON.
    python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --tst TST-NNN
    python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --entity <Name>
    python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --operation <operation_id>
+   python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --component <cid>/<component>
    ```
+
+   A component-level entity change (an ARCH component's `traces_data_entities`
+   moved) routes through `--component`: it is the only selector that reaches
+   a component-scoped test task (`component_ref` set, no `target_symbol` —
+   an integration/system-tier test with no declared subject) that `--symbol`
+   and `--tst` cannot both cover in one call.
 
    It rewrites only the compared embed fields (`interface_contract`,
    `unit_kind`, `unit_summary`, `test_spec`, `family_contract`,
@@ -300,7 +327,7 @@ and stops, because those skills are interviews and the user owns them.
   system file only. When the owed file IS the system one, write
   `/sdlc:task --system --reconcile` rather than the bare form — that is the
   spelling the skill defines for a single named file, and the bare form means
-  "walk every stale file" (ledger IMP-145). The full interview form comes
+  "walk every stale file". The full interview form comes
   second, as the fallback when a reconcile stops at a structural question.
 - **Write `resolution.handoff`** — the walk's conclusion per downstream item,
   for a session that never saw the walk:
@@ -321,6 +348,18 @@ and stops, because those skills are interviews and the user owns them.
   user confirms, never a silent write. The `bump_artifact.py --summary` line
   is the other half of the handoff: every reconcile's `--drift` quotes the
   upstream's changelog since its stamp as the "why".
+
+  **Retiring or renaming a token: put the token, never an authored consumer
+  list.** When the fix removes or renames a named token, add
+  `retired: [<token>, ...]` to the handoff entry — `note` explains WHY, never
+  WHICH items still use the old name. `FND-104` named five tests that did not
+  contain the retired token and missed five that did, two of them live
+  assertions; `FND-107` repeated the pattern for a different token. An
+  authored enumeration is a guess dressed as a fact; the literal
+  token is a fact, and the reconcile's own sweep of its artifact family
+  (`upstream-reconciliation.md` step 3) is what finds the real consumers —
+  the same "Token sweep" convention this skill's own surgical mode uses above,
+  run on the other side.
 - **`/sdlc:test <cid>` before `/sdlc:task <cid>` whenever the fix minted a
   work_unit** (or any new subject): task wires a test task's `depends_on` to
   the impl task of the subject the *test* names (`targets_work_units`, CLAUDE.md

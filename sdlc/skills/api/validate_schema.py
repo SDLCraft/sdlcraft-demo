@@ -1453,6 +1453,23 @@ def discover_resource_files(api_path: Path) -> List[Path]:
 def validate_all(api_path: Path) -> int:
     """Validate API.yaml, all API__*.yaml siblings, and run coverage checks."""
 
+    # `--path` locates the docs dir; it never selects which pydantic model
+    # runs. A resource shard resolves to its API.yaml sibling and the whole
+    # family (system + every discovered shard) validates from there, exactly
+    # as the default `--path docs/API.yaml` already does (ledger IMP-199;
+    # test/validate_schema.py:validate_all is the sibling pattern).
+    if api_path.name.startswith("API__"):
+        system_path = api_path.parent / "API.yaml"
+        if not system_path.exists():
+            print(
+                f"ERROR: {api_path.name} is a container/topic shard; its "
+                f"family is validated through {system_path.name}, which is "
+                f"missing in {api_path.parent}",
+                file=sys.stderr,
+            )
+            return 2
+        api_path = system_path
+
     # 1) API.yaml
     raw, err = _load_yaml(api_path)
     if err:
@@ -1761,7 +1778,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         type=Path,
         default=Path("docs", "API.yaml"),
         help="Path to API.yaml (default: ./docs/API.yaml). Sibling API__*.yaml "
-        "files in the same directory are validated automatically.",
+        "files in the same directory are validated automatically. Passing an "
+        "API__<resource>.yaml shard instead resolves to its API.yaml sibling "
+        "and validates the same way.",
     )
     args = parser.parse_args(argv)
     return validate_all(args.path)

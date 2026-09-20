@@ -73,7 +73,7 @@ For `UX.yaml`:
   template).
 - `metadata.ux_version`: stamp `"3.0"` (or higher) on a new write — the
   version-gated blocking checks (CLI-contract typing, inventory-shard
-  integrity — CLAUDE.md section 10, ledger IMP-009 / IMP-171) arm only
+  integrity — CLAUDE.md section 10) arm only
   at/after 3.0, the same as the existing 2.0 provenance gate; an older
   stamp silently degrades every one of them to a warning instead of dead
   code nothing ever reaches. The update flow on an existing artifact bumps
@@ -141,11 +141,11 @@ The validator does six things in one pass:
    may change freely without breaking the coverage. Uncovered ids are
    surfaced in the output.
 5. CLI-contract typing (blocking at `ux_version >= 3.0`, a warning below
-   — CLAUDE.md section 10, ledger IMP-009): a `layout.cli_args` or
+   — CLAUDE.md section 10): a `layout.cli_args` or
    `cli.global_flags` entry that is not a mapping, or a `cli_command`
    surface's `exit_conditions` entry that is a plain string or names a
    code absent from `cli.exit_codes`.
-6. Inventory-shard integrity (same floor, ledger IMP-171): a
+6. Inventory-shard integrity (same floor): a
    `surface_inventory` `file_path` that names no file on disk, or a
    `UX__*.yaml` on disk that no `surface_inventory` entry names —
    mirrors `arch`'s `check_file_path_integrity`.
@@ -165,7 +165,7 @@ UX artifacts if `UX.yaml.metadata.status != "complete"` OR if the
 validator exits non-zero. The one exception is to the exit code, never to the
 status: a failure every check of which `doctor.py --artifact docs/UX.yaml`
 reports as accepted deviance does not reject
-(`sdlc/skills/repair/references/accepted-deviance.md`).
+(`${CLAUDE_SKILL_DIR}/../repair/references/accepted-deviance.md`).
 
 ## Coverage-check details
 
@@ -236,4 +236,4 @@ Once Phase 8's refresh has run:
 > the validator prints gets translated, not pasted: coverage gaps, warnings and
 > cross-check findings become one plain sentence each (what happened, why it
 > matters, what to do). See CLAUDE.md section 14 and
-> `sdlc/skills/prd/references/reporting-to-the-user.md`.
+> `${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`.

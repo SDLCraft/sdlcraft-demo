@@ -1467,7 +1467,13 @@ def check_fr_names_unbuilt_command(
     covered = _fr_covered_set(ux, surfaces)
     out: List[str] = []
     for fid, text in fr_texts.items():
-        deferred = bool(dfr.defer(fid))
+        # A covered FR must never reach defer(): the prose-match branch is a
+        # side effect (adds fid to dfr.prose_only), and calling it for the
+        # full FR population - covered or not - pollutes the shared
+        # [deferral hygiene] warning with ids a trace already covers, and
+        # flips this row's own wording to "is deferred" for an FR that is
+        # actually traced (ledger IMP-184).
+        deferred = fid.upper() not in covered and bool(dfr.defer(fid))
         if not deferred and fid.upper() not in covered:
             continue
         named: List[Tuple[str, str]] = []
@@ -1868,6 +1874,23 @@ def discover_surface_files(ux_path: Path) -> List[Path]:
 def validate_all(ux_path: Path) -> int:
     """Validate UX.yaml, all UX__*.yaml siblings, and run coverage check."""
 
+    # `--path` locates the docs dir; it never selects which pydantic model
+    # runs. A surface shard resolves to its UX.yaml sibling and the whole
+    # family (system + every discovered shard) validates from there, exactly
+    # as the default `--path docs/UX.yaml` already does (ledger IMP-199;
+    # test/validate_schema.py:validate_all is the sibling pattern).
+    if ux_path.name.startswith("UX__"):
+        system_path = ux_path.parent / "UX.yaml"
+        if not system_path.exists():
+            print(
+                f"ERROR: {ux_path.name} is a container/topic shard; its "
+                f"family is validated through {system_path.name}, which is "
+                f"missing in {ux_path.parent}",
+                file=sys.stderr,
+            )
+            return 2
+        ux_path = system_path
+
     # 1) UX.yaml
     raw, err = _load_yaml(ux_path)
     if err:
@@ -2107,7 +2130,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         type=Path,
         default=Path("docs", "UX.yaml"),
         help="Path to UX.yaml (default: ./docs/UX.yaml). Sibling UX__*.yaml "
-        "files in the same directory are validated automatically.",
+        "files in the same directory are validated automatically. Passing a "
+        "UX__<surface>.yaml shard instead resolves to its UX.yaml sibling "
+        "and validates the same way.",
     )
     args = parser.parse_args(argv)
     return validate_all(args.path)

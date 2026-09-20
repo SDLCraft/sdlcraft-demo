@@ -158,7 +158,7 @@ Read these files at startup:
      when `python "${CLAUDE_SKILL_DIR}/../repair/doctor.py" --docs-dir docs --artifact docs/PRD.yaml`
      reports the check `accepted (N, unchanged)`, the project accepted that
      deviance — proceed (never `--quick`; rule:
-     `sdlc/skills/repair/references/accepted-deviance.md`).
+     `${CLAUDE_SKILL_DIR}/../repair/references/accepted-deviance.md`).
    - If valid and complete → extract the fields the UX skill needs:
      - `technical_constraints.runtime_platform` → preliminary `surface_family`
        (a LIST as of PRD 1.1, e.g. `[mobile_ios, mobile_android]`; a bare
@@ -296,29 +296,15 @@ exists yet (the normal first-chain pass).
 
 ### Phase 3 (first step) — Repo evidence
 
-Before seeding anything, look at what the project already has. On a greenfield
-project this finds nothing and costs one command; on a **brownfield** one it is
-the best evidence available, and this skill used to ignore it entirely.
-
 ```bash
 python .claude/sdlc/repo_scan.py --domain ux --json
 ```
-
-Helper absent (the project never ran `/sdlc:setup`) → skip silently and seed
-from the upstream artifacts alone. Never block the run on it.
-
-It returns CLI arg parsers, route directories, templates, component directories and i18n catalogs — each hit a `path`, `line`
-and one-line `excerpt`. Fold them into the pre-fill map below as **`⚠ inferred`
-candidates**, never as answers: cite `<path>:<line>` in the `_rationale` sibling
-of whatever field the evidence fed, confirm each one individually (the canonical
-flow forbids batch-accepting inferred values), and pass on `truncated` /
-`capped_signals` as "this is a sample of a large repo, not an inventory".
 
 Finding **no** signal at all is itself evidence: it corroborates (never proves)
 a not-applicable answer to Phase 4 question 0.
 
 Full rules, including what to do when the repo contradicts an upstream
-artifact: `sdlc/skills/setup/references/repo-evidence.md`.
+artifact: `${CLAUDE_SKILL_DIR}/../setup/references/repo-evidence.md`.
 
 ### Phase 3 — Idea capture (lightweight)
 
@@ -364,7 +350,7 @@ These determine the *shape* of the UX output:
    `surface_inventory`; write no `UX__*.yaml`; **skip straight to Phase 7**.
    The validator requires the rationale and rejects a not-applicable file that
    still lists surfaces. Mechanics:
-   `sdlc/skills/prd/references/optional-stages.md`.
+   `${CLAUDE_SKILL_DIR}/../prd/references/optional-stages.md`.
 
    Do NOT confuse this with the headless surface families below. `service` and
    `library` mean "headless, but its commands / endpoints / public symbols are
@@ -522,7 +508,7 @@ Writer responsibilities for the new ID conventions:
   does this). It writes `{file, session_id, last_updated, sha256, items}`; the
   `items` map is what lets the next `--drift` name the delta item by item, and
   a hand-written `{file, sha256}` entry is a sha-only stamp `--stale` warns
-  about (ledger IMP-102). Replace-on-write, so it always reflects the latest
+  about. Replace-on-write, so it always reflects the latest
   write. See CLAUDE.md §7.
 
 Then run:
@@ -559,15 +545,15 @@ artifact's own `WRN-NNN` list, a spec defect in the findings queue, a skill
 defect in the lessons queue — never as a note, a bullet or a "resolved" section
 in `CLAUDE.md`. See `references/merge-validate.md`.
 
-**Refresh the navigation index.** If `.claude/sdlc/docs_index.py` exists (the
-project ran `/sdlc:setup`), run `python .claude/sdlc/docs_index.py` after
-writing `docs/UX.yaml` and its per-surface files so `docs/INDEX.yaml` reflects
-the new content right away (the setup hook also does this, but a hook added
-mid-session only activates next session). Optionally run
-`python .claude/sdlc/docs_index.py --check` to confirm the write introduced no
-dangling id references. Harmless no-op if not installed. Phase 7's write
-already refreshed `metadata.upstream_provenance`, so the next run's drift
-check starts from this write.
+**Refresh the navigation index.** Resolve the copy per `helper-resolution.md`:
+the installed `.claude/sdlc/docs_index.py` if present, run it after writing
+`docs/UX.yaml` and its per-surface files; own-toolchain (marker present, no
+`docs_index` helper) → run the project's own docs-hook command from
+`.claude/settings.json` and name it; no marker → nothing to run. Optionally
+run `python .claude/sdlc/docs_index.py --check` to confirm the write
+introduced no dangling id references (skip when the helper is absent).
+Phase 7's write already refreshed `metadata.upstream_provenance`, so the next
+run's drift check starts from this write.
 
 **Refresh the statusboard.** Run `python .claude/sdlc/statusboard.py` in the
 same breath. It regenerates `.claude/rules/sdlc-statusboard.md` (loaded into
@@ -579,19 +565,12 @@ Then: set `status: complete` in the state
 file (keep the file — audit trail), tell the user where the artifacts live,
 and point at what comes next:
 
-**Self-review & record the run** (CLAUDE.md 15; doctrine:
-`sdlc/skills/lesson/references/lessons-capture.md`). First drain `state.lesson_notes` (mid-run observations — that file →
-"Mid-run: note now, record at close"), then answer the self-review questions
-from that file for this run. Each yes that matches a raising condition
-becomes one `lessons.py add` (at most 2 per run unless one is a `blocker`;
-drained notes count toward the cap). Then record the run:
-
-```bash
-python .claude/sdlc/lessons.py record-run --skill ux --plugin-root "${CLAUDE_SKILL_DIR}/../.."
-```
-
-Best-effort: a non-zero exit becomes one `Attention:` clause in the card;
-helper absent (project never ran `/sdlc:setup`) — skip silently.
+**Self-review & record the run** (CLAUDE.md 15; doctrine and the self-review
+questions: `${CLAUDE_SKILL_DIR}/../lesson/references/lessons-capture.md` → "Mid-run:
+note now, record at close"). Drain `state.lesson_notes`, answer the self-review for
+this run (at most 2 `lessons.py add` per run unless one is a `blocker`; drained
+notes count toward the cap), then `python .claude/sdlc/lessons.py record-run --skill ux --plugin-root "${CLAUDE_SKILL_DIR}/../.."`
+— best-effort: a non-zero exit is one `Attention:` clause; helper absent, skip silently.
 
 **Drain the findings notes** (CLAUDE.md 13). For each `state.finding_notes`
 entry (user picks at the stale-ref / downstream-claim / delta-review prompts,
@@ -610,8 +589,13 @@ lands each defect once across runs. Mid-run the agent NEVER stops to record —
 notes ride the normal state writes; this drain (also run on EXIT) is the only
 place they become findings.
 
+**Commit the run** (CLAUDE.md 20; the message rules and what is staged:
+`${CLAUDE_SKILL_DIR}/../setup/references/auto-commit.md`) — the last action before the card, on every exit path, never a blocker:
+`python .claude/sdlc/autocommit.py commit --skill ux --invocation "<the form the dispatch resolved, as typed>" --summary "<one line: what changed, in the user's words>"`
+Its one printed line is the card's `Commit:` row; off, or helper absent → no row.
+
 **Close with the card** (CLAUDE.md 14; canonical shape:
-`sdlc/skills/prd/references/reporting-to-the-user.md`). The user reading this
+`${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`). The user reading this
 knows only "there is a pipeline and I run it in order", so answer their three
 questions and nothing else: did it work, can I run the next skill, what do I
 type next.
@@ -622,13 +606,14 @@ Wrote:     docs/UX.yaml + docs/UX__*.yaml ({the one count that matters})
 Status:    complete - /sdlc:design can run it
 Attention: {what needs a decision, in the user's words}
 Findings:  {N recorded (FND-011, ...) -> /sdlc:repair — only when any exist}
+Commit:    {a1b2c3d  /sdlc:ux → <summary> | nothing to commit | not committed - <reason> — only when auto-commit is on}
 Next:      {the computed next invocation}   ← in a NEW session
 Why new:   the artifacts and state files on disk are the handoff, not this
            transcript.
 ```
 
 **Compute the `Next:` row; never copy the example.** Procedure and successor
-map: `sdlc/skills/prd/references/reporting-to-the-user.md`
+map: `${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`
 (CLAUDE.md 14). For `/sdlc:ux` it resolves to:
 
 - **`docs/` artifact is `draft`, the user typed `EXIT`, or the validator is not
@@ -642,7 +627,7 @@ map: `sdlc/skills/prd/references/reporting-to-the-user.md`
 
 Rules: omit any row with nothing to say (never write "no warnings"). Add a
 `Lessons:` row only when this run recorded at least one — e.g. `Lessons: 1
-recorded (LSN-004) - about this skill, for its maintainer; nothing for you to
+recorded (LSN-NNN) - about this skill, for its maintainer; nothing for you to
 do` — and never print "no lessons". Add the `Findings:` row only when this
 run recorded findings (the drain above) or open findings name an artifact
 this skill consumed — ids plus one consequence clause; never print "no
@@ -813,4 +798,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.21"
+skill_version: "1.23"

@@ -1153,6 +1153,23 @@ def _format_pydantic_errors(err: ValidationError) -> List[str]:
 
 
 def validate_all(design_path: Path) -> int:
+    # `--path` locates the docs dir; it never selects which pydantic model
+    # runs. A tokens/assets shard resolves to its DESIGN.yaml sibling and the
+    # whole family (system + every discovered shard) validates from there,
+    # exactly as the default `--path docs/DESIGN.yaml` already does (ledger
+    # IMP-199; test/validate_schema.py:validate_all is the sibling pattern).
+    if design_path.name.startswith("DESIGN__"):
+        system_path = design_path.parent / "DESIGN.yaml"
+        if not system_path.exists():
+            print(
+                f"ERROR: {design_path.name} is a container/topic shard; its "
+                f"family is validated through {system_path.name}, which is "
+                f"missing in {design_path.parent}",
+                file=sys.stderr,
+            )
+            return 2
+        design_path = system_path
+
     # 1) DESIGN.yaml
     raw, err = _load_yaml(design_path)
     if err:
@@ -1354,7 +1371,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         type=Path,
         default=Path("docs", "DESIGN.yaml"),
         help="Path to DESIGN.yaml (default: ./docs/DESIGN.yaml). DESIGN__*.yaml "
-        "siblings in the same directory are validated automatically.",
+        "siblings in the same directory are validated automatically. Passing "
+        "a DESIGN__*.yaml shard instead resolves to its DESIGN.yaml sibling "
+        "and validates the same way.",
     )
     args = parser.parse_args(argv)
     return validate_all(args.path)

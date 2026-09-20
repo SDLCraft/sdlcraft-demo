@@ -217,7 +217,7 @@ container list is the single most consequential scope decision in the
 whole architecture — a missed container cascades into every downstream
 skill. So **after the per-item loop closes, before the inventory is
 finalized, run a dynamic scope-completeness sweep** (canonical spec:
-`sdlc/skills/prd/references/importance-flows.md` →
+`${CLAUDE_SKILL_DIR}/../prd/references/importance-flows.md` →
 "The `critical` flow → Step e — dynamic scope-completeness sweep").
 
 Reflect, in order, on:

@@ -3733,7 +3733,19 @@ def check_unreachable_work_units(
                     f"{cid}/{comp.component_id}/{name}", f"{comp.component_id}/{name}", name,
                 ]):
                     continue
-                pat = re.compile(r"(?<![\w.])" + re.escape(name) + r"(?![\w])")
+                # The bare-name arm excludes a preceding dot too, so an
+                # accidental substring hit inside an unrelated identifier
+                # never counts - but that also blocks the corpus's own
+                # qualified `component.unit` form for a cross-component
+                # callee. A second arm accepts exactly that form, keyed to
+                # THIS unit's own component_id, so a differently-qualified
+                # same-name hit (`other_component.unit`) still correctly
+                # fails to match (ledger IMP-189).
+                qualified = re.escape(comp.component_id) + r"\." + re.escape(name)
+                pat = re.compile(
+                    r"(?:(?<![\w.])" + re.escape(name) + r"(?![\w])"
+                    r"|(?<![\w])" + qualified + r"(?![\w]))"
+                )
                 if any(pat.search(t) for k, t in unit_texts.items()
                        if k != (comp.component_id, name)):
                     continue
@@ -3838,6 +3850,24 @@ def discover_container_files(arch_path: Path) -> List[Path]:
 
 def validate_all(arch_path: Path) -> int:
     docs_dir = arch_path.parent
+
+    # `--path` locates the docs dir; it never selects which pydantic model
+    # runs. A container/topic shard resolves to its ARCH.yaml sibling and the
+    # whole family (system + every discovered shard) validates from there,
+    # exactly as the default `--path docs/ARCH.yaml` already does - arch has
+    # no container-standalone mode, so the system file must exist (ledger
+    # IMP-199; test/validate_schema.py:validate_all is the sibling pattern).
+    if arch_path.name.startswith("ARCH__"):
+        system_path = docs_dir / "ARCH.yaml"
+        if not system_path.exists():
+            print(
+                f"ERROR: {arch_path.name} is a container/topic shard; its "
+                f"family is validated through {system_path.name}, which is "
+                f"missing in {docs_dir}",
+                file=sys.stderr,
+            )
+            return 2
+        arch_path = system_path
 
     # 1) ARCH.yaml
     raw, err = _load_yaml(arch_path)
@@ -4199,7 +4229,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         type=Path,
         default=Path("docs", "ARCH.yaml"),
         help="Path to ARCH.yaml (default: ./docs/ARCH.yaml). Sibling ARCH__*.yaml "
-        "files in the same directory are validated automatically.",
+        "files in the same directory are validated automatically. Passing an "
+        "ARCH__<container>.yaml shard instead resolves to its ARCH.yaml "
+        "sibling and validates the same way.",
     )
     args = parser.parse_args(argv)
     return validate_all(args.path)

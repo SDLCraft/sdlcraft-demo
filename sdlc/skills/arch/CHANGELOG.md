@@ -7,6 +7,22 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.23 (2026-09-20) — Phase 8 commits the run when the project opted in (auto-commit, CLAUDE.md 20)
+
+- New close step after `record-run`, before the card: `python .claude/sdlc/autocommit.py commit --skill arch --invocation "<as typed>" --summary "<one line>"` (mechanics in `setup/references/auto-commit.md`), its one printed line as the card's new `Commit:` row; runs on every exit path, never a blocker. The restated self-review paragraph is now a pointer at `lessons-capture.md`, paying for the lines (AUTHORING §19 ceilings unchanged). Pinned by `setup/_smoke/autocommit_lockstep_selftest.py`.
+
+## 1.22 (2026-09-19) — Cross-check 32 accepts a callee named in its own component's qualified form, `--path` on an ARCH__<cid>.yaml shard validates the family, and Phase 8 distinguishes own-toolchain
+
+- `check_unreachable_work_units` (cross-check 32) also accepts a callee named in its OWN component's qualified form `<component_id>.<unit>`; a same-name mention under a different component's prefix still does not count as a call. Pinned by fixture `38_unreachable_unit` + `seam_and_path_selftest.py` (ledger IMP-189).
+- `validate_all()` no longer applies the system Arch model to an `ARCH__<cid>.yaml` shard given to `--path`: a shard path redirects to its `ARCH.yaml` sibling and validates the whole family, mirroring test/task; a shard whose system file is missing gets a named exit-2 message; `[OK]` prints the system path. Pinned by the `39_shard_provenance/ARCH__backend-api.yaml` row (ledger IMP-199).
+- Phase 8's index refresh distinguishes own-toolchain (marker present, no `docs_index` helper: run the project's own docs-hook command from `.claude/settings.json` and name it) from never-ran-setup (no marker: the only genuine no-op), per setup's helper-resolution.md; the statusboard sentence is unchanged. Pinned by setup's `_smoke/index_refresh_lockstep_selftest.py` (ledger IMP-200).
+
+- The `Phase 3 (first step) — Repo evidence` block keeps only its skill-specific lines and a consumer-safe pointer (`${CLAUDE_SKILL_DIR}/../setup/references/repo-evidence.md`); the fifteen lines setup's canonical file already states are gone (14 lines shorter; the lint_context_budget ceiling follows). `lint_skill_paths.py` now flags a bare `sdlc/skills/<x>/references/<y>.md` path in shipped markdown (ledger IMP-181).
+
+- Every cross-skill reference pointer in SKILL.md and references/ now uses the consumer-safe `${CLAUDE_SKILL_DIR}/../<skill>/references/<file>.md` form instead of a bare `sdlc/skills/...` path that resolves only in the plugin repository; `lint_skill_paths.py` holds it (ledger IMP-206).
+
+- No shipped runtime file (SKILL.md, references/, assets/) carries a ledger-id citation any more: bare `(IMP-NNN)` / `(LSN-NNN)` parentheticals are gone, history sentences keep their rule and their reason without the ticket, close-card examples show the `LSN-NNN` placeholder; `lint_context_budget.py` counts IMP- and LSN- ids with a ceiling of 0 per skill (ledger IMP-182).
+
 ## 1.21 (2026-09-17) — The write-time stamp is written down, the shared provenance helper declares the version fields it gates, and Phase 1 is the shared four-state trigger
 
 Ledger IMP-178. merge-validate.md gains the one-sentence stamp rule (new writes stamp `arch_version` "2.0" — the schema already did, the reference never said so), and `check_provenance_staleness`'s def line carries `# version-floor-fields: arch_version, arch_container_version`, the declared mapping `lint_version_floors.py` reads for a helper whose bare `version` parameter serves both the system file and every container — declared, never guessed; a floor with neither a traceable field nor an annotation stays red in that lint.

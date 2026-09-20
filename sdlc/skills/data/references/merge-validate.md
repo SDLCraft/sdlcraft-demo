@@ -148,7 +148,7 @@ reject the DATA-MODEL if `metadata.status != "complete"` OR if
 `validate_schema.py` exits non-zero. The one exception is to the exit code,
 never to the status: a failure every check of which
 `doctor.py --artifact docs/DATA-MODEL.yaml` reports as accepted deviance does
-not reject (`sdlc/skills/repair/references/accepted-deviance.md`).
+not reject (`${CLAUDE_SKILL_DIR}/../repair/references/accepted-deviance.md`).
 
 ## Cross-check recovery flows
 
@@ -213,4 +213,4 @@ Once Phase 8's refresh has run:
 > the validator prints gets translated, not pasted: coverage gaps, warnings and
 > cross-check findings become one plain sentence each (what happened, why it
 > matters, what to do). See CLAUDE.md section 14 and
-> `sdlc/skills/prd/references/reporting-to-the-user.md`.
+> `${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`.

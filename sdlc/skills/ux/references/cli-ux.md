@@ -174,8 +174,8 @@ re-typed) inside every `cli_command` surface's `layout.cli_args`. Same
 `CLIArg` shape as `layout.cli_args` below — name/kind/type/required/
 description at minimum; a global flag's `kind` is almost always
 `flag`. At `ux_version >= 3.0` an entry that is not a mapping in this
-shape is rejected (a warning below that floor — CLAUDE.md section 10,
-ledger IMP-009). Answer `none - every flag is per command` when the
+shape is rejected (a warning below that floor — CLAUDE.md section 10).
+Answer `none - every flag is per command` when the
 CLI truly has no cross-cutting flags.
 
 ## Per-CLI-command (`cli_command`) surface contents
@@ -208,8 +208,7 @@ exit_conditions:
 `code` must be a key of `UX.yaml.cli.exit_codes` — the validator checks
 it exists there, so the code's meaning is recorded once, never
 re-described per surface. A plain-string entry (the pre-3.0 shape) is
-accepted with a warning below the floor and rejected at or above it
-(ledger IMP-009).
+accepted with a warning below the floor and rejected at or above it.
 
 ### `layout.cli_args`
 
@@ -333,5 +332,4 @@ don't leave a required flag's `type` or `description` blank on the assumption a
 later stage will fill it. (Seam: SK-34 — the task-side `cli_contract` field.)
 At `ux_version >= 3.0` the shape is enforced, not just documented: a
 `cli_args` or `global_flags` entry that is not a mapping is rejected by the
-validator (a warning below that floor) before it ever reaches `task`'s embed
-(ledger IMP-009).
+validator (a warning below that floor) before it ever reaches `task`'s embed.

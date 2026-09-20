@@ -8,7 +8,7 @@ description: >
   --hash/--drift/--stale/--items/--stamp), a Write|Edit PostToolUse hook that refreshes the index on
   every docs/ edit, the slice-don't-slurp access rule, and the CLAUDE.md
   pointer — plus the shared helpers every later skill calls (lessons.py,
-  findings.py, bump_artifact.py, repo_scan.py) and their ambient rules. Trigger only on
+  findings.py, bump_artifact.py, repo_scan.py, autocommit.py) and their ambient rules. Trigger only on
   /sdlc:setup or a direct request to set up the sdlc docs toolchain / docs
   index. Idempotent — safe to re-run; a re-run also upgrades previously
   installed helpers.
@@ -55,7 +55,8 @@ reconcile-chain list `--stale` after a re-run.
 | `.claude/rules/sdlc-findings.md` | When and how to record a finding (the ambient analog of the lessons rule). |
 | `.claude/sdlc/bump_artifact.py` | The `metadata.<name>_version` + changelog bumper the artifact skills and `repair` share (copied from the sibling `repair` skill). |
 | `.claude/sdlc/repo_scan.py` | Bounded evidence sweep over the project's OWN files, one domain per skill (`--domain prd\|ux\|design\|data\|api\|arch\|test\|task`, `--json`). Finds the migrations, route files, Dockerfiles, token files and test layout already on disk so a brownfield project's Phase-3 pre-fill starts from what exists rather than from the upstream specs alone. Costs are capped: the file list comes from `git ls-files` (so `.gitignore` is honoured for free), files and bytes per file are capped, and an excerpt is one trimmed line - it never emits a file body. Everything it returns is a CANDIDATE tagged `inferred`, confirmed item by item in the interview. |
-| `.claude/sdlc/sdlc-plugin.json` | Plugin-version marker, also naming the version of every helper installed (`helpers: {docs_index, lessons, findings, bump_artifact}`), so recorded runs, lessons and findings say what they ran against. Carries the `telemetry` block too — the answer to step 4's sharing question, seeded `off`, plus the batch thresholds and the project's opaque ids: a random `project_uuid` minted on the first delivery (stable across a move, and with no path to guess back out of it) beside the legacy path-hash `project_id`. A re-run preserves it verbatim. Also records the installed `edition` — `free` when test, task and code do not ship beside setup, with the free build's `homepage` as `pro_url` — which the statusboard reads to label those stages instead of routing to them. |
+| `.claude/sdlc/sdlc-plugin.json` | Plugin-version marker, also naming the version of every helper installed (`helpers: {docs_index, lessons, findings, bump_artifact, …, autocommit}`), so recorded runs, lessons and findings say what they ran against. Carries the `telemetry` block too — the answer to step 4's sharing question, seeded `off`, plus the batch thresholds and the project's opaque ids: a random `project_uuid` minted on the first delivery (stable across a move, and with no path to guess back out of it) beside the legacy path-hash `project_id`. A re-run preserves it verbatim. Likewise the `auto_commit` block — the answer to step 4's second question (`mode: on \| off`, seeded `off`, `decided_on`), preserved verbatim on re-run. Also records the installed `edition` — `free` when test, task and code do not ship beside setup, with the free build's `homepage` as `pro_url` — which the statusboard reads to label those stages instead of routing to them. |
+| `.claude/sdlc/autocommit.py` | The close-step committer (CLAUDE.md 20; copied from this skill). When the project opted in, every skill's close runs `python .claude/sdlc/autocommit.py commit …` as its last action: it stages only that skill's own files and commits them as `<the command as typed> → <what changed>`. Never pushes, never `git add -A`, never a run failure. `autocommit.py mode [--set on\|off]` reads or changes the answer. Mechanics: `references/auto-commit.md`. |
 | `CLAUDE.md` (`## SDLC Documents`) | Slice-first access note + the `docs/INDEX.yaml` pointer. Coexists with the per-artifact bullets `prd`/`ux`/`data`/`arch` add to the same section. |
 | `docs/INDEX.yaml` | Generated once now (no-op if `docs/` is empty). |
 
@@ -72,6 +73,7 @@ have the sdlc plugin installed, and the toolchain upgrades only when
 | `SKILL.md` | This file — the workflow. |
 | `docs_index.py` | The generator that gets copied into the target. Read it only if asked to extend index coverage. |
 | `wire_setup.py` | Deterministic installer that performs all of the above. The skill calls it; you do not hand-edit the targets. |
+| `autocommit.py` | The close-step committer copied into the target (CLAUDE.md 20); `references/auto-commit.md` is the rule every skill's close phase points at. |
 | `assets/sdlc-docs-access.md` | The rule-file template copied into the target. |
 | `assets/sdlc-output-glossary.md` | The user-facing glossary copied into the target. |
 | `assets/sdlc-lessons.md` | The lessons rule-file template copied into the target. |
@@ -131,7 +133,7 @@ ONLY if the user explicitly says they want the stock toolchain to replace the
 project's own — that form also removes the project's foreign index hook from
 `settings.json`.
 
-### 4 — Ask once whether lessons may be shared
+### 4 — Ask once: may lessons be shared, and should every run commit itself
 
 The plugin learns from real runs. When a SKILL misbehaves, the agent records an
 `LSN-NNN` lesson in `.claude/skills-state/sdlc-lessons.yaml` — about the plugin,
@@ -189,6 +191,48 @@ If the user asks later, `python .claude/sdlc/lessons.py consent` prints the
 current setting and `consent --set off` stops it for good;
 `SDLC_LESSONS_TELEMETRY=off` in the environment overrides everything.
 
+**The second question: should every run commit itself** (CLAUDE.md 20). Ask
+it in the SAME `AskUserQuestion` call as the sharing question when both are
+pending (two questions, one call), alone when only this one is. The answer is
+a standing permission — the helper's `git commit` runs from inside a script,
+where no permission prompt will ever see it — so this too is a consent notice:
+use the exact header, question and option text below **verbatim**.
+
+- **header:** `Auto-commit`
+- **question:**
+  > Should every `/sdlc:*` run commit its own files when it finishes? When on,
+  > each run ends with one `git commit` covering only the pipeline's own files —
+  > the spec it wrote under `docs/`, `docs/INDEX.yaml`, its state file and the
+  > shared queues under `.claude/skills-state/`, the generated statusboard, and
+  > (for code generation) the source files it generated — with the message
+  > `<the command you typed> → <what changed>`. It never pushes, never stages
+  > anything else, never rewrites history, and skips the commit when nothing
+  > changed; other changes in your working tree are left as they are. Change
+  > this anytime with `python .claude/sdlc/autocommit.py mode --set off`.
+  > Commit each run automatically?
+- **options** (exactly these two — the tool adds "Other" on its own):
+  1. `Yes, commit after every run (Recommended)` — "One commit per run, named
+     by the command that produced it; drafts and aborted runs are committed
+     too, marked as such."
+  2. `No, I commit myself` — "Nothing is committed on its own; the close card
+     names the files each run wrote."
+
+Before asking, run `python .claude/sdlc/autocommit.py mode` (the helper was
+installed in step 3) and read its `git:` line. Then record the answer:
+
+```bash
+python .claude/sdlc/autocommit.py mode --set <on|off>
+```
+
+**Do not ask, and do not run the command, when:** the marker already carries
+an `auto_commit.decided_on` (answered on an earlier run — never re-litigate
+it), the session is non-interactive, or the `git:` line says the project is
+not a repository — in that last case say so in the close card's `Attention:`
+row and name `python .claude/sdlc/autocommit.py mode --set on` for after
+`git init`. `SDLC_AUTO_COMMIT=off` in the environment overrides everything.
+Every skill's close then commits, or not, by reading this answer; none of
+them asks again. Mechanics: `references/auto-commit.md`.
+
 ### 5 — Report + the one caveat that matters
 Summarize what was installed and the action log. Then flag the timing caveat:
 
@@ -204,7 +248,7 @@ Suggest the user restart the session (or `/hooks` to verify) if they want the
 automatic hook active immediately.
 
 **Self-review & record the run** (CLAUDE.md 15; doctrine:
-`sdlc/skills/lesson/references/lessons-capture.md`). `setup` has no state file
+`${CLAUDE_SKILL_DIR}/../lesson/references/lessons-capture.md`). `setup` has no state file
 and no interview, so there are no `lesson_notes` to drain — answer the
 self-review questions from that file for this run (did a bundled script fail on
 this platform? did an instruction here mislead you? did the installer clobber
@@ -231,18 +275,32 @@ log, never placeholders. On `wire_setup.py` exit 2 use `--outcome failed` and
 still pass `wire_exit=2`. If the helper was not installed (the copy step itself
 failed), skip this and say so in `Attention:`.
 
+**Commit the run** (CLAUDE.md 20; `references/auto-commit.md`) — the last
+action before the card, never a blocker. A re-run at the same version prints
+`nothing to commit`, which is correct:
+
+```bash
+python .claude/sdlc/autocommit.py commit --skill setup --invocation "/sdlc:setup" \
+  --summary "plugin <version> wired - helpers, rules, docs hook, INDEX.yaml"
+```
+
+Its one printed line is the card's `Commit:` row; off, or helper absent → no row.
+
 **Close with the card** (CLAUDE.md 14; canonical shape:
-`sdlc/skills/prd/references/reporting-to-the-user.md`). The timing caveat above
+`${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`). The timing caveat above
 is what belongs in `Attention:` — do not drop it.
 
 ```
 -- /sdlc:setup - what you have now -------------------
-Wrote:     .claude/sdlc/docs_index.py + lessons.py + findings.py + bump_artifact.py,
-           .claude/rules/*, docs/INDEX.yaml, the docs hook in .claude/settings.json,
-           the static CLAUDE.md section, the plugin-version marker
+Wrote:     .claude/sdlc/docs_index.py + lessons.py + findings.py + bump_artifact.py
+           + autocommit.py, .claude/rules/*, docs/INDEX.yaml, the docs hook in
+           .claude/settings.json, the static CLAUDE.md section, the plugin-version marker
 Status:    complete - /sdlc:prd can run
 Sharing:   lesson reports are {sent automatically | offered each time | not
            shared} - change it with: python .claude/sdlc/lessons.py consent
+Commits:   every /sdlc:* run commits its own files: {on | off} - change it
+           with: python .claude/sdlc/autocommit.py mode --set on|off
+Commit:    {a1b2c3d  /sdlc:setup → <summary> | nothing to commit — only when auto-commit is on}
 Attention: hooks load at session start, so the automatic index refresh begins
            next session; every skill also refreshes the index itself, so
            nothing is stale in the meantime
@@ -297,4 +355,4 @@ versions, and refreshes the index. Use `--dry-run` to preview.
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.20"
+skill_version: "1.22"

@@ -5,7 +5,7 @@ Read whenever the agent hits a situation off the happy path.
 ## Input-side (PRD / UX)
 
 - **`docs/UX.yaml` missing** → NOT automatically a stop. Resolve applicability
-  first (`sdlc/skills/prd/references/optional-stages.md`): if
+  first (`${CLAUDE_SKILL_DIR}/../prd/references/optional-stages.md`): if
   `PRD.pipeline_scope.ux.applicable` is `false`, this project has no UX and no
   visual design — go to Phase 4 step 0 and record DESIGN as not applicable. If
   there is no scope entry, ask once; on "yes, no UX" do the same, on "no" stop
@@ -132,7 +132,7 @@ When `/sdlc:design` is re-invoked after `docs/DESIGN.yaml` exists and an upstrea
 moved, Phase 2 runs the consolidated **delta-review** (added / removed / modified
 PRD or UX ids) before the interview, comparing recorded `metadata.upstream_
 provenance` hashes to current. Full mechanics:
-`sdlc/skills/ux/references/upstream-reconciliation.md` (the canonical §7 file —
+`${CLAUDE_SKILL_DIR}/../ux/references/upstream-reconciliation.md` (the canonical §7 file —
 don't duplicate it here).
 
 ## Resume with stale state

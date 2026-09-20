@@ -172,7 +172,7 @@ python .claude/sdlc/lessons.py add --skill test --kind schema_gap \
   footer — except a ledger-shaped state (`code` today), which nothing
   re-stamps between runs: there the installed footer, when it disagrees, is
   recorded alongside as `footer_skill_version` rather than replacing the
-  ledger's number (ledger IMP-144).
+  ledger's number.
 - Severity: `blocker` = the run could not finish correctly; `degraded` =
   finished with rework or friction; `cosmetic` = polish. On a project that
   opted in to sharing, severity also decides **when** the lesson reaches the
@@ -286,7 +286,7 @@ Add a `Lessons:` row ONLY when this run captured something — recorded
 lessons and/or noted harness observations:
 
 ```
-Lessons:   1 recorded (LSN-004) - about this skill, for its maintainer;
+Lessons:   1 recorded (LSN-NNN) - about this skill, for its maintainer;
            noted 1 harness observation (see Attention:) - nothing for you
            to do
 ```

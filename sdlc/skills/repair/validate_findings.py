@@ -30,11 +30,30 @@ Beyond field types it checks the invariants that keep the queue trustworthy:
     finding in this file. A wontfix with located_stage: code and no
     stale_tasks is WARNED (never blocked): the closer named the cause but
     forgot the task id code needs to schedule the rebuild.
+  * Version-gated on its own, higher floor (findings_file_version >= 3 —
+    above the version-2 corpus this check must not retroactively block,
+    CLAUDE.md section 10): a re-invoke resolution with an empty
+    artifacts_touched, below findings_file_version 3 a WARNING only —
+    doctor.py's "should be reopened" hint narrows to the upstream this
+    field names, so an empty list falls back to its old unfiltered hint.
+  * Same higher floor, same reason (findings_file_version >= 3, one floor -
+    not a second one): a RESOLVED finding whose fix changed a named symbol
+    (symbols_changed non-empty) or whose mode is re-invoke, carrying an empty
+    resolution.sites_considered - the forward-propagation checklist persisted
+    as a record instead of only printed (ledger IMP-196). A `deferred` entry
+    with no `reason`, or an `unaffected` entry with no `how`, is gated the
+    same way.
+  * `findings.py validate --upgrade` is the only writer that ever raises an
+    existing queue's findings_file_version - it does so only when every gated
+    check above already passes with ZERO warnings (not merely zero errors).
   * Legacy stage spellings ('data-model' -> data, 'test-strategy' -> test)
     are read as their canonical form with a WARNING, never rejected.
   * resolution.handoff (the notes a re-invoke leaves for the reconcile runs it
-    owes) is checked as WARNINGS only - its shape, a non-re-invoke mode, and
-    a note addressed to a file the finding does not owe.
+    owes) is checked as WARNINGS only - its shape, a non-re-invoke mode, a
+    note addressed to a file the finding does not owe, a malformed `retired`
+    token list, and a note that enumerates two or more foreign TST-/TSK- ids
+    with retirement wording and no `retired` list (the FND-104 shape, ledger
+    IMP-193).
   * A finding that pins `expected_count` with no detected_by is WARNED, never
     rejected: doctor.py accepts a pinned count only from a finding that names
     its check (references/accepted-deviance.md).
@@ -143,6 +162,31 @@ EXPECTED_COUNT_RE = re.compile(r"expected_count:\s*(\d+)")
 # validating; they just hear about it.
 GATED_VERSION = 2
 
+# IMP-195: doctor.py's "should be reopened" hint narrows to the upstream a
+# re-invoke resolution's artifacts_touched actually names; an empty list
+# falls back to the old unfiltered hint, silently. This check is floored
+# ABOVE GATED_VERSION on its own (CLAUDE.md section 10, "floor above the
+# corpus"): the corpus already has resolved re-invoke findings stamped
+# findings_file_version 2 with no artifacts_touched recorded (findings.py's
+# NEW_FILE_VERSION has stamped "2" since before this check existed), and a
+# floor equal to GATED_VERSION would retroactively block them the instant
+# this check shipped.
+ARTIFACTS_TOUCHED_GATED_VERSION = 3
+
+# IMP-196: `resolution.sites_considered` (the forward-propagation checklist,
+# persisted) reuses this SAME floor - one gated version for both fields, not
+# a fourth constant, since both exist to keep a re-invoke resolution honest
+# about what it actually touched vs. only looked at.
+SITES_CONSIDERED_GATED_VERSION = ARTIFACTS_TOUCHED_GATED_VERSION
+
+# IMP-193: an authored enumeration of "which items use this retired token" is
+# unreliable in both directions (FND-104 named five tests without the token
+# and missed five that had it; FND-107 repeated the pattern) - warn when a
+# handoff note reads like one and carries no `retired` list instead. Warn-only,
+# no version gate: a new, hand-written field, not a blocking rule.
+RETIRE_VOCAB_RE = re.compile(r"\b(retired|retire|removed|renamed|no longer)\b", re.IGNORECASE)
+FOREIGN_ID_RE = re.compile(r"\b(?:TST|TSK)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\b")
+
 # Spellings older writers used for two stages. Read as the canonical stage,
 # reported as a warning, never rejected: the aicf queue carried them.
 LEGACY_STAGE_ALIASES = {
@@ -226,6 +270,25 @@ class Hop(str, Enum):
     downstream = "downstream"
 
 
+class SiteDisposition(str, Enum):
+    edited = "edited"
+    resliced = "resliced"
+    unaffected = "unaffected"
+    deferred = "deferred"
+
+
+class SiteConsidered(BaseModel):
+    """One artifact the forward-propagation checklist named, and what became
+    of it (IMP-196). Distinct from PropagationHop: a hop records a place the
+    fix DID land, verified; a site_considered entry records that an artifact
+    was CHECKED, whatever the outcome - including "looked at, unaffected"."""
+    model_config = ConfigDict(extra="allow")
+    artifact: str
+    disposition: SiteDisposition
+    reason: Optional[str] = None
+    how: Optional[str] = None
+
+
 class SurfacedAt(BaseModel):
     model_config = ConfigDict(extra="allow")
     qualified_task: Optional[str] = None
@@ -255,6 +318,7 @@ class Resolution(BaseModel):
     propagation: Optional[List[PropagationHop]] = None
     fields_changed: Optional[List[str]] = None
     symbols_changed: Optional[List[str]] = None
+    sites_considered: Optional[List[SiteConsidered]] = None
     summary: Optional[str] = None
     # What the localization walk concluded each owed re-invocation should do,
     # per downstream item: [{artifact: docs/<file>, key: <item key | null>,
@@ -414,6 +478,11 @@ def cross_checks(doc: FindingsFile, version: int) -> Tuple[List[str], List[str]]
         f" (not blocking: this file is version {version}; it blocks from "
         f"findings_file_version {GATED_VERSION})"
     )
+    touched_gated = errors if version >= ARTIFACTS_TOUCHED_GATED_VERSION else warnings
+    touched_gate_note = "" if version >= ARTIFACTS_TOUCHED_GATED_VERSION else (
+        f" (not blocking: this file is version {version}; it blocks from "
+        f"findings_file_version {ARTIFACTS_TOUCHED_GATED_VERSION})"
+    )
     ids = [f.fnd_id for f in doc.findings]
 
     dupes = sorted({i for i in ids if ids.count(i) > 1})
@@ -534,6 +603,37 @@ def cross_checks(doc: FindingsFile, version: int) -> Tuple[List[str], List[str]]
                 f"names no command sequence leaves the user guessing which skills to re-run; "
                 f"list them in pipeline order{gate_note}"
             )
+        if res.mode is Mode.re_invoke and not res.artifacts_touched:
+            touched_gated.append(
+                f"{fid}: mode=re-invoke but artifacts_touched is empty - doctor.py's "
+                f"'should be reopened' hint narrows to the upstream this resolution actually "
+                f"touched; an empty list falls back to today's unfiltered hint{touched_gate_note}"
+            )
+
+        # ---- sites_considered (IMP-196; reuses the artifacts_touched floor,
+        # never a fourth version) ---------------------------------------------
+        trigger = None
+        if f.status is Status.resolved and res.mode is Mode.re_invoke:
+            trigger = "mode=re-invoke"
+        elif f.status is Status.resolved and (res.symbols_changed or []):
+            trigger = "symbols_changed is non-empty"
+        if trigger and not res.sites_considered:
+            touched_gated.append(
+                f"{fid}: resolution.sites_considered is empty but {trigger} - every artifact the "
+                f"forward-propagation checklist named must be recorded edited | resliced | "
+                f"unaffected | deferred before the finding closes{touched_gate_note}"
+            )
+        for i, sc in enumerate(res.sites_considered or []):
+            if sc.disposition is SiteDisposition.deferred and not (sc.reason or "").strip():
+                touched_gated.append(
+                    f"{fid}: resolution.sites_considered[{i}] ({sc.artifact}) is deferred with no "
+                    f"reason - say why it stays untouched on purpose{touched_gate_note}"
+                )
+            if sc.disposition is SiteDisposition.unaffected and not (sc.how or "").strip():
+                touched_gated.append(
+                    f"{fid}: resolution.sites_considered[{i}] ({sc.artifact}) is unaffected with no "
+                    f"how - a sweep count stands for the reason (e.g. \"sweep <token>: 0 hits\"){touched_gate_note}"
+                )
         if res.mode is Mode.additive:
             # Additive means repair authored every new downstream item itself,
             # so nothing is owed to a re-invocation (ledger IMP-060).
@@ -623,6 +723,26 @@ def handoff_problems(fid: str, res: Resolution) -> List[str]:
                        f"verify before it writes), so a cold session knows which notes to check first")
         elif str(basis) not in HANDOFF_BASES:
             out.append(f"{fid}: resolution.handoff[{i}] basis {basis!r} is not measured | inferred")
+
+        # ---- retired: the literal token, not an authored consumer list (IMP-193) --
+        note_text = str(h.get("note") or "")
+        retired = h.get("retired")
+        if retired is not None:
+            if not (isinstance(retired, list) and retired
+                    and all(isinstance(t, str) and t.strip() for t in retired)):
+                out.append(f"{fid}: resolution.handoff[{i}].retired should be a list of one or more "
+                           f"non-empty token strings - as written, no reconcile sweep can read it")
+        else:
+            ids = {m.group(0) for m in FOREIGN_ID_RE.finditer(note_text)}
+            ids.discard(str(h.get("key") or ""))
+            if len(ids) >= 2 and RETIRE_VOCAB_RE.search(note_text):
+                out.append(
+                    f"{fid}: resolution.handoff[{i}] note names {len(ids)} other TST-/TSK- id(s) "
+                    f"({join_ids(sorted(ids), 5)}) and reads like a retirement, but carries no "
+                    f"retired list - naming specific consumers here is the FND-104 shape (wrong in "
+                    f"both directions); put the retired token(s) in handoff[{i}].retired and let the "
+                    f"reconcile's own sweep find the real consumers"
+                )
     return out
 
 

@@ -175,7 +175,7 @@ run owns, so the loop picks it up next — its Phase 2 walk is short (the
 finding that minted it is the localization), its Phase 3 gate offers *decide
 it now* at position 1, and it lands in `findings_worked` like any other. A run
 invoked with named findings (`/sdlc:repair FND-003`) works the ones it minted
-too; they are not "other findings" (ledger IMP-153).
+too; they are not "other findings".
 
 **`EXIT`** (any free-text field, any phase): persist the state file with
 `status: aborted`, confirm which artifacts were already edited, run
@@ -197,7 +197,7 @@ The second is the **pre-run stale snapshot**: its `provenance.stale` lists
 every artifact/upstream pair that already owed a reconcile before this run
 wrote anything. Surgical step 5 stamps only pairs absent from it, and Phase 5
 reads a leftover `--stale` row that is in it as that owed reconcile, not as a
-missed stamp (ledger IMP-099).
+missed stamp.
 
 The first runs every skill validator against its canonical artifact, every
 `TASKS__*.json` shard, `crosscheck_artifacts.py`, and the docs-index dangling
@@ -226,7 +226,7 @@ consumable) but records nothing for it, and when every failure is owed its
 row again; the close card counts it as work that finding still owes (Phase 6,
 "The `Findings:` and `Status:` rows"). Before this label existed, every sweep between two hops
 minted the same failure afresh, because its first defect line moved with each
-hop while the cause did not (ledger IMP-077). Skipped checks (artifact absent,
+hop while the cause did not. Skipped checks (artifact absent,
 tool absent) are reported as skipped and never become findings.
 
 Copy the second run's per-check exits into the state file's `baseline_checks`
@@ -261,7 +261,7 @@ the work:
 
 **Blast-radius checklist.** For every located symbol, compute — never guess —
 the inbound sites, and print them **grouped by artifact** as a checklist the
-Phase-4 fix must tick off (edited / re-sliced / unaffected):
+Phase-4 fix must tick off and PERSIST as `resolution.sites_considered`:
 
 ```bash
 python .claude/sdlc/docs_index.py --refs <symbol>
@@ -272,17 +272,18 @@ Every `python .claude/sdlc/docs_index.py …` in this file runs the copy
 run: an installed copy older than the plugin's counts as absent. The bare
 regenerate in Phase 5 is the exception that file names.
 
-**Retired-token sweep.** A fix that REMOVES or RENAMES a named token (an input
+**Token sweep.** A fix that REMOVES, RENAMES, or ADDS a named token (an input
 parameter, a CLI flag, a field, an enum member, a literal) has sites `--refs`
-cannot see: nothing references a name that no longer exists. Sweep the corpus
-for the old name with a plain text search — `grep -rn <token> docs/` (or the
-Grep tool over `docs/`); the index's `--find` matches symbols, not prose, so
-it cannot do this sweep — and add every hit to the checklist, changelog lines
-excepted. The typical miss is a
-sibling test in the very file you are about to edit (aicf LSN-074: five
-artifacts reconciled, one test in the edited strategy file still passing the
-removed parameter). The close card names the token, the hit count and each
-hit's disposition (ledger IMP-091).
+cannot see — an added field's shape is typically restated in prose before any
+reader declares it a structured reference. Sweep the corpus with a plain
+text search — `grep -rn <token> docs/` (or the Grep tool over `docs/`); the
+index's `--find` matches symbols, not prose, so it cannot do this sweep —
+and add every hit to the checklist (its own `sites_considered` entry),
+changelog lines excepted. The typical miss is a
+sibling test in the very file you are about to edit — five artifacts
+reconciled, one test in the edited strategy file still passing the removed
+parameter. The close card names the token, the hit count and each
+hit's disposition.
 
 Until shards and named symbols are indexed, `--refs` resolves **corpus ids
 only** (`FR-`, `WKF-`, `ENT-`, `SCR-`, `TST-`, `TSK-`, … families defined in
@@ -344,7 +345,7 @@ recurrence default changes which mode leads, never which modes are offered
 (`references/forward-propagation.md` says exactly that: "never a refusal of the
 in-run modes, just a changed default"), while the additive rule rests on a
 measured cost — routing a fully-determined item to `re-invoke` costs the user
-two interviews and discards the walk (aicf LSN-019 / LSN-040).
+two interviews and discards the walk.
 
 `references/back-propagation.md` names when to **ask rather than decide**:
 `missing_requirement` findings, two equally defensible stages, any fix that
@@ -369,7 +370,7 @@ only when it needs a decision this run cannot get — and a modelling choice
 inside the located artifact itself (which component owns a new work_unit,
 what it is called) is one this run CAN get: ask it at Phase 3, then write it.
 A new finding is cheap to write and expensive to redeem: the next skill re-derives the cross-artifact
-walk cold, with no guarantee of the same reading (aicf LSN-019 / LSN-040).
+walk cold, with no guarantee of the same reading.
 
 - **`surgical`** (content) — scripted, in this order, no hand edits to any
   task JSON:
@@ -385,12 +386,12 @@ walk cold, with no guarantee of the same reading (aicf LSN-019 / LSN-040).
      and name each one in `artifacts_touched`;
   3. re-derive any prose the change invalidated (CLAUDE.md §8);
   4. walk the rest of the checklist by hand — every inbound site that is not a
-     task embed is edited (with its own bump) or explicitly marked unaffected.
-     When the fix retires or renames a named token, sweep the corpus for it
-     first (`grep -rn <token> docs/` - a text search, never the index's
-     symbol-only `--find`) and add every hit: the sibling test in the file you
-     just edited is the
-     typical miss (Phase 2, "Retired-token sweep");
+     task embed is edited (with its own bump), unaffected (`how`), or
+     deferred (`reason`) — each a `sites_considered` entry. When the fix
+     retires, renames, or ADDS a named token, sweep the corpus for it first
+     (`grep -rn <token> docs/` - a text search, never the index's symbol-only
+     `--find`) and add every hit: the sibling test or prose restatement in
+     the file you just edited is the typical miss (Phase 2, "Token sweep");
   5. `python .claude/sdlc/docs_index.py --stamp docs/<artifact> --upstream docs/<reviewed-upstream> --hold-upstream docs/<other-recorded-upstream>`
      (one flag per file; each flag takes exactly one) for every artifact
      reconciled by hand, upstream-first — a stamp moves the stamped file's own
@@ -399,8 +400,8 @@ walk cold, with no guarantee of the same reading (aicf LSN-019 / LSN-040).
      `${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks:
      `--hold-upstream` needs `docs_index.py` capability 6, and an older
      install rejects it with exit 2 (the plugin's form is
-     `"${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs`; ledger
-     IMP-088, IMP-108). **`--upstream` only for a pair that was fresh before
+     `"${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs`).
+     **`--upstream` only for a pair that was fresh before
      this run's first write.** A stamp claims that EVERY delta between the
      recorded upstream and the current one was reviewed, and this run
      reviewed one finding's change. It also re-hashes EVERY upstream the
@@ -412,8 +413,7 @@ walk cold, with no guarantee of the same reading (aicf LSN-019 / LSN-040).
      delta to `/sdlc:<skill> … --reconcile`, and stamping it now would forge
      that review. An artifact with no fresh reviewed pair is not stamped at
      all. Name each held pre-existing pair on the close card's `Attention:`
-     row and route the owed reconcile in `Next:` (ledger IMP-099, IMP-106,
-     aicf LSN-080). **Then read what the stamp printed:** a `re-stamped
+     row and route the owed reconcile in `Next:`. **Then read what the stamp printed:** a `re-stamped
      <upstream>: … since the last stamp - reviewed by this run?` line names
      an upstream it re-hashed that had moved. For an upstream this run
      reviewed that is expected; for any other a hold is missing, so restore
@@ -431,8 +431,8 @@ walk cold, with no guarantee of the same reading (aicf LSN-019 / LSN-040).
      pair the Phase 2 snapshot listed**: the embed still moves (a mechanical
      copy, not a review), but the shard's stamp for that upstream stays, so
      the owed `--reconcile` still sees the whole delta — the re-slice's own
-     stamp refresh would otherwise forge it exactly as a hand `--stamp` would
-     (IMP-099). A pre-existing embed drift on such a pair is a baseline
+     stamp refresh would otherwise forge it exactly as a hand `--stamp` would.
+     A pre-existing embed drift on such a pair is a baseline
      failure for Phase 5, not this run's to clear;
   7. verify (Phase 5) — `reslice_embeds.py --check` green, the validators
      bare, and `docs_index.py --stale` listing nothing this run reconciled —
@@ -501,8 +501,8 @@ walk cold, with no guarantee of the same reading (aicf LSN-019 / LSN-040).
   alone": a `missing_requirement`, a product-behaviour change, a walk ending
   at PRD) becomes a sibling finding for a later run, and the close card says
   so. The same holds for any defect the walk surfaces BESIDE the one being
-  fixed (ledger IMP-153, aicf LSN-086: an adjacent contradiction was routed to
-  "file a new finding" with the walk loaded and the user at the gate). Never
+  fixed — an adjacent contradiction was routed to
+  "file a new finding" with the walk loaded and the user at the gate. Never
   under-deliver silently, and never interleave two findings' surgical
   sequences: the second starts after the first's Phase 5, so each stamp
   claims only what its own run reviewed.
@@ -544,7 +544,7 @@ walk cold, with no guarantee of the same reading (aicf LSN-019 / LSN-040).
   measured note as read and VERIFIES an inferred one against the cited
   artifact before writing - one siting recommendation written by analogy was
   wrong against the very files its note cited, and nothing marked it as a
-  guess (ledger IMP-082). Never mix the two registers in one note. The
+  guess. Never mix the two registers in one note. The
   `bump_artifact.py --summary` line is the other half — every reconcile's
   `--drift` quotes it as the upstream's "why" — so write that summary for the
   reader who lacks this session.
@@ -613,8 +613,9 @@ If verification cannot run at all, nothing is marked `resolved`.
 
 Write each finding's `resolution` block (`by`, `at`, `located_stage`, `mode`,
 `artifacts_touched`, `downstream_rerun`, `stale_tasks`, `fields_changed` /
-`symbols_changed` when known, `summary`) **and its `propagation` hops** — one
-per place the fix had to land, each with `verified_at` and `how`:
+`symbols_changed` when known, `sites_considered` when required, `summary`)
+**and its `propagation` hops** — one per place the fix had to land, each
+with `verified_at` and `how`:
 
 ```yaml
 propagation:
@@ -668,19 +669,17 @@ when learned by trial (canonical: `FINDINGS.schema.yaml`):
   `triaged` until the user reports those runs done. A re-invoke whose sequence
   you cannot compute carries no resolution block at all — an empty one is the
   state that hid those defects. What is still owed is reported by the row
-  table below (ledger IMP-054).
-- `handoff` (re-invoke only) is a list of `{artifact: docs/<file>, key, note,
-  basis}`,
-  and `artifact` must be a file an owed `downstream_rerun` command rewrites —
-  container-scoped on arch/test/task, since a bare `--reconcile` maps to the
-  system file only. The validator merely warns on a misplaced note, and a
-  misplaced note is one no reconcile ever reads: address it right.
-- **Upgrade a version-1 queue when it is clean.** When every finding in a
-  `findings_file_version: "1"` queue passes the version-2 checks (run
-  `validate_findings.py` and read the gated warnings — zero means clean), set
-  `findings_file_version: "2"` in the same close write, then re-validate. The
-  gate exists for queues this skill does not touch, not for the one it keeps
-  writing.
+  table below.
+- `handoff` (re-invoke only) is `{artifact: docs/<file>, key, note, basis,
+  retired}` — `retired` carries the literal token(s), never which items use
+  them; `artifact` is a file an owed `downstream_rerun` command rewrites.
+  Warns only on a misplaced note or a malformed `retired`.
+- `sites_considered` (`{artifact, disposition: edited | resliced | unaffected
+  | deferred, reason, how}`, one per Phase-4 checklist artifact), REQUIRED
+  when `symbols_changed` is non-empty or `mode` is `re-invoke` (`findings_file_version: "3"`).
+- **Raise the floor when clean:** `python "${CLAUDE_SKILL_DIR}/findings.py"
+  validate --upgrade` at close instead of hand-stamping `findings_file_version`
+  — a no-op already at the floor, refused while any warning remains.
 
 Then compute the handback. There is no bespoke mechanism and there should not
 be: editing a task artifact changes each affected task's fingerprints, which
@@ -689,6 +688,16 @@ be: editing a task artifact changes each affected task's fingerprints, which
 matters moved) and gates at its plan approval. `topo_order.py`'s `stale` and
 `--affected` sections are the answer; they are already in
 `resolution.stale_tasks` from Phase 4.
+
+**Record the run** (CLAUDE.md 15): drain `lesson_notes` (one `lessons.py add` per surviving
+note, at most 2 unless one is a blocker), then `python .claude/sdlc/lessons.py record-run --skill repair --plugin-root "${CLAUDE_SKILL_DIR}/../.."`
+(best-effort: a non-zero exit is one line in the report; helper absent — skip silently). A `Lessons:`
+row only when one was recorded — never "no lessons". Then set the state file `status: complete`.
+
+**Commit the run** (CLAUDE.md 20; the message rules and what is staged:
+`${CLAUDE_SKILL_DIR}/../setup/references/auto-commit.md`) — the last action before the card, on every exit path, never a blocker:
+`python .claude/sdlc/autocommit.py commit --skill repair --invocation "<the form the dispatch resolved, as typed>" --summary "<one line: what changed, in the user's words>"`
+Its one printed line is the card's `Commit:` row; off, or helper absent → no row.
 
 Close with the report:
 
@@ -699,6 +708,7 @@ Located:   FND-001 → arch (suspected: task)  ·  FND-002 → api (suspected: t
 Edited:    docs/ARCH__demo-api.yaml, docs/TASKS__demo-api.json (2 embeds re-sliced)
 Verified:  arch exit 0 · task exit 0 · reslice --check exit 0 · crosscheck exit 0 · index exit 0
 Stale:     demo-api/TSK-004, demo-api/TSK-006 will be offered for regeneration
+Commit:    {a1b2c3d  /sdlc:repair FND-001 FND-002 → <summary> | nothing to commit — only when auto-commit is on}
 Status:    {computed - e.g. repair's edits are done; FND-004 closes when its 2 re-runs finish, and you run them, one per new session}
 Next:      {the computed next invocation}   ← in a NEW session
 Why new:   the artifacts and state files on disk are the handoff, not this
@@ -707,7 +717,7 @@ Why new:   the artifacts and state files on disk are the handoff, not this
 
 **The `Findings:` and `Status:` rows** answer "is repair done, what is still
 owed, and who runs it" — the question a user asked when a card printed the
-queue's own words beside a `Next:` naming another skill (ledger IMP-154). The
+queue's own words beside a `Next:` naming another skill. The
 queue's state names and field names are input to these rows, never their text
 (`prd/references/reporting-to-the-user.md`, "translates; it never pastes"):
 
@@ -715,7 +725,7 @@ queue's state names and field names are input to these rows, never their text
 |---|---|
 | `resolved` | `fixed and closed` |
 | `triaged`, `mode: re-invoke`, commands recorded | `fixed at its source, still owes N re-run(s)` — N is the length of its `resolution.downstream_rerun`; the same owed work `doctor.py` labels `awaiting re-invocation per FND-NNN` |
-| `triaged`, `mode: re-invoke`, no commands recorded (IMP-054) | `not closable - its re-runs were never recorded` |
+| `triaged`, `mode: re-invoke`, no commands recorded | `not closable - its re-runs were never recorded` |
 | `open`, a surgical fix whose hop this run could not verify | `fixed, not verified - <the check that could not run>` |
 | `deferred` / `wontfix` / `duplicate` | `parked (<reason>)` / `left as is (accepted)` / `same defect as FND-NNN` |
 
@@ -737,7 +747,7 @@ it is not — or as unfinished when it is.
 4. **`--check`** → `health check only - nothing under docs/ was edited`.
 
 **Compute the `Next:` row; never copy the example literals.** Procedure and
-successor map: `sdlc/skills/prd/references/reporting-to-the-user.md`
+successor map: `${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`
 (CLAUDE.md 14). `repair` walks backwards, so its `Next:` is an **in-run
 position** (the located stage) while work remains, and the pipeline position
 once the run is done — print both as they apply:
@@ -762,21 +772,10 @@ blocks later components or two findings name one symbol) → ONE `/sdlc:repair`
 over the batch → the printed `--reconcile` chain, only when printed (run the
 first; each names the next; the last routes back to `/sdlc:repair FND-NNN`)
 → `/sdlc:code <cid>` in a NEW session. Never repair mid-component. There is no
-`--propagate` chain walker: propagation is `reslice_embeds.py` + refreshed
-provenance + the residual re-invoke list with its `handoff` notes, and that
-list routes itself.
+`--propagate` chain walker: propagation is `reslice_embeds.py` + refreshed provenance + the residual re-invoke list with its `handoff` notes, which routes itself.
 
 Every target must have a `sdlc/skills/<name>/SKILL.md`; never route to
 `/sdlc:deploy`, which is planned and not yet implemented.
-
-**Record the run** (CLAUDE.md 15): drain `lesson_notes` (one `lessons.py add`
-per note that survives the self-review, at most 2 unless one is a blocker),
-then `python .claude/sdlc/lessons.py record-run --skill repair --plugin-root
-"${CLAUDE_SKILL_DIR}/../.."`. Best-effort: a non-zero exit becomes one line in
-the close report; helper absent — skip silently. Add a `Lessons:` row to the
-card only when this run recorded at least one; never print "no lessons".
-
-Set the state file `status: complete`.
 
 ## Localization at a glance
 
@@ -846,4 +845,4 @@ context that codegen is trying to conserve.
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.19"
+skill_version: "1.21"
