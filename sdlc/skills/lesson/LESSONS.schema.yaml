@@ -287,13 +287,58 @@ lessons:                                   # REQUIRED — list[Lesson]; may be e
                                            #   next batch and the maintainer's
                                            #   merge updates it in place.
 
-    status: open                           # REQUIRED — open | collected
-                                           #   (collected = the maintainer's
-                                           #   collector has ingested it).
-                                           #   NOT the same as sent_at below:
-                                           #   `status` is the maintainer's
-                                           #   view, `sent_at` is this
-                                           #   machine's.
+    # --- the maintainer's verdict ----------------------------------------
+    # `open` is this project's word; every other status is the maintainer's,
+    # and it comes BACK here two ways: the installed plugin ships
+    # skills/lesson/VERDICTS.yaml (rows keyed by this project's opaque id),
+    # which `lessons.py reconcile` applies - record-run does it at every skill
+    # close, so a /sdlc:setup re-run after a plugin upgrade is what delivers
+    # it; and a repo the maintainer registered is stamped directly by their
+    # collector. Before this, nothing ever told a project which of its lessons
+    # a version had fixed: one carried 55 resolved defects as live traps and
+    # re-filed two of them. `status` is the maintainer's view; `sent_at` is
+    # this machine's - a delivered lesson is still `open` until a verdict
+    # arrives. A queue written before verdicts existed carries only
+    # open/collected and stays valid; a helper older than this schema keeps
+    # recording runs and lessons but its `validate` refuses the four verdict
+    # values - re-run /sdlc:setup to upgrade it.
+    status: open                           # REQUIRED — open | collected |
+                                           #   triaged | resolved | wontfix |
+                                           #   dismissed.
+                                           #   collected = the collector has
+                                           #     ingested it, no verdict yet
+                                           #   triaged  = grouped into a ledger
+                                           #     item that is still being worked
+                                           #   resolved = the item is fixed;
+                                           #     fixed_in says in which version
+                                           #   wontfix  = a real observation the
+                                           #     plugin will not act on
+                                           #   dismissed = not a lesson (a
+                                           #     placeholder, a project problem)
+                                           #   A REPEAT of a resolved / wontfix /
+                                           #   dismissed lesson (`add` folding a
+                                           #   recurrence) sets it back to `open`
+                                           #   and KEEPS the three fields below:
+                                           #   that is the reopen signal - the
+                                           #   fix regressed or the call was
+                                           #   wrong - which `list` prints as
+                                           #   `[open again after 0.9.8]`, the
+                                           #   same stale verdict never re-closes
+                                           #   (a newer one does), and the
+                                           #   maintainer's digest lists as a
+                                           #   REOPEN candidate.
+    imp_id: null                           # OPTIONAL — IMP-NNN, the maintainer's
+                                           #   ledger item this lesson was grouped
+                                           #   into (triaged/resolved/wontfix).
+                                           #   Written by lessons.py alone.
+    fixed_in: null                         # OPTIONAL — the plugin version that
+                                           #   ships the fix (resolved only; kept
+                                           #   through a reopen). `list` says
+                                           #   `- not installed` when it is newer
+                                           #   than the marker's plugin_version.
+    verdict_at: null                       # OPTIONAL — YYYY-MM-DD the verdict was
+                                           #   stamped here. Present on an `open`
+                                           #   lesson = it was reopened.
     sent_at: null                          # OPTIONAL — set once this lesson has
                                            #   been delivered. Absent means
                                            #   unsent; a delivered lesson is

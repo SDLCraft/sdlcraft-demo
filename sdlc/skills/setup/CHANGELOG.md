@@ -7,6 +7,10 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.24 (2026-09-22) — statusboard.py's Lessons line reports the maintainer's verdicts, not just a count of everything ever recorded
+
+- `statusboard.py`: `collect_lessons` reads the verdict fields `lessons.py reconcile` stamps and the line becomes `Lessons: N open (ids), M open again after a fix (ids), K triaged upstream, R resolved (fix installed), P resolved upstream, not installed - run /sdlc:setup, W wontfix`; STATUS.md splits open from open-again. Pinned by `_smoke/statusboard_selftest.py` (lessons arm).
+
 ## 1.23 (2026-09-22) — autocommit.py repairs a missing /sdlc:<skill> prefix and commits a project's declared auto_commit.also files; docs_index.py gains --items-at
 
 - `autocommit.py commit`: an `--invocation` without the `/sdlc:<skill>` prefix (the `$ARGUMENTS` half alone, a one-token `-d`, a bare `/<skill>`) is repaired from `--skill` and the one printed line says so; one naming a different skill is refused with a `[DRAFT]` line. argv is rewritten to `--invocation=`/`--summary=` before parsing so a value starting with `-` no longer exits 2. HELPER_VERSION 2 (ledger IMP-207, pinned by `_smoke/autocommit_selftest.py`).

@@ -23,6 +23,13 @@ Usage:
     findings.py list --owed-by docs/<artifact> [--json]
                         # the re-invoke findings waiting on that file + the
                         # handoff notes left for it (read by every --reconcile)
+    findings.py plan [--from <dir of localize reports>] [--doctor-json <snapshot>]
+                     [--close-first FND-NNN ...] [--json]
+                        # the open set grouped into aggregates (write sets that
+                        # share an artifact) and ordered into stage-waves,
+                        # upstream first - the table /sdlc:repair's plan gate
+                        # shows; provisional from queue fields alone, exact
+                        # once wave 1's reports are in
     findings.py reopen FND-NNN
                         # a resolved/wontfix/deferred finding whose owed work
                         # turned out incomplete (doctor.py --provenance's
@@ -876,6 +883,448 @@ def cmd_list(args) -> int:
     return 0
 
 
+# =============================================================================
+# plan - the open set, grouped into aggregates and ordered into stage-waves.
+#
+# A repair run used to assert its open set once and then work whatever its
+# context window still held: one consumer project's runs went from twelve
+# findings to one while twenty waited. The plan is the table the session's
+# ONE gate shows, and the order its fix workers run in. Two inputs:
+#   * the queue alone (provisional): clusters by the fields a finding already
+#     carries - the same surfaced symbol, `related`, `recurrence_of`, the same
+#     surfaced file - ordered by the stage the finding suspects (or, for a
+#     triaged one, the stage its walk located);
+#   * --from <dir> of localize reports (exact): the aggregates are the write
+#     sets that share an artifact, joined transitively and directory-aware,
+#     ordered by the pipeline stage of the located artifact, upstream first.
+# =============================================================================
+
+# Copied from setup/docs_index.py (_PIPELINE / _STAGE_OF): this script cannot
+# import setup's module from a consumer install, the way the validators copy
+# the WRN block rather than import it. Keep the two in step by hand.
+PIPELINE = ("prd", "ux", "design", "data", "api", "arch", "test", "task", "code")
+STAGE_OF_STEM = {"PRD": "prd", "UX": "ux", "DESIGN": "design", "DATA-MODEL": "data",
+                 "API": "api", "ARCH": "arch", "TEST-STRATEGY": "test", "TASKS": "task",
+                 "CODE-MANIFEST": "code"}
+PLAN_CAP = 5   # findings per aggregate: a worker's context, not a policy
+
+
+def artifact_stage(path: Any) -> Optional[str]:
+    """'docs/ARCH__x.yaml' -> 'arch'; None for a path no stage owns."""
+    name = _artifact_name(path)
+    stem = name.split(".", 1)[0].split("__", 1)[0]
+    return STAGE_OF_STEM.get(stem)
+
+
+def stage_rank(stage_or_path: Any) -> int:
+    """Pipeline position: `brief` (a hand-written upstream) is 0, an unknown
+    stage sorts last, a docs/ path ranks as its owning stage."""
+    s = str(stage_or_path or "")
+    if s == "brief":
+        return 0
+    if s in PIPELINE:
+        return PIPELINE.index(s) + 1
+    stage = artifact_stage(s)
+    return PIPELINE.index(stage) + 1 if stage else len(PIPELINE) + 1
+
+
+def finding_stage(f: Dict[str, Any]) -> Optional[str]:
+    res = f.get("resolution") or {}
+    if isinstance(res, dict) and res.get("located_stage"):
+        return str(res["located_stage"])
+    return str(f["suspected_stage"]) if f.get("suspected_stage") else None
+
+
+def _norm_docs(path: Any) -> Tuple[str, bool]:
+    """('docs/<name>', is_directory) - a trailing slash or a bare directory
+    name is a directory entry, which contains every path beneath it."""
+    raw = str(path or "").replace("\\", "/").strip()
+    is_dir = raw.endswith("/") or raw in ("docs", ".")
+    raw = raw.rstrip("/")
+    if raw in ("docs", "."):
+        return "docs", True
+    if "/" in raw:
+        raw = raw.rsplit("/", 1)[1] if raw.startswith("docs/") and raw.count("/") == 1 else raw
+    return (raw if raw.startswith("docs/") else f"docs/{raw}"), is_dir
+
+
+def _overlap(a: Tuple[str, bool], b: Tuple[str, bool]) -> bool:
+    if a[0] == b[0]:
+        return True
+    if a[1] and b[0].startswith(a[0] + "/"):
+        return True
+    if b[1] and a[0].startswith(b[0] + "/"):
+        return True
+    return False
+
+
+def union_find(items: List[str], edges: List[Tuple[str, str, str]]) -> Tuple[Dict[str, str], Dict[str, List[str]]]:
+    """(parent map, {root: [why, ...]}) over `items`; an edge is (a, b, why)."""
+    parent = {i: i for i in items}
+    why: Dict[str, List[str]] = {i: [] for i in items}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for a, b, reason in edges:
+        if a not in parent or b not in parent:
+            continue
+        ra, rb = find(a), find(b)
+        if ra == rb:
+            continue
+        keep, drop = sorted((ra, rb), key=_fnd_num)
+        parent[drop] = keep
+        why[keep] = why[keep] + why[drop] + [reason]
+        why[drop] = []
+    roots = {i: find(i) for i in items}
+    return roots, {r: why[r] for r in set(roots.values())}
+
+
+def _fnd_num(fnd_id: Any) -> int:
+    try:
+        return int(str(fnd_id).split("-")[1])
+    except (IndexError, ValueError):
+        return 10 ** 9
+
+
+def _closable_from_doctor(path: Optional[str]) -> List[str]:
+    """The ids the doctor's --provenance JSON says can be marked resolved."""
+    if not path:
+        return []
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    hints = ((data.get("provenance") or {}).get("resolvable")) if isinstance(data, dict) else None
+    out = []
+    for h in hints or []:
+        m = re.match(r"\s*(FND-\d{3,})", str(h))
+        if m:
+            out.append(m.group(1))
+    return out
+
+
+def provisional_plan(data: Dict[str, Any], closable: List[str]) -> Dict[str, Any]:
+    """The plan from queue fields alone - exact after wave 1 (`--from`)."""
+    open_set = [f for f in (data.get("findings") or [])
+                if isinstance(f, dict) and f.get("status") in OPEN_STATUSES]
+    by_id = {str(f.get("fnd_id")): f for f in open_set}
+    ids = sorted(by_id, key=_fnd_num)
+    owed, candidates = [], []
+    for fid in ids:
+        f = by_id[fid]
+        res = f.get("resolution") or {}
+        if f.get("status") == "triaged" and isinstance(res, dict) and res.get("mode") == "re-invoke":
+            if fid not in closable:
+                owed.append({"fnd": fid, "downstream_rerun": list(res.get("downstream_rerun") or [])})
+            continue
+        candidates.append(fid)
+    edges: List[Tuple[str, str, str]] = []
+    anchors: Dict[str, List[str]] = {}
+    files: Dict[str, List[str]] = {}
+    for fid in candidates:
+        f = by_id[fid]
+        a = _anchor(f)
+        if a:
+            anchors.setdefault(a, []).append(fid)
+        sa = f.get("surfaced_at") or {}
+        if isinstance(sa, dict) and sa.get("file"):
+            files.setdefault(_norm_docs(sa["file"])[0], []).append(fid)
+        for rel in f.get("related") or []:
+            if str(rel) in by_id and str(rel) in candidates:
+                edges.append((fid, str(rel), f"{fid} is related to {rel}"))
+        rec = f.get("recurrence_of")
+        if rec and str(rec) in candidates:
+            edges.append((fid, str(rec), f"{fid} recurs {rec}"))
+    for a, group in anchors.items():
+        for other in group[1:]:
+            edges.append((group[0], other, f"same symbol {a}"))
+    for path, group in files.items():
+        for other in group[1:]:
+            edges.append((group[0], other, f"surfaced in {path}"))
+    roots, why = union_find(candidates, edges)
+    groups: Dict[str, List[str]] = {}
+    for fid in candidates:
+        groups.setdefault(roots[fid], []).append(fid)
+    aggregates = []
+    for root, members in groups.items():
+        members = sorted(members, key=_fnd_num)
+        stages = [finding_stage(by_id[m]) for m in members]
+        rank = min((stage_rank(s) for s in stages if s), default=len(PIPELINE) + 1)
+        aggregates.append({"findings": members, "located": [], "write_set": [],
+                           "modes": {m: "?" for m in members}, "decisions": [],
+                           "rank": rank, "stage": _stage_name(rank),
+                           "merged_because": why.get(root, [])})
+    return _assemble("queue", closable, [], owed, aggregates, [])
+
+
+def load_localize_reports(directory: Path) -> Tuple[Dict[str, Dict[str, Any]], List[str]]:
+    reports: Dict[str, Dict[str, Any]] = {}
+    problems: List[str] = []
+    for path in sorted(directory.glob("*.yaml")):
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as e:
+            problems.append(f"{path.name}: unreadable ({e})")
+            continue
+        if not isinstance(doc, dict) or not FND_RE.match(str(doc.get("fnd_id") or "")):
+            problems.append(f"{path.name}: no fnd_id - not a localize report")
+            continue
+        if not doc.get("located_stage") and not doc.get("located"):
+            problems.append(f"{path.name}: names no located stage or artifact")
+            continue
+        reports[str(doc["fnd_id"])] = doc
+    return reports, problems
+
+
+def write_set(report: Dict[str, Any]) -> List[Tuple[str, bool]]:
+    out: List[Tuple[str, bool]] = []
+    for loc in report.get("located") or []:
+        if isinstance(loc, dict) and loc.get("artifact"):
+            out.append(_norm_docs(loc["artifact"]))
+    for p in report.get("write_set") or []:
+        out.append(_norm_docs(p))
+    seen: set = set()
+    uniq = []
+    for item in out:
+        if item not in seen:
+            seen.add(item)
+            uniq.append(item)
+    return uniq
+
+
+def _located_paths(report: Dict[str, Any]) -> List[str]:
+    return [_norm_docs(loc["artifact"])[0] for loc in (report.get("located") or [])
+            if isinstance(loc, dict) and loc.get("artifact")]
+
+
+def _stage_name(rank: int) -> str:
+    if rank == 0:
+        return "brief"
+    if 1 <= rank <= len(PIPELINE):
+        return PIPELINE[rank - 1]
+    return "unknown"
+
+
+def aggregates_from_reports(reports: Dict[str, Dict[str, Any]], closable: List[str],
+                            kinds: Optional[Dict[str, str]] = None) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
+    """(aggregates, duplicates): union-find over write sets; two reports on
+    one located symbol WITH THE SAME KIND fold into one (the later id is the
+    duplicate - the recurrence rule's key, since two kinds on one symbol are
+    two defects); an aggregate over PLAN_CAP is split by located stage, then
+    by id."""
+    kinds = kinds or {}
+    ids = sorted((i for i in reports if i not in closable), key=_fnd_num)
+    duplicates: List[Dict[str, str]] = []
+    by_symbol: Dict[str, str] = {}
+    kept: List[str] = []
+    for fid in ids:
+        rep = reports[fid]
+        dup = rep.get("duplicate_of")
+        if dup and str(dup) in reports and str(dup) != fid:
+            duplicates.append({"fnd": fid, "of": str(dup), "why": "the worker found the same defect"})
+            continue
+        key = None
+        for loc in rep.get("located") or []:
+            if isinstance(loc, dict) and loc.get("symbol"):
+                key = f"{_norm_docs(loc.get('artifact'))[0]}#{loc['symbol']}#{kinds.get(fid) or rep.get('kind') or ''}"
+                break
+        if key and key in by_symbol:
+            duplicates.append({"fnd": fid, "of": by_symbol[key],
+                               "why": f"same symbol {key.split('#')[1]}, same kind"})
+            continue
+        if key:
+            by_symbol[key] = fid
+        kept.append(fid)
+    sets = {fid: write_set(reports[fid]) for fid in kept}
+    edges: List[Tuple[str, str, str]] = []
+    for i, a in enumerate(kept):
+        for b in kept[i + 1:]:
+            shared = [x[0] for x in sets[a] for y in sets[b] if _overlap(x, y)]
+            if shared:
+                edges.append((a, b, f"{a} and {b} both write {shared[0]}"))
+    roots, why = union_find(kept, edges)
+    groups: Dict[str, List[str]] = {}
+    for fid in kept:
+        groups.setdefault(roots[fid], []).append(fid)
+    aggregates: List[Dict[str, Any]] = []
+    for root, members in groups.items():
+        members = sorted(members, key=_fnd_num)
+        parts = _split(members, reports)
+        for index, part in enumerate(parts):
+            located = sorted({p for m in part for p in _located_paths(reports[m])})
+            ws = sorted({p[0] for m in part for p in sets[m]})
+            rank = min((stage_rank(reports[m].get("located_stage") or (located[0] if located else None))
+                        for m in part), default=len(PIPELINE) + 1)
+            decisions = [{"fnd": m, **{k: v for k, v in (reports[m].get("missing_decision") or {}).items()
+                                       if k in ("question", "proposal", "basis")}}
+                         for m in part if isinstance(reports[m].get("missing_decision"), dict)
+                         and reports[m]["missing_decision"].get("question")]
+            aggregates.append({"findings": part, "located": located, "write_set": ws,
+                               "modes": {m: str(reports[m].get("proposed_mode") or "?") for m in part},
+                               "decisions": decisions, "rank": rank, "stage": _stage_name(rank),
+                               "merged_because": why.get(root, []) if len(parts) == 1 else
+                               [w for w in why.get(root, []) if any(m in w for m in part)],
+                               # the parts of one split group hold the same artifacts, so
+                               # they run one after another - never side by side
+                               "chain": root if len(parts) > 1 else None, "chain_index": index})
+    return aggregates, duplicates
+
+
+def _split(members: List[str], reports: Dict[str, Dict[str, Any]]) -> List[List[str]]:
+    if len(members) <= PLAN_CAP:
+        return [members]
+    by_stage: Dict[int, List[str]] = {}
+    for m in members:
+        by_stage.setdefault(stage_rank(reports[m].get("located_stage")), []).append(m)
+    parts: List[List[str]] = []
+    for rank in sorted(by_stage):
+        chunk = by_stage[rank]
+        for i in range(0, len(chunk), PLAN_CAP):
+            parts.append(chunk[i:i + PLAN_CAP])
+    return parts
+
+
+def order_waves(aggregates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Waves of equal effective rank, upstream first. An aggregate whose located
+    artifact is downstream of another aggregate's write set waits for it even
+    when the two are disjoint - a downstream stamp must see final upstream
+    bytes. Stable tie-break: the lowest finding id."""
+    aggs = sorted(aggregates, key=lambda a: (a["rank"], _fnd_num(a["findings"][0])))
+    effective = {id(a): a["rank"] for a in aggs}
+    changed = True
+    while changed:
+        changed = False
+        for a in aggs:
+            for b in aggs:
+                if a is b:
+                    continue
+                if any(stage_rank(la) > stage_rank(wb) for la in a["located"] for wb in b["write_set"]) \
+                        and effective[id(a)] <= effective[id(b)]:
+                    effective[id(a)] = effective[id(b)] + 1
+                    changed = True
+                # the parts of one split group share artifacts: part k+1 waits for part k
+                if a.get("chain") and a.get("chain") == b.get("chain") \
+                        and a.get("chain_index", 0) > b.get("chain_index", 0) \
+                        and effective[id(a)] <= effective[id(b)]:
+                    effective[id(a)] = effective[id(b)] + 1
+                    changed = True
+    waves: Dict[int, List[Dict[str, Any]]] = {}
+    for a in aggs:
+        waves.setdefault(effective[id(a)], []).append(a)
+    out = []
+    for n, rank in enumerate(sorted(waves), start=1):
+        members = sorted(waves[rank], key=lambda a: (a["rank"], _fnd_num(a["findings"][0])))
+        for k, a in enumerate(members):
+            a["id"] = f"A{sum(len(waves[r]) for r in sorted(waves) if r < rank) + k + 1}"
+        out.append({"wave": n, "stage": _stage_name(min(a["rank"] for a in members)),
+                    "aggregates": members})
+    return out
+
+
+def _assemble(source: str, closable: List[str], duplicates: List[Dict[str, str]],
+              owed: List[Dict[str, Any]], aggregates: List[Dict[str, Any]],
+              unplaced: List[Dict[str, str]]) -> Dict[str, Any]:
+    return {"source": source, "planned_at": _iso_utc_now(), "close_first": sorted(closable, key=_fnd_num),
+            "duplicates": duplicates, "owed": owed, "waves": order_waves(aggregates),
+            "unplaced": unplaced}
+
+
+def render_plan(plan: Dict[str, Any]) -> str:
+    n_agg = sum(len(w["aggregates"]) for w in plan["waves"])
+    n_open = (len(plan["close_first"]) + len(plan["duplicates"]) + len(plan["owed"])
+              + len(plan["unplaced"]) + sum(len(a["findings"]) for w in plan["waves"] for a in w["aggregates"]))
+    tag = "from: localize reports" if plan["source"] == "localize" else \
+        "provisional: from queue fields - exact after wave 1"
+    lines = [f"Repair plan - {n_open} open finding(s): {len(plan['close_first'])} close first, "
+             f"{n_agg} aggregate(s) in {len(plan['waves'])} stage-wave(s), "
+             f"{len(plan['duplicates'])} duplicate(s)  [{tag}]"]
+    for fid in plan["close_first"]:
+        lines.append(f"CLOSE FIRST  {fid}  every artifact its re-runs rewrite was rebuilt after the fix")
+    for w in plan["waves"]:
+        lines.append(f"WAVE {w['wave']} - {w['stage']}")
+        for a in w["aggregates"]:
+            where = ", ".join(a["located"]) if a["located"] else "(located after wave 1)"
+            extra = len(a["write_set"]) - len(a["located"])
+            if extra > 0:
+                where += f" + {extra} downstream"
+            modes = ", ".join(a["modes"][m] + ("*" if any(d["fnd"] == m for d in a["decisions"]) else "")
+                              for m in a["findings"])
+            lines.append(f"  {a['id']:<4} {', '.join(a['findings']):<34} {where:<48} {modes}")
+            for d in a["decisions"]:
+                lines.append(f"       * {d['fnd']} needs one decision: {d.get('question')} - proposal: {d.get('proposal')}")
+            for why in a["merged_because"]:
+                lines.append(f"       ({why})")
+    for d in plan["duplicates"]:
+        lines.append(f"DUPLICATE  {d['fnd']} = {d['of']} ({d['why']})")
+    if plan["owed"]:
+        for o in plan["owed"]:
+            first = o["downstream_rerun"][0] if o["downstream_rerun"] else "(no command recorded)"
+            lines.append(f"Handed off already  {o['fnd']}  first: {first}")
+    else:
+        lines.append("Handed off already: none")
+    for u in plan["unplaced"]:
+        lines.append(f"UNPLACED  {u['fnd']}  {u['why']}")
+    if plan["waves"]:
+        lines.append("NEXT: answer the plan gate; each stage-wave starts after the previous one drains.")
+    elif n_open:
+        lines.append("NEXT: nothing to dispatch - close the close-first findings and record the owed ones.")
+    else:
+        lines.append("NEXT: nothing open - the queue is clean.")
+    return "\n".join(lines)
+
+
+def cmd_plan(args) -> int:
+    path = _queue_path(args)
+    data = _load_for_read(path)
+    if data is None:
+        data = empty_queue()
+    if data == 2:
+        return 2
+    closable = list(args.close_first or []) + _closable_from_doctor(args.doctor_json)
+    if args.from_dir:
+        directory = Path(args.from_dir)
+        if not directory.is_dir():
+            print(f"[FAIL] cannot plan - {directory} is not a directory of localize reports.",
+                  file=sys.stderr)
+            return 2
+        reports, problems = load_localize_reports(directory)
+        if problems:
+            print(f"[FAIL] {len(problems)} localize report(s) cannot be read - re-dispatch those "
+                  f"findings before planning:")
+            for p in problems:
+                print(f"  - {p}")
+            return 1
+        open_ids = [str(f.get("fnd_id")) for f in (data.get("findings") or [])
+                    if isinstance(f, dict) and f.get("status") in OPEN_STATUSES]
+        owed = []
+        unplaced = []
+        for fid in sorted(open_ids, key=_fnd_num):
+            f = next(x for x in data["findings"] if str(x.get("fnd_id")) == fid)
+            res = f.get("resolution") or {}
+            if fid in reports or fid in closable:
+                continue
+            if f.get("status") == "triaged" and isinstance(res, dict) and res.get("mode") == "re-invoke":
+                owed.append({"fnd": fid, "downstream_rerun": list(res.get("downstream_rerun") or [])})
+            else:
+                unplaced.append({"fnd": fid, "why": "no localize report"})
+        kinds = {str(f.get("fnd_id")): str(f.get("kind") or "") for f in (data.get("findings") or [])
+                 if isinstance(f, dict)}
+        aggregates, duplicates = aggregates_from_reports(reports, closable, kinds)
+        plan = _assemble("localize", [c for c in closable if c in open_ids or c in reports],
+                         duplicates, owed, aggregates, unplaced)
+    else:
+        plan = provisional_plan(data, closable)
+    if args.as_json:
+        print(json.dumps(plan, indent=2, ensure_ascii=False, default=str))
+    else:
+        print(render_plan(plan))
+    return 0
+
+
 def cmd_reopen(args) -> int:
     vf = validator_module()
     path = _queue_path(args)
@@ -1125,6 +1574,22 @@ def main(argv=None) -> int:
     p.add_argument("--json", action="store_true", dest="as_json")
     _add_global_opts(p, sub=True)
     p.set_defaults(func=cmd_list)
+
+    p = sub.add_parser("plan", help="The open set grouped into aggregates and ordered into "
+                                    "stage-waves, upstream first - the table /sdlc:repair's "
+                                    "plan gate shows. Provisional from the queue alone; exact "
+                                    "with --from <dir of localize reports>.")
+    p.add_argument("--from", dest="from_dir", default=None, metavar="DIR",
+                   help="Directory of wave-1 localize reports (<FND>.yaml); the aggregates are "
+                        "then the write sets that share an artifact.")
+    p.add_argument("--doctor-json", default=None, metavar="PATH",
+                   help="The doctor's provenance snapshot (its --provenance --json output, written "
+                        "at Phase 2); its resolvable hints become the close-first list.")
+    p.add_argument("--close-first", action="extend", nargs="+", default=None, metavar="FND-NNN",
+                   help="Ids to close before any wave (adds to the doctor's hints).")
+    p.add_argument("--json", action="store_true", dest="as_json")
+    _add_global_opts(p, sub=True)
+    p.set_defaults(func=cmd_plan)
 
     p = sub.add_parser("reopen", help="Flip a resolved/wontfix/deferred finding back into "
                                       "scope, mode-aware (the doctor sweep's --provenance report "

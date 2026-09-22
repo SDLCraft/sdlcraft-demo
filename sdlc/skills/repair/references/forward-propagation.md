@@ -1,7 +1,8 @@
 # Forward-propagation — fixing at the source and carrying it downstream (sdlc-repair)
 
-Read this on entering Phase 4. Back-propagation found *where* the defect lives;
-this file covers *how* to fix it there and how far the fix has to travel.
+Read by the wave-2 fix worker (SKILL.md Phase 4), and by the session when it
+runs a fix inline. Back-propagation found *where* the defect lives; this file
+covers *how* to fix it there and how far the fix has to travel.
 
 ---
 
@@ -212,11 +213,11 @@ Nothing in this sequence is a hand edit to a task JSON.
    after every hand edit of step 4 and every stamp of step 5:
 
    ```bash
-   python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --symbol <cid>/<component>/<work_unit>
-   python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --tst TST-NNN
-   python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --entity <Name>
-   python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --operation <operation_id>
-   python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --component <cid>/<component>
+   python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --symbol <cid>/<component>/<work_unit>   # edition-ok: demo edition skips step 6 (SKILL.md Phase 4)
+   python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --tst TST-NNN                              # edition-ok: demo edition skips step 6 (SKILL.md Phase 4)
+   python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --entity <Name>                            # edition-ok: demo edition skips step 6 (SKILL.md Phase 4)
+   python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --operation <operation_id>                 # edition-ok: demo edition skips step 6 (SKILL.md Phase 4)
+   python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --component <cid>/<component>              # edition-ok: demo edition skips step 6 (SKILL.md Phase 4)
    ```
 
    A component-level entity change (an ARCH component's `traces_data_entities`
@@ -248,8 +249,8 @@ Nothing in this sequence is a hand edit to a task JSON.
    resolution names what moved:
 
    ```bash
-   python "${CLAUDE_SKILL_DIR}/../code/topo_order.py" --scope <cid> --state .claude/skills-state/sdlc-code.state.yaml
-   python "${CLAUDE_SKILL_DIR}/../code/topo_order.py" --affected FR-012 FR-013     # after a PRD change
+   python "${CLAUDE_SKILL_DIR}/../code/topo_order.py" --scope <cid> --state .claude/skills-state/sdlc-code.state.yaml   # edition-ok: demo edition skips step 8 (SKILL.md Phase 4)
+   python "${CLAUDE_SKILL_DIR}/../code/topo_order.py" --affected FR-012 FR-013     # after a PRD change; edition-ok: demo edition skips step 8 (SKILL.md Phase 4)
    ```
 
    `stale` (build-relevant content moved), `ring_recheck` (a provider's
@@ -312,8 +313,19 @@ is `re-invoke`, and `/sdlc:test <cid>` runs before `/sdlc:task <cid>`.
 
 ## Re-invoke mode
 
-This skill does not run other skills. It produces the **exact command sequence**
-and stops, because those skills are interviews and the user owns them.
+This skill does not run other skills. It produces the **exact command
+sequence** for the session to print once at close, because those skills are
+interviews and the user owns them. A re-invoke never ends the run: the source
+is fixed here, the sequence is recorded on the finding, and the next
+aggregate starts (`orchestration.md`, "The consolidated handoff chain").
+
+The shape of a sequence, rooted in one artifact:
+
+```
+# rooted in docs/API__tasks.yaml; a fix rooted in ARCH__demo-api.yaml starts at /sdlc:test demo-api --reconcile
+/sdlc:arch demo-api --reconcile   then   /sdlc:test demo-api --reconcile   then   /sdlc:task demo-api --reconcile
+(fallback when a reconcile stops at a structural question: the same skills without --reconcile)
+```
 
 - Order the sequence by pipeline position (`prd → ux → design → data → api →
   arch → test → task`), including only the stages the radius actually touches.
@@ -347,7 +359,17 @@ and stops, because those skills are interviews and the user owns them.
   and offers them as the matching card's position-1 proposal — a candidate the
   user confirms, never a silent write. The `bump_artifact.py --summary` line
   is the other half of the handoff: every reconcile's `--drift` quotes the
-  upstream's changelog since its stamp as the "why".
+  upstream's changelog since its stamp as the "why" — so write that summary
+  for the reader who lacks this session.
+
+  **Say how each note was reached.** `basis: measured` means you read it off
+  the artifacts the note names (a call site checked against the caller's
+  declared order, a field read from the entity); `basis: inferred` means an
+  analogy or a precedent you did not verify there. A cold reconcile offers a
+  measured note as read and VERIFIES an inferred one against the cited
+  artifact before writing — one siting recommendation written by analogy was
+  wrong against the very files its note cited, and nothing marked it as a
+  guess. Never mix the two registers in one note.
 
   **Retiring or renaming a token: put the token, never an authored consumer
   list.** When the fix removes or renames a named token, add
@@ -401,10 +423,10 @@ path (`--path docs/ARCH__demo-api.yaml`) is refused.
 
 ```bash
 python "${CLAUDE_SKILL_DIR}/../arch/validate_schema.py" --path docs/ARCH.yaml
-python "${CLAUDE_SKILL_DIR}/../test/validate_schema.py" --path docs/TEST-STRATEGY.yaml
-python "${CLAUDE_SKILL_DIR}/../task/validate_schema.py" --path docs/TASKS.json
-python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --container <cid> --all --check
-python "${CLAUDE_SKILL_DIR}/../task/crosscheck_artifacts.py" --docs-dir docs
+python "${CLAUDE_SKILL_DIR}/../test/validate_schema.py" --path docs/TEST-STRATEGY.yaml                  # edition-ok: runs only where test/task ship (below)
+python "${CLAUDE_SKILL_DIR}/../task/validate_schema.py" --path docs/TASKS.json                           # edition-ok: runs only where test/task ship (below)
+python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --container <cid> --all --check   # edition-ok: runs only where test/task ship (below)
+python "${CLAUDE_SKILL_DIR}/../task/crosscheck_artifacts.py" --docs-dir docs                             # edition-ok: runs only where test/task ship (below)
 python .claude/sdlc/docs_index.py                 # regenerate the index - the PROJECT's copy only;
                                                   # absent -> skip and say so, never the plugin's copy (SKILL.md Phase 5)
 python .claude/sdlc/docs_index.py --check         # dangling-reference gate
@@ -441,6 +463,35 @@ on disk before the finding closes:
 This is the rule the FND-016 → FND-023 → FND-034 sequence taught: a fix whose
 propagation stopped one hop short came back twice under new ids.
 
+## The resolution write
+
+The session writes each finding's `resolution` block from the worker's
+report (SKILL.md Phase 6). The queue's validator enforces rules the example
+there does not show, and each one costs a rejected round-trip when learned
+by trial (canonical: `FINDINGS.schema.yaml`):
+
+- `hop` is one of `source` (the artifact whose content was wrong), `embed` (a
+  write-time copy re-sliced from it), `downstream` (any other artifact the fix
+  propagated into — a TST acceptance, an entity trace, a UX shard) or `code`
+  (generated source the build re-made). Nothing else — an index refresh is
+  not a hop.
+- `duplicate_of` is present exactly when `status: duplicate`, and a duplicate
+  carries NO `resolution` block. A `wontfix` never carries `duplicate_of`;
+  say which finding it repeats in `resolution.summary` instead.
+- `resolved`, `wontfix` and `deferred` all carry a `resolution` block
+  (`deferred` with a `reason`).
+- `handoff` (re-invoke only) is `{artifact: docs/<file>, key, note, basis,
+  retired}` — `retired` carries the literal token(s), never which items use
+  them; `artifact` is a file an owed command rewrites. Warns only on a
+  misplaced note or a malformed `retired`.
+- `sites_considered` (`{artifact, disposition: edited | resliced | unaffected
+  | deferred, reason, how}`, one per checklist artifact) is REQUIRED when
+  `symbols_changed` is non-empty or `mode` is `re-invoke`
+  (`findings_file_version: "3"`).
+- **Raise the floor when clean:** `python "${CLAUDE_SKILL_DIR}/findings.py"
+  validate --upgrade` at close instead of hand-stamping `findings_file_version`
+  — a no-op already at the floor, refused while any warning remains.
+
 ## Handback to codegen
 
 There is no bespoke handback mechanism, and there should not be. Editing a task
@@ -459,7 +510,8 @@ Next:  /sdlc:code <cid>          ← in a NEW session
 ```
 
 Fresh session for the same reason it always is: `/sdlc:code`'s handoff is its
-ledger, not a transcript (`../../code/references/session-and-limits.md`).
+ledger, not a transcript, as the `code` skill's session-and-limits reference
+explains.
 
 ## Batching — the recommended loop
 
@@ -470,9 +522,11 @@ Findings arrive in batches, and the cheapest loop treats them that way:
    Continue to the *container* boundary when the blocked cascade is confined
    to the component; stop when a finding blocks later components or two
    findings name one symbol.
-3. ONE `/sdlc:repair` over the whole batch. Surgical findings are fixed and
-   re-sliced in-session; set changes fix the source and print their
-   `--reconcile` commands (test before task).
+3. ONE `/sdlc:repair` over the whole batch — every open finding, in
+   stage-wave order, through the localize and fix workers. Surgical and
+   additive findings are fixed and re-sliced in-run; set changes fix the
+   source and leave their `--reconcile` commands for the close, printed once
+   (test before task).
 4. The `--reconcile` runs — only when printed: run the first, each names the
    next, and the last routes back to `/sdlc:repair FND-NNN` to close the
    finding.

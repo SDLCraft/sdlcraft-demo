@@ -1,7 +1,9 @@
 # Back-propagation — finding to source stage (sdlc-repair)
 
-Read this on entering Phase 2. It answers one question per finding: **which
-artifact's content is actually wrong?**
+Read by the wave-1 localize worker (SKILL.md Phase 2), and by the session
+when it runs a walk inline. It answers one question per finding: **which
+artifact's content is actually wrong?** — and, in Step 3½, which artifacts
+the fix will have to touch.
 
 The question matters because the artifact a defect *surfaces in* is almost never
 the artifact that *caused* it. A codegen worker cannot see PRD; it sees a task
@@ -10,6 +12,27 @@ see is how a pipeline develops a permanent limp: the same defect returns the
 next time anything regenerates.
 
 ---
+
+## At a glance
+
+The one-line version of each kind's rule; the sections below hold the full
+ones.
+
+| Finding kind | Usual source | The check that decides |
+|---|---|---|
+| `contract_underdetermined` | `arch` work_unit | …unless it `traces_api_operation` (→ `api`), or filling it in would require inventing behaviour (→ `prd`) |
+| `contract_contradiction` | the *earlier* of the two stages | whichever statement PRD supports stands; PRD silent → `prd` |
+| `test_contradicts_contract` | `arch`/`api` **or** `test` | trace both to PRD; whichever the FR/NFR/ACR supports is right. Supports neither → `prd` |
+| `missing_requirement` | `prd` **or** the downstream stage | is the behaviour legitimate, or invented scope? Always the user's call |
+| `missing_operation` / `missing_entity` | `api` / `data` | …unless the container should not reach for it at all (→ `arch`) |
+| `unrealizable_item` | the stage that *defined* the item | the item's owner (UX surface → `ux`, operation → `api`, work_unit → `arch`) unless its inputs are what is missing (→ one stage earlier) |
+| `upstream_incomplete` | the named upstream, exactly | the fact is the finding: fill the null REQUIRED field there; never patch around it downstream |
+| `stale_downstream_claim` | usually the **downstream** artifact | the claim is stale, not the upstream item: reconcile the claimer (a `--reconcile` re-invoke) unless the upstream item was removed by mistake |
+| `drifted_embed` | upstream, or a stale slice | compare embed to source: same wrong thing → upstream; different → re-slice |
+| `wrong_path`, `missing_dependency_edge`, `impossible_acceptance` | `task` | …unless the acceptance was copied from an unsatisfiable ACR (→ `prd`) |
+| `validator_error` | the named artifact | …unless it is a coverage failure naming an upstream id |
+| `crosscheck_broken_ref`, `dangling_reference` | whichever side is stale | `docs_index.py --refs`: many inbound refs + absent definer → the definer; one dangling ref → the referencer |
+| any kind raised by an **interview skill** or the **user** | one stage *upstream* of the raiser | the raiser read its inputs and found them wanting; the `suspected_stage` it gives is usually its immediate upstream — check that one first, then keep walking |
 
 ## The rule
 
@@ -246,6 +269,57 @@ python .claude/sdlc/docs_index.py --refs <symbol>
   recording it.
 
 This is also the cheapest localization in the set — run it before reasoning.
+
+## Step 3½ — Blast radius: the write set
+
+The walk names the source; the fix has to reach every place the source's
+content was copied or restated. Compute that set — never guess it — before
+the gate sees the finding, and write it into the localize report's
+`write_set` (it is what groups findings into aggregates and bounds the fix
+worker) and `sites_considered_draft`.
+
+**The checklist.** For every located symbol, ask the index for the inbound
+sites and print them **grouped by artifact** — the Phase-4 fix ticks them off
+and PERSISTS them as `resolution.sites_considered`:
+
+```bash
+python .claude/sdlc/docs_index.py --refs <symbol>
+```
+
+Every `docs_index.py` call runs the copy
+`${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once per
+run: an installed copy older than the plugin's counts as absent. The bare
+regenerate in Phase 5 is the exception that file names.
+
+**Token sweep.** A fix that REMOVES, RENAMES, or ADDS a named token (an input
+parameter, a CLI flag, a field, an enum member, a literal) has sites `--refs`
+cannot see — an added field's shape is typically restated in prose before any
+reader declares it a structured reference. Sweep the corpus with a plain text
+search — `grep -rn <token> docs/` (or the Grep tool over `docs/`); the index's
+`--find` matches symbols, not prose, so it cannot do this sweep — and add
+every hit to the checklist (its own `sites_considered` entry), changelog lines
+excepted. The typical miss is a sibling test in the very file about to be
+edited — five artifacts reconciled, one test in the edited strategy file still
+passing the removed parameter. The close card names the token, the hit count
+and each hit's disposition.
+
+Until shards and named symbols are indexed, `--refs` resolves **corpus ids
+only** (`FR-`, `WKF-`, `ENT-`, `SCR-`, `TST-`, `TSK-`, … families defined in
+the canonical files). For a *named* symbol fall back to a grep over `docs/`,
+by symbol class, and say in the report that the radius came from grep:
+
+| Symbol class | Grep for the name in | Fields that carry it |
+|---|---|---|
+| DATA-MODEL entity | `docs/ARCH__*.yaml docs/TEST-STRATEGY__*.yaml docs/TASKS__*.json` (+ `docs/API__*.yaml`) | `traces_data_entities`, `touches_entities`, `via_entity`, `entity_slice.entity`, `primary_entity`, `to_entity` |
+| ARCH work_unit | `docs/TEST-STRATEGY__<cid>.yaml docs/TASKS__<cid>.json docs/ARCH__<cid>.yaml` | `target_symbol`, `targets_work_units`, `via_unit` |
+| TST-NNN | `docs/TASKS__<cid>.json` | `implements_tests` (+ `test_spec` is its embed) |
+| API operation | `docs/ARCH__*.yaml docs/TASKS__*.json` | `traces_api_operation`, `touches_operations`, `operation_contract` |
+
+The write set is the located artifact(s) plus every artifact a checklist
+entry will be *edited*, *stamped* or *re-sliced* in — an entry the fix will
+leave *unaffected* or *deferred* is a `sites_considered` line, not a write.
+Add the `docs_index.py --stale` rows marked `re-stamp only` that name a file
+in the set to `restamp_only_rows`; the session stamps those between waves.
 
 ## Step 4 — Confidence, and when to ask
 

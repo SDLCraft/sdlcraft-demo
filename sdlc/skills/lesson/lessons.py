@@ -19,7 +19,16 @@ Subcommands:
                 the skill folder, kind/file mismatch, placeholder text, a
                 blocker that did not stop anything) - hints, never rejects.
                 --dry-run validates and prints the checks, writes nothing.
-    list        print lessons (all, --open, --skill X).
+    list        print lessons (all, --open, --status X, --skill X), each with
+                the maintainer's verdict when one has reached this project:
+                [triaged IMP-041], [resolved 0.9.8], [resolved 0.9.17 - not
+                installed], [wontfix IMP-039], [dismissed], and [open again
+                after 0.9.8] for a lesson that recurred after its fix.
+    reconcile   stamp the maintainer's verdicts onto this project's lessons
+                from the installed plugin's skills/lesson/VERDICTS.yaml (rows
+                keyed by this project's opaque id; --plugin-root names the
+                plugin outside a skill run). record-run does this at every
+                close, so it is rarely typed by hand.
     export      sanitized report for the skillset owner (--format md|json,
                 --out FILE to write it, --send to mail it now).
     consent     read or set this project's telemetry mode (off|ask|auto).
@@ -112,7 +121,12 @@ STATE_REL_TMPL = ".claude/skills-state/sdlc-{skill}.state.yaml"
 
 LSN_RE = re.compile(r"^LSN-\d{3,}$")
 FND_RE = re.compile(r"^FND-\d{3,}$")
+IMP_RE = re.compile(r"^IMP-\d{3,}$")
 SKILL_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+# The maintainer's verdict manifest, shipped inside the plugin (relative to
+# the plugin root): one row per lesson the ledger has dealt with, keyed by the
+# opaque project id. `reconcile` reads it; /improve's close writes it.
+VERDICTS_REL = Path("skills/lesson/VERDICTS.yaml")
 
 KINDS = (
     "instruction_gap",
@@ -131,7 +145,15 @@ SEVERITIES = ("blocker", "degraded", "cosmetic")
 OUTCOMES = ("complete", "draft", "aborted", "failed")
 AGENT_ACTIONS = ("improvised", "asked_user", "stopped", "worked_around")
 GENERALIZES = ("yes", "unsure", "project_specific")
-LESSON_STATUSES = ("open", "collected")
+# `open` is this project's word; everything after it is the maintainer's,
+# stamped by `reconcile` (from the installed plugin's VERDICTS.yaml) or by the
+# maintainer's collector on a registered repo. `collected` only says the
+# collector has the lesson; the four VERDICT_STATUSES say what became of it.
+LESSON_STATUSES = ("open", "collected", "triaged", "resolved", "wontfix", "dismissed")
+VERDICT_STATUSES = ("triaged", "resolved", "wontfix", "dismissed")
+# A recurrence of a lesson in one of these reopens it (status back to `open`,
+# the verdict fields kept): the fix regressed, or the call was wrong.
+CLOSED_STATUSES = ("resolved", "wontfix", "dismissed")
 MAX_EVIDENCE = 5
 MAX_EVIDENCE_LEN = 200
 
@@ -177,6 +199,9 @@ LESSON_KEYS = (
     "first_seen_at",
     "last_seen_at",
     "status",
+    "imp_id",
+    "fixed_in",
+    "verdict_at",
     "sent_at",
 )
 
@@ -880,7 +905,194 @@ def stamp_recurrence(prior: dict, fresh: dict) -> dict:
         prior["severity"] = fresh["severity"]
     if not prior.get("suggested_fix") and fresh.get("suggested_fix"):
         prior["suggested_fix"] = fresh["suggested_fix"]
+    # A repeat of a lesson the maintainer had CLOSED is the reopen signal: the
+    # fix regressed, or the wontfix/dismissed call was wrong. Status goes back
+    # to open; imp_id / fixed_in / verdict_at stay, so `list` can say "open
+    # again after 0.9.8", the next reconcile can tell this stale verdict from
+    # a newer one, and the maintainer's digest lists it as a REOPEN candidate.
+    # A triaged lesson stays triaged: its item is open already, and the bumped
+    # count is what has to travel.
+    if prior.get("status") in CLOSED_STATUSES:
+        prior["status"] = "open"
     return prior
+
+
+# =============================================================================
+# Verdicts - the maintainer's word on a lesson, coming back to the project.
+#
+# A lesson leaves as `open`. The maintainer groups it into a ledger item, fixes
+# the skill, ships a version - and until this section existed, nothing told the
+# project. One consumer carried 55 fixed defects as live traps for months and
+# re-filed two of them as new lessons. Two channels close that loop, and both
+# go through `apply_verdict` so they obey one rule:
+#
+#   * the installed plugin ships skills/lesson/VERDICTS.yaml, rows keyed by the
+#     opaque project id; `reconcile` (run by every record-run) stamps the rows
+#     that name THIS project;
+#   * the maintainer's collector stamps a registered repo directly (`--mark`).
+#
+# The one rule that is not obvious: a lesson that RECURRED after its verdict
+# (stamp_recurrence set it back to `open`, keeping the verdict fields) is left
+# alone by the very verdict it recurred after - re-closing it would erase the
+# only signal the maintainer has that the fix regressed. A newer fix, or a
+# reopened item, still stamps.
+# =============================================================================
+
+
+def _reopened_from(lesson: dict):
+    """The verdict a reopened lesson carried before its recurrence, as the
+    (status, imp_id, fixed_in) triple apply_verdict compares against - or None
+    when the lesson was never closed. Only resolved / wontfix / dismissed
+    reopen (stamp_recurrence), so the fields left behind say which it was."""
+    if lesson.get("status") != "open" or not lesson.get("verdict_at"):
+        return None
+    if lesson.get("fixed_in"):
+        return ("resolved", str(lesson.get("imp_id") or "") or None, str(lesson["fixed_in"]))
+    if lesson.get("imp_id"):
+        return ("wontfix", str(lesson["imp_id"]), None)
+    return ("dismissed", None, None)
+
+
+def apply_verdict(lesson: dict, verdict: dict, today: "str | None" = None) -> "str | None":
+    """Stamp one maintainer verdict onto one lesson.
+
+    Returns the status written, "reopened" when a reopened lesson was left
+    alone because this is the verdict it recurred after, or None when the
+    lesson already carried it (so a second pass changes nothing).
+    """
+    status = str(verdict.get("status") or "")
+    if status not in VERDICT_STATUSES:
+        return None
+    imp_id = str(verdict["imp_id"]) if verdict.get("imp_id") else None
+    fixed_in = str(verdict["fixed_in"]) if verdict.get("fixed_in") else None
+    target = (status, imp_id, fixed_in)
+    prior = _reopened_from(lesson)
+    if prior is not None and prior == target:
+        return "reopened"
+    current = (str(lesson.get("status") or ""),
+               str(lesson["imp_id"]) if lesson.get("imp_id") else None,
+               str(lesson["fixed_in"]) if lesson.get("fixed_in") else None)
+    if current == target:
+        return None
+    lesson["status"] = status
+    for key, value in (("imp_id", imp_id), ("fixed_in", fixed_in)):
+        if value:
+            lesson[key] = value
+        else:
+            lesson.pop(key, None)
+    lesson["verdict_at"] = today or _iso_utc_now()[:10]
+    return status
+
+
+def project_ids(root: Path) -> "set[str]":
+    """Every id this project may be known by in a verdict manifest: the
+    marker's project_uuid and project_id, plus the legacy path hash (a report
+    delivered before the uuid existed was keyed by it)."""
+    ids = {project_id_for(root)}
+    stored = read_marker(root).get("telemetry")
+    if isinstance(stored, dict):
+        for key in ("project_uuid", "project_id"):
+            if stored.get(key):
+                ids.add(str(stored[key]))
+    return ids
+
+
+def load_verdicts(path: Path) -> "list[dict]":
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    rows = raw.get("rows") if isinstance(raw, dict) else None
+    return [r for r in (rows or [])
+            if isinstance(r, dict) and r.get("project") and r.get("lsn_id")]
+
+
+def reconcile(root: Path, plugin_root, today: "str | None" = None) -> dict:
+    """Apply the installed plugin's verdict manifest to this project's queue.
+
+    Returns {status: no-manifest | unreadable | no-rows | ok, path, queue,
+    stamped: {status: n}, reopened: n, written: bool, problem}. Never raises
+    for a missing or unreadable manifest - a close must not fail on it.
+    """
+    out = {"status": "no-manifest", "path": None, "queue": Path(root) / QUEUE_REL,
+           "stamped": {}, "reopened": 0, "written": False, "problem": None}
+    if not plugin_root:
+        return out
+    path = Path(plugin_root) / VERDICTS_REL
+    if not path.is_file():
+        return out
+    out["path"] = path
+    try:
+        rows = load_verdicts(path)
+    except (OSError, yaml.YAMLError) as e:
+        out.update(status="unreadable", problem=str(e))
+        return out
+    ids = project_ids(root)
+    mine = {str(r["lsn_id"]): r for r in rows if str(r["project"]) in ids}
+    try:
+        queue = load_queue(out["queue"])
+    except (OSError, yaml.YAMLError, ValueError) as e:
+        out.update(status="unreadable", problem=str(e))
+        return out
+    named = [l for l in queue["lessons"] if isinstance(l, dict) and str(l.get("lsn_id")) in mine]
+    if not named:
+        out["status"] = "no-rows"
+        return out
+    out["status"] = "ok"
+    stamped: "dict[str, int]" = {}
+    for lesson in named:
+        result = apply_verdict(lesson, mine[str(lesson["lsn_id"])], today)
+        if result == "reopened":
+            out["reopened"] += 1
+        elif result:
+            stamped[result] = stamped.get(result, 0) + 1
+    out["stamped"] = stamped
+    if stamped:
+        queue["last_updated"] = _iso_utc_now()
+        try:
+            dump_queue(queue, out["queue"])
+        except OSError as e:
+            out.update(status="unreadable", problem=str(e))
+            return out
+        out["written"] = True
+    return out
+
+
+def verdict_summary(summary: dict) -> str:
+    """One line for the terminal, from reconcile()'s result (status ok)."""
+    stamped = summary["stamped"]
+    n = sum(stamped.values())
+    if not n and not summary["reopened"]:
+        return (f"verdicts from {summary['path']}: nothing new - every lesson it names "
+                f"already carries its verdict.")
+    parts = ", ".join(f"{stamped[k]} {k}" for k in VERDICT_STATUSES if stamped.get(k))
+    text = f"verdicts from {summary['path']}: {n} lesson(s) stamped"
+    if parts:
+        text += f" ({parts})"
+    if summary["reopened"]:
+        text += (f", {summary['reopened']} left open - recurred after the verdict the "
+                 f"manifest records, which the maintainer reads as a reopen")
+    return text + f" -> {summary['queue']}"
+
+
+def verdict_tag(lesson: dict, installed: "str | None") -> str:
+    """What `list` prints in the brackets: the status, with the verdict's
+    facts beside it, and `- not installed` when the fix is newer than what
+    /sdlc:setup last copied here."""
+    prior = _reopened_from(lesson)
+    if prior is not None:
+        if prior[0] == "resolved":
+            return f"open again after {prior[2]}"
+        if prior[0] == "wontfix":
+            return f"open again - {prior[1]} was wontfix"
+        return "open again - was dismissed"
+    status = str(lesson.get("status") or "open")
+    if status == "resolved":
+        fixed_in = lesson.get("fixed_in")
+        tag = f"resolved {fixed_in}" if fixed_in else "resolved"
+        if fixed_in and installed and _version_older(installed, fixed_in):
+            tag += " - not installed"
+        return tag
+    if status in ("triaged", "wontfix") and lesson.get("imp_id"):
+        return f"{status} {lesson['imp_id']}"
+    return status
 
 
 def find_recurrence(queue: dict, lesson: dict, threshold: float = SIM_STRONG,
@@ -1767,6 +1979,16 @@ def cmd_record_run(args) -> int:
                     resolve_plugin_root(args))
     if lag:
         print(f"Check: {lag}")
+    # A close is also where the maintainer's verdicts arrive: the installed
+    # plugin ships skills/lesson/VERDICTS.yaml, and a close is the one moment a
+    # plugin root is reliably known. Silent unless something changed, and never
+    # a failure - the run record above is what this command is for.
+    try:
+        verdicts = reconcile(root, resolve_plugin_root(args))
+    except Exception:  # noqa: BLE001
+        verdicts = None
+    if verdicts and verdicts["status"] == "ok" and (verdicts["stamped"] or verdicts["reopened"]):
+        print(f"Verdicts: {verdict_summary(verdicts)}")
     # A skill close is a flush point. The due-check is a local read that costs
     # nothing when nothing is due, so the network is touched at most once a week
     # per project - and never at all unless this project opted in.
@@ -2036,11 +2258,20 @@ def cmd_list(args) -> int:
         return 2
     lessons = _filter_lessons(queue["lessons"], args)
     print(f"{len(lessons)} lesson(s), {len(queue['runs'])} run(s) recorded.")
+    installed = installed_plugin_version(root)
+    counts: "dict[str, int]" = {}
+    for lesson in queue["lessons"]:
+        if isinstance(lesson, dict):
+            key = "open again" if _reopened_from(lesson) else str(lesson.get("status") or "open")
+            counts[key] = counts.get(key, 0) + 1
+    if any(k not in ("open", "collected") for k in counts):
+        order = ("open", "open again", "collected") + VERDICT_STATUSES
+        print("  by verdict: " + ", ".join(f"{counts[k]} {k}" for k in order if counts.get(k)))
     for lesson in lessons:
         where = lesson.get("where") or {}
         anchor = f"#{where.get('anchor')}" if where.get("anchor") else ""
         print(
-            f"  {lesson.get('lsn_id')} [{lesson.get('status')}] "
+            f"  {lesson.get('lsn_id')} [{verdict_tag(lesson, installed)}] "
             f"{lesson.get('skill')}/{lesson.get('kind')} ({lesson.get('severity')}) "
             f"{where.get('file')}{anchor} - {lesson.get('summary')}"
         )
@@ -2053,6 +2284,8 @@ def _filter_lessons(lessons, args):
         if not isinstance(lesson, dict):
             continue
         if getattr(args, "open", False) and lesson.get("status") != "open":
+            continue
+        if getattr(args, "status", None) and lesson.get("status") != args.status:
             continue
         if getattr(args, "skill", None) and lesson.get("skill") != args.skill:
             continue
@@ -2359,6 +2592,16 @@ def _check_queue(doc: dict) -> "list[str]":
         for fnd in lesson.get("related_findings") or []:
             if not FND_RE.match(str(fnd)):
                 errors.append(f"{tag}: related_findings entry {fnd!r} is not FND-NNN")
+        # The verdict fields: type checks only, and only when present - a
+        # queue written before verdicts existed carries none and stays green.
+        imp_id = lesson.get("imp_id")
+        if imp_id is not None and not IMP_RE.match(str(imp_id)):
+            errors.append(f"{tag}: imp_id {imp_id!r} does not match IMP-NNN - it names "
+                          f"the maintainer's ledger item, and is written by lessons.py alone")
+        for key in ("fixed_in", "verdict_at"):
+            value = lesson.get(key)
+            if value is not None and not isinstance(value, str):
+                errors.append(f"{tag}: {key} must be a string (got {value!r})")
         # Type checks only. Absent means "reported once" and every queue
         # written before recurrence stamping existed is silent here, so an
         # older file cannot turn red on upgrade.
@@ -2399,10 +2642,34 @@ def cmd_validate(args) -> int:
         )
         return 1
     open_count = sum(1 for l in queue["lessons"] if l.get("status") == "open")
+    resolved = sum(1 for l in queue["lessons"] if l.get("status") == "resolved")
     print(
         f"[OK] {path} is valid - {len(queue['lessons'])} lesson(s) "
-        f"({open_count} open), {len(queue['runs'])} run(s)."
+        f"({open_count} open" + (f", {resolved} resolved upstream" if resolved else "")
+        + f"), {len(queue['runs'])} run(s)."
     )
+    return 0
+
+
+def cmd_reconcile(args) -> int:
+    root = resolve_project_root(args.project_root)
+    summary = reconcile(root, resolve_plugin_root(args))
+    if summary["status"] == "no-manifest":
+        print(
+            "[OK] no verdict manifest reachable - run this inside a skill, or pass "
+            "--plugin-root <the installed sdlc plugin's folder>; nothing to reconcile."
+        )
+        return 0
+    if summary["status"] == "unreadable":
+        print(f"[FAIL] cannot reconcile - {summary['problem']}", file=sys.stderr)
+        return 2
+    if summary["status"] == "no-rows":
+        print(f"[OK] {summary['path']} names no lesson of this project - nothing to reconcile.")
+        return 0
+    print(f"[OK] {verdict_summary(summary)}")
+    if summary["written"]:
+        print_next("python .claude/sdlc/lessons.py list - the verdict now shows beside each id.")
+        _refresh_statusboard(root)
     return 0
 
 
@@ -2516,12 +2783,22 @@ def main(argv=None) -> int:
     )
     p.set_defaults(func=cmd_add)
 
-    p = sub.add_parser("list", help="Print recorded lessons.")
+    p = sub.add_parser("list", help="Print recorded lessons, each with the maintainer's "
+                                    "verdict when one has reached this project.")
     p.add_argument("--open", action="store_true")
+    p.add_argument("--status", default=None,
+                   help="One of: " + "|".join(LESSON_STATUSES) + ".")
     p.add_argument("--skill", default=None)
     p.add_argument("--since", default=None)
     p.add_argument("--path", default=None)
     p.set_defaults(func=cmd_list)
+
+    p = sub.add_parser("reconcile", help="Stamp the maintainer's verdicts (from the installed "
+                                         "plugin's VERDICTS.yaml) onto this project's lessons. "
+                                         "record-run does this at every skill close.")
+    p.add_argument("--plugin-root", default=None,
+                   help="The installed plugin's folder (default: the skill running now).")
+    p.set_defaults(func=cmd_reconcile)
 
     p = sub.add_parser("export", help="Sanitized report for the skillset owner.")
     p.add_argument("--format", default="md", choices=("md", "json"))

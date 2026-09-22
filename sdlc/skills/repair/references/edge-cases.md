@@ -21,8 +21,42 @@ resolves toward "surface it and ask", not "make a reasonable guess".
   / `docs_index.py` copies (use the plugin's own under
   `"${CLAUDE_SKILL_DIR}"` — the doctor already does for the dangling gate).
   Degrade to `crosscheck_artifacts.py` plus the per-symbol-class grep
-  (SKILL.md Phase 2 table), say so at the confirmation gate, and record it in
-  the resolution. Do not silently narrow the radius.
+  (`back-propagation.md`, "Blast radius"), say so at the plan gate, and record
+  it in the resolution. Do not silently narrow the radius.
+- **The Agent tool is unavailable** → both waves run inline, one finding at a
+  time, in plan order; the plan, the gate and the card rules are unchanged
+  (`orchestration.md`, "Without the Agent tool"). Say so on the card.
+
+## The sweep's labels
+
+What `doctor.py --emit-findings` does with what it finds, so a red line is
+read for what it is:
+
+- It appends one finding per failed check, **deduplicated** against every
+  open, triaged, wontfix, deferred and duplicate finding, keyed on the check
+  and the count-stripped first defect line — so a re-sweep never piles up
+  copies and never re-mints something a person dismissed.
+- Only lines under a blocking section become findings; a validator's warnings
+  never do unless `--warnings-as-findings` is passed (the cross-artifact
+  subset: task `[check 20]` embed drift, `[check 23]` built-but-test-deferred,
+  ux/arch warnings that name another artifact).
+- A `wontfix` finding whose summary carries `expected_count: N` for a check
+  is an **accepted deviance**: the check reports `accepted (N, unchanged)`
+  instead of failing until its count moves — matched by the artifact's file
+  name, so it holds whether `--docs-dir` was given as `docs` or as an absolute
+  path, and the doctor writes repo-relative paths into every finding it mints.
+- A check labelled `awaiting re-invocation per FND-NNN (<command>)` is red on
+  an artifact that finding still **owes** — named by its recorded command
+  sequence or by a propagation hop with no `verified_at` — so the failure is
+  that finding's pending hop, not a new defect: the doctor keeps it red (the
+  artifact is not consumable) but records nothing for it, and when every
+  failure is owed its `NEXT:` names the owed command instead of this skill.
+  Such a row is never localized again; it is work the finding still owes.
+  Before this label existed, every sweep between two hops minted the same
+  failure afresh, because its first defect line moved with each hop while the
+  cause did not.
+- Skipped checks (artifact absent, tool absent) are reported as skipped and
+  never become findings.
 - **The located symbol is a NAME, not a corpus id** (an entity, a work_unit,
   an operation) → `--refs` returns nothing or only the canonical file, because
   the index does not yet follow names or scan shards. That is not "no inbound
@@ -81,13 +115,28 @@ resolves toward "surface it and ask", not "make a reasonable guess".
 - **A downstream artifact is `status: draft`** → repair it anyway, but say so:
   a draft artifact will be rewritten by its own skill, and the edit may not
   survive. Prefer `re-invoke` for draft stages.
-- **Write-permission error mid-repair** → stop immediately, do not continue to
-  the next finding. Report which artifacts were already edited and which were
+- **Write-permission error mid-repair** → a worker reports it as `blocked`
+  and edits nothing more; the session stops the run, does not dispatch the
+  next wave, and reports which artifacts were already edited and which were
   not: a half-propagated fix is the one state worse than an unfixed defect, and
   the user needs to know exactly where it stopped.
+- **A worker relocates** (its fix proved the walk wrong, the source is outside
+  its write boundary) → it edits nothing; the session re-plans the finding
+  into a later aggregate or names it under `Remaining:` — never a mid-run
+  inline walk (`orchestration.md`, "Relocation").
 
 ## Verification
 
+- **The regenerate line runs only through the project's installed copy.**
+  When `.claude/sdlc/docs_index.py` is absent, skip that line and say so in
+  the close report: either the project never ran `/sdlc:setup`, or it ships
+  its own index generator (its `docs/INDEX.yaml` header names it, and the
+  doctor's gate label reads `plugin copy, --check only` with the reason). In
+  both cases `docs/INDEX.yaml` is not this skill's to rewrite. Never run the
+  plugin's own `setup/docs_index.py` bare against a consumer project: it
+  writes a stock-format index over whatever the project generates, and one
+  project lost its project-owned index that way. Only the read-only `--check`
+  may fall back to the plugin copy, exactly as the doctor does.
 - **A validator was already red before the repair** → record its before and
   after exit codes and state plainly that the pre-existing failure is unrelated.
   Never let an unrelated red be read as caused by the repair, and never claim a
@@ -135,7 +184,10 @@ resolves toward "surface it and ask", not "make a reasonable guess".
 - **Interrupted mid-repair** → on the next invocation, reconcile: for each
   finding left `open` whose `evidence` records partial progress, re-verify those
   artifacts against disk before continuing. Re-applying an edit that already
-  landed is the common failure mode here.
+  landed is the common failure mode here. The state file's `plan:` block, the
+  breadcrumbs under `sdlc-repair/inflight/` and the reports under
+  `sdlc-repair/reports/` say where each aggregate stands
+  (`orchestration.md`, "Resume").
 - **A finding whose artifacts have changed since it was raised** → re-read
   before trusting the evidence. Evidence is a snapshot; the defect may already
   be gone, in which case close it `resolved` with `mode: none` and a note that

@@ -9,7 +9,7 @@
       "name": "sdlc",
       "description": "SDLCraft Demo: spec-driven development for Claude Code. Structured interviews turn an idea into requirements, UX, design, data, API and architecture specs that AI agents build from.",
       "source": "./sdlc",
-      "version": "0.9.16"
+      "version": "0.9.17"
     }
   ]
 }

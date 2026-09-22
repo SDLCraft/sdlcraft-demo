@@ -10,7 +10,7 @@ This is the **demo edition** (MIT). It takes a project from idea to a complete,
 validated architecture. The full edition, SDLCraft, continues from there to
 tested code — see [Editions](#editions).
 
-> Pre-1.0 (version 0.9.16): expect the skills to keep changing.
+> Pre-1.0 (version 0.9.17): expect the skills to keep changing.
 
 ## Install
 

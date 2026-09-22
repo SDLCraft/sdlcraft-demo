@@ -510,12 +510,52 @@ def collect_findings(state):
     return out
 
 
-def collect_lessons(state):
+def collect_lessons(state, root=None):
+    """Open lessons by id, plus the counts of what the maintainer's verdicts
+    made of the rest - a lesson stays `open` only until a verdict reaches the
+    project (lessons.py reconcile, at every skill close), so the board says
+    what came back rather than counting every lesson as live."""
     doc = load(state / "sdlc-lessons.yaml") or {}
-    # Same here: the lessons queue writes `lsn_id`.
-    return [str(l.get("lsn_id") or l.get("id") or "LSN-???")
-            for l in (doc.get("lessons") or [])
-            if isinstance(l, dict) and str(l.get("status") or "") == "open"]
+    installed = (load(root / MARKER_REL) or {}).get("plugin_version") if root else None
+    out = {"open": [], "reopened": [], "collected": 0, "triaged": 0,
+           "resolved_installed": 0, "resolved_pending": 0, "wontfix": 0, "dismissed": 0}
+    for l in (doc.get("lessons") or []):
+        if not isinstance(l, dict):
+            continue
+        # Same here: the lessons queue writes `lsn_id`.
+        lid = str(l.get("lsn_id") or l.get("id") or "LSN-???")
+        status = str(l.get("status") or "")
+        if status == "open":
+            # An open lesson carrying a verdict date recurred AFTER its
+            # verdict: the fix regressed, or the call was wrong.
+            (out["reopened"] if l.get("verdict_at") else out["open"]).append(lid)
+        elif status == "resolved":
+            fixed_in = l.get("fixed_in")
+            pending = bool(fixed_in and installed and _older(installed, fixed_in))
+            out["resolved_pending" if pending else "resolved_installed"] += 1
+        elif status in out:
+            out[status] += 1
+    return out
+
+
+def lessons_line(lessons):
+    """The one board line: open ids, then what came back from the maintainer."""
+    bits = []
+    if lessons["open"]:
+        bits.append("%d open (%s)" % (len(lessons["open"]), id_list(lessons["open"])))
+    if lessons["reopened"]:
+        bits.append("%d open again after a fix (%s)"
+                    % (len(lessons["reopened"]), id_list(lessons["reopened"])))
+    if lessons["triaged"]:
+        bits.append("%d triaged upstream" % lessons["triaged"])
+    if lessons["resolved_installed"]:
+        bits.append("%d resolved (fix installed)" % lessons["resolved_installed"])
+    if lessons["resolved_pending"]:
+        bits.append("%d resolved upstream, not installed - run /sdlc:setup"
+                    % lessons["resolved_pending"])
+    if lessons["wontfix"]:
+        bits.append("%d wontfix" % lessons["wontfix"])
+    return ", ".join(bits)
 
 
 def collect_integrity(docs):
@@ -779,9 +819,9 @@ def render_tier1(data, stamp):
     cmd, why = data["next"]
     L += ["## Next", ""]
     L.append("`%s` - %s" % (cmd, why) if cmd else "Nothing is queued - %s" % why)
-    if data["lessons"]:
-        L += ["", "Lessons: %d open (%s) - about the SDLC plugin itself, not this "
-                  "project." % (len(data["lessons"]), id_list(data["lessons"]))]
+    if lessons_line(data["lessons"]):
+        L += ["", "Lessons: %s - about the SDLC plugin itself, not this project."
+              % lessons_line(data["lessons"])]
     L.append("")
     return cap(L, len(down), len(risks))
 
@@ -916,10 +956,19 @@ def render_tier2(data, stamp):
         L.append("- Installed helpers: from plugin %s, older than the plugin in use - "
                  "run `/sdlc:setup` once." % data["setup_lag"])
     L.append("")
-    if data["lessons"]:
+    lessons = data["lessons"]
+    if lessons_line(lessons):
         L += ["## Lessons about the plugin", "",
               "These describe the sdlc SKILLS, not this project; nothing in the",
-              "pipeline reads them. Open: %s" % ", ".join(data["lessons"]), ""]
+              "pipeline reads them. The maintainer's verdicts arrive at every skill",
+              "close (`python .claude/sdlc/lessons.py list` shows each one)."]
+        if lessons["open"]:
+            L.append("- Open: %s" % ", ".join(lessons["open"]))
+        if lessons["reopened"]:
+            L.append("- Open again after a fix (recurred - the maintainer sees it as a "
+                     "reopen): %s" % ", ".join(lessons["reopened"]))
+        L.append("- Verdicts: %s" % lessons_line(lessons))
+        L.append("")
     return "\n".join(L) + "\n"
 
 
@@ -940,7 +989,7 @@ def gather(root, plugin_root=None):
         "warnings": warnings, "refused_warnings": refused,
         "pipeline": pipeline, "findings": findings,
         "blocked": blocked, "questions": questions,
-        "integrity": collect_integrity(docs), "lessons": collect_lessons(state),
+        "integrity": collect_integrity(docs), "lessons": collect_lessons(state, root),
         "next": next_step(pipeline, findings, blocked, questions, pro_url, edition),
         "setup_lag": setup_lag,
         "auto_commit": read_auto_commit(root),

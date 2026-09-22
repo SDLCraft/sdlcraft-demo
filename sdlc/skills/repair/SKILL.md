@@ -5,12 +5,14 @@ description: >
   Runs a doctor sweep (every skill validator + the cross-artifact linter + the
   docs-index dangling-reference gate + provenance drift), merges it with the
   FND-NNN findings any stage raised (codegen, an interview skill, the user),
-  then BACK-PROPAGATES each finding to the earliest artifact whose content is
-  actually wrong, fixes it there, and forward-propagates along the computed
-  blast radius — surgically (edit + bump + re-slice, scripted), or by handing
-  the user the exact downstream re-invocation sequence (each stage's
+  then BACK-PROPAGATES every open finding to the earliest artifact whose
+  content is actually wrong, fixes it there, and forward-propagates along the
+  computed blast radius — surgically (edit + bump + re-slice, scripted), or by
+  handing the user the exact downstream re-invocation sequence (each stage's
   --reconcile form; the walk's reasoning is left on the finding as handoff
-  notes, and the chain routes itself). Forms: /sdlc:repair
+  notes, and the chain routes itself). The session orchestrates: opus workers
+  localize every finding in parallel, one plan gate orders the whole queue
+  upstream-first, workers fix per artifact aggregate. Forms: /sdlc:repair
   (full flow), /sdlc:repair --check [--no-emit] [--provenance] (sweep only,
   edits no docs/ artifact), /sdlc:repair FND-003 FND-005 (named findings),
   /sdlc:repair --flag "<reason>" [--stage <stage>] [--path <id|schema_path>]
@@ -24,7 +26,7 @@ user-invocable: true
 disable-model-invocation: true
 model: opus
 effort: xhigh
-allowed-tools: Read Write Edit Bash Bash(ls *) Glob Grep AskUserQuestion
+allowed-tools: Read Write Edit Bash Bash(ls *) Glob Grep Agent AskUserQuestion
 ---
 
 # sdlc-repair
@@ -46,12 +48,14 @@ the real defect stays in ARCH or PRD, invisible, waiting.
 
 - Edits to the artifact(s) under `docs/` that actually hold the defect, with
   `metadata` version bumps and changelog entries (via `bump_artifact.py`) and
-  every task embed copied from a changed symbol re-sliced (via
-  `../task/reslice_embeds.py`).
+  every task embed copied from a changed symbol re-sliced (via the `task`
+  skill's `reslice_embeds.py`, full edition only).
 - `.claude/skills-state/sdlc-findings.yaml` — the `FND-NNN` queue, with a
   `resolution` block per finding it closed (schema: `FINDINGS.schema.yaml`).
   Written only through `findings.py` and the Phase-6 resolution write.
-- `.claude/skills-state/sdlc-repair.state.yaml` — session state, for resume.
+- `.claude/skills-state/sdlc-repair.state.yaml` — session state, for resume;
+  `.claude/skills-state/sdlc-repair/{localize,gate,inflight,reports}/` — the
+  workers' reports and breadcrumbs (`references/orchestration.md`).
 - A close report naming the stale tasks `/sdlc:code` will offer to rebuild.
 
 It owns no `docs/` artifact of its own.
@@ -70,23 +74,26 @@ defect is an `LSN-NNN`, and all of them surface, generated, in
 | `SKILL.md` | This file — dispatch, the six phases, the gates. |
 | `FINDINGS.schema.yaml` | Canonical schema for `.claude/skills-state/sdlc-findings.yaml` (version 2). |
 | `validate_findings.py` | Pydantic v2 validator for the queue (+ id/resolution/propagation integrity, version-gated). `--stats` prints the suspected-vs-located matrix. |
-| `findings.py` | The queue's ONLY writer: `add \| list \| validate \| stats`. Every stage calls it as `python "${CLAUDE_SKILL_DIR}/../repair/findings.py"`; `setup` installs a copy at `.claude/sdlc/findings.py` for ambient sessions. Validates before it appends, dedupes, stamps recurrence. |
+| `findings.py` | The queue's ONLY writer: `add \| list \| plan \| reopen \| validate \| stats`. Every stage calls it as `python "${CLAUDE_SKILL_DIR}/../repair/findings.py"`; `setup` installs a copy at `.claude/sdlc/findings.py` for ambient sessions. Validates before it appends, dedupes, stamps recurrence; `plan` orders the open set into aggregates and stage-waves. |
 | `doctor.py` | The sweep runner. `--quick` = cross-artifact linter only (what `/sdlc:code` runs at component boundaries); default = the full sweep; `--provenance` = upstream-hash drift; `--emit-findings [--warnings-as-findings]` records failures through `findings.py`. |
 | `bump_artifact.py` | Bumps `metadata.<name>_version` and prepends the changelog line as one text-level edit (comments preserved); refuses an out-of-order changelog unless `--force`. Installed by `setup` at `.claude/sdlc/bump_artifact.py`. |
-| `references/back-propagation.md` | Finding → source stage. The localization rules. Read in Phase 2. |
-| `references/forward-propagation.md` | Blast-radius checklist, surgical vs re-invoke, the scripted surgical sequence, verification, handback. Read in Phase 4. |
-| `references/edge-cases.md` | Unusual situations. |
+| `references/orchestration.md` | The two worker waves: briefs, report shapes, breadcrumbs, aggregates and their order, the plan gate, the drain between waves, the consolidated handoffs, the close card rows. Read by the session in Phase 2. |
+| `references/back-propagation.md` | Finding → source stage, and the write set (Step 3½). Read by every localize worker; by the session when it walks inline. |
+| `references/forward-propagation.md` | Surgical / additive / re-invoke, the scripted sequences, verification, the resolution write, handback. Read by every fix worker; by the session when it fixes inline. |
+| `references/edge-cases.md` | Unusual situations, the sweep's labels, verification caveats. |
 | `../prd/references/reporting-to-the-user.md` | How to report results to the user: the three verdict tags, translated (never pasted) findings, and the Phase-8 close card. Shared by every skill; read before Phase 6. |
 | `../lesson/references/lessons-capture.md` | When a walk ends at the SKILL rather than an artifact (Phase 2 Step 0): the lessons routing table and raising conditions. |
-| `_smoke/` | Validator fixtures (pinned by `expected.yaml`) + `bump_selftest.py`, `findings_selftest.py`, `doctor_selftest.py`. |
-| `evals/` | Eval prompts; `evals/fixtures/<case>/` holds pre-edited copies of the demo docs for cases 3 and 4. |
+| `_smoke/` | Validator fixtures (pinned by `expected.yaml`) + `bump_selftest.py`, `findings_selftest.py`, `doctor_selftest.py`, `orchestration_selftest.py` and the other prose pins. |
+| `evals/` | Eval prompts; `evals/fixtures/<case>/` holds pre-edited copies of the demo docs. |
 
 ## Invocation dispatch
 
 Classify `$ARGUMENTS`:
 
-1. **No arguments** → **full flow**: sweep, merge with open findings, localize,
-   confirm, fix, verify, hand back. Phases 1–6 below.
+1. **No arguments** → **full flow**: sweep, merge with open findings, localize
+   every one of them, plan, confirm once, fix, verify, hand back. Phases 1–6
+   below. The run works EVERY open finding the extent answer covers, and it
+   never stops at a handoff.
 2. **`--check`** → **sweep only**: run the full doctor, print the report, stop.
    **Edits no artifact under `docs/`** — but it *does* append one finding per
    failed check to the queue (deduplicated), which is what makes the next
@@ -138,9 +145,12 @@ Classify `$ARGUMENTS`:
 
 Read `.claude/skills-state/sdlc-repair.state.yaml` if present. `in_progress`
 → offer resume / restart / discard. Load and validate the findings queue.
+Prune `.claude/skills-state/sdlc-repair/localize/` and `reports/` left by an
+earlier run that is `complete` or `aborted` (they are that run's audit trail,
+not this one's input).
 
-The state file's schema (written on first gate, updated after every finding
-worked, kept as audit trail):
+The state file's schema (written at the plan gate, updated after every
+finding worked and every drain, kept as audit trail):
 
 ```yaml
 session_id: <uuid4>
@@ -150,32 +160,43 @@ last_updated: <iso8601>
 status: in_progress          # in_progress | complete | aborted
 findings_worked: []          # FND ids resolved/triaged/wontfixed/deferred this session
 current_finding: null
+dispatch: agent              # agent | inline (the Agent tool was unavailable)
+plan: {}                     # Phase 3: `findings.py plan --json` + extent, decisions,
+                             #   per-aggregate status (planned | dispatched | done | relocated)
+handoffs: []                 # Phase 6: the consolidated command chain, printed once
 baseline_checks: {}          # Phase 2: {"<check name> <target>": <exit>} copied from
                              #   doctor.py --json, so Phase 5 can say "red before, red after"
 provenance_drift: []         # Phase 2: the [stale] lines doctor.py --provenance printed
 metrics: {}                  # run telemetry (CLAUDE.md 15): validator_runs,
-                             # validator_failures, resumes
+                             # validator_failures, resumes, workers_dispatched
 lesson_notes: []             # mid-run lesson scratch (CLAUDE.md 15): noted, never
                              # acted on mid-run; drained by the Phase-6 self-review
 ```
 
 On resume, reconcile before continuing. An interrupted run leaves one of two
-shapes, and both name the artifacts it had already edited: a `triaged`
-re-invoke carries them in its resolution block's `artifacts_touched`, and a
-surgical fix whose verification never ran leaves the finding `open` with one
-evidence line naming them (Phase 6 — an `open` finding carries no resolution
-block at all, and a `triaged` one only while a re-invoke is in progress).
-Re-verify every artifact so named against disk before touching it. The common
-failure mode here is re-applying an edit that already landed.
+shapes on a finding, and both name the artifacts it had already edited: a
+`triaged` re-invoke carries them in its resolution block's `artifacts_touched`,
+and a surgical fix whose verification never ran leaves the finding `open` with
+one evidence line naming them (Phase 6 — an `open` finding carries no
+resolution block at all, and a `triaged` one only while a re-invoke is in
+progress). Re-verify every artifact so named against disk before touching it.
+The common failure mode here is re-applying an edit that already landed. The
+`plan:` block, the breadcrumbs under `sdlc-repair/inflight/` and the reports
+under `sdlc-repair/reports/` say where each aggregate stands
+(`references/orchestration.md`, "Resume"): an aggregate with a report and a
+written resolution is done, one with a breadcrumb is re-dispatched from its
+last phase after its `files_written` hashes are re-verified, one with nothing
+is dispatched fresh.
 
-**The queue is re-read after every finding closes.** A finding minted mid-run
-(`--raised-by sdlc-repair`, Phase 4: a defect the walk surfaced beside the one
-being fixed, whose decision this run can obtain) is `open` in the queue this
-run owns, so the loop picks it up next — its Phase 2 walk is short (the
-finding that minted it is the localization), its Phase 3 gate offers *decide
-it now* at position 1, and it lands in `findings_worked` like any other. A run
-invoked with named findings (`/sdlc:repair FND-003`) works the ones it minted
-too; they are not "other findings".
+**The queue is re-read after every finding closes and after every stage-wave
+drains.** A finding minted mid-run (`--raised-by sdlc-repair`: a defect a
+worker surfaced beside the one it was fixing, whose decision this run can
+obtain) is `open` in the queue this run owns, so the loop picks it up next —
+it joins the next stage-wave's plan through a localize pass of its own (short:
+the finding that minted it is most of the walk), its gate question offers
+*decide it now* at position 1, and it lands in `findings_worked` like any
+other. A run invoked with named findings (`/sdlc:repair FND-003`) works the
+ones it minted too; they are not "other findings".
 
 **`EXIT`** (any free-text field, any phase): persist the state file with
 `status: aborted`, confirm which artifacts were already edited, run
@@ -183,7 +204,7 @@ too; they are not "other findings".
 (skip silently if absent) after draining `lesson_notes` into `lessons.py add`
 calls, and stop.
 
-### Phase 2 — Sweep & localize
+### Phase 2 — Sweep & localize (wave 1)
 
 Run the doctor (bare; capture the numeric exit code — never read an exit status
 after a pipe, CLAUDE.md §11). Two invocations, both cheap:
@@ -201,46 +222,46 @@ missed stamp.
 
 The first runs every skill validator against its canonical artifact, every
 `TASKS__*.json` shard, `crosscheck_artifacts.py`, and the docs-index dangling
-gate (the project's `.claude/sdlc/docs_index.py`, or the plugin's own copy -
-read-only `--check`, never a regenerate - when none is installed, with a label
-saying why); appends one finding per failed check (deduplicated
-against every open, triaged, wontfix, deferred and duplicate finding, keyed on
-the check and the count-stripped first defect line — so a re-sweep never piles
-up copies and never re-mints something a person dismissed); and reports each
-check's captured exit code plus its `WARNINGS (N)` count. Only lines under a
-blocking section become findings; a validator's warnings never do unless you
-pass `--warnings-as-findings` (the cross-artifact subset: task `[check 20]`
-embed drift, `[check 23]` built-but-test-deferred, ux/arch warnings that name
-another artifact). A `wontfix` finding whose summary carries
-`expected_count: N` for a check is an **accepted deviance**: the check reports
-`accepted (N, unchanged)` instead of failing until its count moves — matched
-by the artifact's file name, so it holds whether `--docs-dir` was given as
-`docs` or as an absolute path, and the doctor writes repo-relative paths into
-every finding it mints whatever form it ran with. A check
-labelled `awaiting re-invocation per FND-NNN (<command>)` is red on an
-artifact that finding still **owes** — named by its `downstream_rerun` or by a
-propagation hop with no `verified_at` — so the failure is that finding's
-pending hop, not a new defect: the doctor keeps it red (the artifact is not
-consumable) but records nothing for it, and when every failure is owed its
-`NEXT:` names the owed command instead of this skill. Do not localize such a
-row again; the close card counts it as work that finding still owes (Phase 6,
-"The `Findings:` and `Status:` rows"). Before this label existed, every sweep between two hops
-minted the same failure afresh, because its first defect line moved with each
-hop while the cause did not. Skipped checks (artifact absent,
-tool absent) are reported as skipped and never become findings.
+gate (the project's `.claude/sdlc/docs_index.py`, or the plugin's own copy —
+read-only `--check`, never a regenerate — when none is installed, with a label
+saying why); appends one finding per failed check, deduplicated, and reports
+each check's captured exit code plus its `WARNINGS (N)` count. What each label
+means — accepted deviance, `awaiting re-invocation per FND-NNN`, skipped —
+is in `references/edge-cases.md`, "The sweep's labels"; a row labelled
+awaiting is work a finding still owes and is never localized again.
 
 Copy the second run's per-check exits into the state file's `baseline_checks`
 and its `[stale]` lines into `provenance_drift`. A `[stale]` line is *not* a
 finding — an artifact built against an older upstream is a known state whose
 channel is the owning skill's §7 delta-review — but it is a fact Phase 4 needs
-(see "hand-edits" in `references/edge-cases.md`), and the doctor's
-`can be marked resolved` hints name triaged re-invoke findings whose downstream
-artifacts have all been rebuilt since the fix: confirm and close those first.
+(see "hand-edits" in `references/edge-cases.md`).
 
-Merge the sweep's findings with the queue's existing open ones (all raisers:
-`sdlc-code`, any `sdlc-<skill>`, `sdlc-repair`, `user`), then **localize each**.
-Load `references/back-propagation.md` now — it holds the rules. The shape of
-the work:
+**The open set** is every `open` finding plus every `triaged` one — the
+sweep's new findings merged with the queue's existing ones, all raisers
+(`sdlc-code`, any `sdlc-<skill>`, `sdlc-repair`, `user`). Assert it here with
+`python "${CLAUDE_SKILL_DIR}/findings.py" list --open`, and it is re-asserted
+at every stage-wave drain: a run ends when nothing in that set can still be
+worked, never because the first handoff was printed. A run invoked with named
+findings uses those instead.
+
+**Close first.** The snapshot's `provenance.resolvable` hints (`FND-NNN can be
+marked resolved`) name the `triaged` re-invoke findings whose downstream
+artifacts have all been rebuilt since the fix: verify their hops (Phase 5) and
+close them (Phase 6) before any wave — they need no walk.
+
+**Wave 1 — localize.** Load `references/orchestration.md` now. Every finding
+in the open set that carries no `resolution.located_stage` gets ONE read-only
+worker (the Agent tool, `model: "opus"`, `run_in_background: true`, the whole
+wave in one turn, five in flight, rolling) whose brief carries paths only —
+the finding id and queue path, `references/back-propagation.md`, the index,
+the snapshot, and the report path
+`.claude/skills-state/sdlc-repair/localize/<FND>.yaml`. The worker walks,
+computes the write set (Step 3½) and writes that one file; it edits nothing
+and asks nothing. Without the Agent tool, walk them yourself, one at a time,
+and say so on the card. While the wave runs,
+`python "${CLAUDE_SKILL_DIR}/findings.py" plan` (no `--from`) prints the
+provisional table from the queue's own fields; the exact one comes after the
+wave. The shape of every walk, whoever runs it:
 
 - walk **backwards** from where the finding surfaced to the earliest artifact
   whose content is wrong; a finding raised by an interview skill usually
@@ -257,45 +278,12 @@ the work:
 - read the upstream slice an embed was copied from and compare: same wrong thing
   → upstream is the source; different → the embed is merely stale;
 - a finding stamped `recurrence_of: FND-NNN` was **repaired before**: say so at
-  the gate, put `re-invoke` in position 1, and never refuse `surgical`.
-
-**Blast-radius checklist.** For every located symbol, compute — never guess —
-the inbound sites, and print them **grouped by artifact** as a checklist the
-Phase-4 fix must tick off and PERSIST as `resolution.sites_considered`:
-
-```bash
-python .claude/sdlc/docs_index.py --refs <symbol>
-```
-
-Every `python .claude/sdlc/docs_index.py …` in this file runs the copy
-`${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once per
-run: an installed copy older than the plugin's counts as absent. The bare
-regenerate in Phase 5 is the exception that file names.
-
-**Token sweep.** A fix that REMOVES, RENAMES, or ADDS a named token (an input
-parameter, a CLI flag, a field, an enum member, a literal) has sites `--refs`
-cannot see — an added field's shape is typically restated in prose before any
-reader declares it a structured reference. Sweep the corpus with a plain
-text search — `grep -rn <token> docs/` (or the Grep tool over `docs/`); the
-index's `--find` matches symbols, not prose, so it cannot do this sweep —
-and add every hit to the checklist (its own `sites_considered` entry),
-changelog lines excepted. The typical miss is a
-sibling test in the very file you are about to edit — five artifacts
-reconciled, one test in the edited strategy file still passing the removed
-parameter. The close card names the token, the hit count and each
-hit's disposition.
-
-Until shards and named symbols are indexed, `--refs` resolves **corpus ids
-only** (`FR-`, `WKF-`, `ENT-`, `SCR-`, `TST-`, `TSK-`, … families defined in
-the canonical files). For a *named* symbol fall back to a grep over `docs/`,
-by symbol class, and say in the resolution that the radius came from grep:
-
-| Symbol class | Grep for the name in | Fields that carry it |
-|---|---|---|
-| DATA-MODEL entity | `docs/ARCH__*.yaml docs/TEST-STRATEGY__*.yaml docs/TASKS__*.json` (+ `docs/API__*.yaml`) | `traces_data_entities`, `touches_entities`, `via_entity`, `entity_slice.entity`, `primary_entity`, `to_entity` |
-| ARCH work_unit | `docs/TEST-STRATEGY__<cid>.yaml docs/TASKS__<cid>.json docs/ARCH__<cid>.yaml` | `target_symbol`, `targets_work_units`, `via_unit` |
-| TST-NNN | `docs/TASKS__<cid>.json` | `implements_tests` (+ `test_spec` is its embed) |
-| API operation | `docs/ARCH__*.yaml docs/TASKS__*.json` | `traces_api_operation`, `touches_operations`, `operation_contract` |
+  the gate, put `re-invoke` in position 1, and never refuse `surgical`;
+- compute the blast radius — the write set — with `docs_index.py --refs` plus
+  the token sweep (`back-propagation.md`, Step 3½), never by guessing; every
+  `python .claude/sdlc/docs_index.py …` in this file runs the copy
+  `${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once
+  per run, and the bare regenerate in Phase 5 is the exception that file names.
 
 **Step 0 — is it the skill?** (CLAUDE.md 15). Sometimes the walk ends not at
 a wrong artifact but at the *plugin itself*: a validator check the user
@@ -304,40 +292,60 @@ with no field for what downstream needs (`schema_gap`). The fix then does NOT
 live in this project — record a lesson
 (`python .claude/sdlc/lessons.py add --skill <owning-skill> --kind …
 --related FND-NNN`; skip silently if the helper is absent) and close the
-finding `wontfix` with that reason. Never bend a validator to accept an
-artifact, and never patch any plugin file from inside a consumer project.
-Mid-run observations that are not yet lessons go to `lesson_notes`, never to a
-detour.
+finding `wontfix` with that reason. A worker reports it as `lesson`; the
+session records it. Never bend a validator to accept an artifact, and never
+patch any plugin file from inside a consumer project. Mid-run observations
+that are not yet lessons go to `lesson_notes`, never to a detour.
 
 **Read by slice, not by slurp.** The upstream artifacts are large; use
 `docs/INDEX.yaml` line ranges (`.claude/rules/sdlc-docs-access.md`) to read only
 the symbol under suspicion and its inbound sites.
 
-### Phase 3 — Confirm
+### Phase 3 — Plan gate
 
-One `AskUserQuestion` per finding (batch 2–4 when several are mechanical and
-low-stakes). Present, per finding: the **walk** (surfacing site → stages
-examined → chosen source → why), the proposed fix, the blast-radius checklist,
-the mode (`surgical` / `re-invoke`) and, when it applies, `repaired before as
-FND-NNN`.
+When the wave has drained, build the table — never from memory:
 
-Options: *fix as proposed* (position 1; position 1 is *re-invoke* for a
-recurrence) / *fix fully — author the new item(s) here* (offered, and at
-position 1, whenever the fix changes the downstream SET and the four-part
-additive criterion in Phase 4 holds; it is never argued for, it is offered)
-/ *fix differently* (free text) / *defer* (status `deferred`,
-`resolution.mode: none` + `reason`; on a TASKS artifact also declare the task
-in its top-level `deferrals: [{id, reason}]` list — never a `WRN` prose note) /
-*accept as-is* (status `wontfix` with `expected_count: N` in the summary when
-the finding is a validator count the project lives with) / *wontfix* / *it's
-the skill, not the doc* (record the lesson per Phase 2 Step 0, cross-linked
-`--related FND-NNN`, and close the finding `wontfix`) / *it's the generated
-code, not the spec* (`back-propagation.md`'s Step 2 owner table showed every
-upstream contract already correct; close `wontfix` with
-`resolution.located_stage: code` and name the owning qualified task id(s) in
-`resolution.stale_tasks` — `/sdlc:code`'s own plan gate reads that field
-regardless of status and schedules the rebuild; repair still never edits
-code itself).
+```bash
+python "${CLAUDE_SKILL_DIR}/findings.py" plan --from .claude/skills-state/sdlc-repair/localize \
+  --doctor-json .claude/skills-state/sdlc-repair.doctor.json --json
+```
+
+It groups the findings into **aggregates** (write sets that share an
+artifact, joined transitively, directory-aware, capped at five; two findings
+on one located symbol become one, the later a `duplicate`) and orders them
+into **stage-waves** by the pipeline stage of the located artifact, upstream
+first (`prd → ux → design → data → api → arch → test → task`): an aggregate
+downstream of another aggregate's write set waits for it even when the two
+are disjoint, `related` and `recurrence_of` findings sit together, and the
+close-first findings are already closed. That order is the dependency order
+of the whole queue, and it is stated here once (`references/orchestration.md`
+holds the mechanics).
+
+Then ONE `AskUserQuestion`, with the whole table inside it (AUTHORING's channel
+rule: what a decision depends on rides in the call, in the recommended
+option's `preview`, never in chat markdown the same turn):
+
+- the **extent** ladder, single-select — *all N aggregates, in wave order*
+  at position 1 with the full table as its `preview`; *the first stage-wave
+  only*; *the first aggregate only*. "Other" carries the per-finding
+  dispositions in the Quick-reference vocabulary (`all except FND-…`,
+  `defer FND-…: <reason>`, `wontfix FND-…`, `accept-as-is FND-…
+  (expected_count N)`, `it's the skill FND-…`, `it's the generated code
+  FND-…`);
+- one question per **missing decision** — a finding whose walk would route
+  to `re-invoke` for want of ONE decision this run can take (which component
+  owns a new unit, what it is called, which of two contradictory values is
+  right): the worker's proposal at position 1 with its `basis`, *hand it off*
+  last. Answered, the finding is authored in this run (`additive`); declined,
+  it is a handoff and the run carries on. Four per call; a fifth goes in a
+  second call before wave 2.
+
+Per finding the table shows the **walk** (surfacing site → stages examined →
+chosen source → why), the proposed mode (`surgical` / `additive` /
+`re-invoke`), the write set, and `repaired before as FND-NNN` when it applies.
+Position 1 of a mode is *re-invoke* for a recurrence, *fix fully — author the
+new item(s) here* whenever the fix changes the downstream SET and the
+four-part additive criterion in Phase 4 holds (offered, never argued for).
 
 **When both rules claim position 1** — the finding is a recurrence *and* its fix
 meets the four-part additive criterion — *fix fully* takes position 1. The
@@ -350,18 +358,18 @@ two interviews and discards the walk.
 `references/back-propagation.md` names when to **ask rather than decide**:
 `missing_requirement` findings, two equally defensible stages, any fix that
 changes product behaviour rather than clarifying a description, and any walk
-that terminates at PRD. Mechanical cases (a stale embed re-slice, a dangling ref
-whose owner `--refs` makes obvious, an `upstream_incomplete` whose field the
-owner can simply fill) can be batched.
+that terminates at PRD — those are the missing-decision questions above, never
+silent choices. Record every answer in
+`.claude/skills-state/sdlc-repair/gate/answers.yaml` and the state file's
+`plan:` before the first dispatch.
 
 `EXIT` in any free-text field stops the run (Phase 1 rules).
 
-### Phase 4 — Fix at the source
+### Phase 4 — Fix at the source (wave 2)
 
-Load `references/forward-propagation.md`. Three modes, chosen by two
-questions: does the fix change the **set** of downstream items, or only their
-**content**? And when the set — is the change **purely additive and fully
-determined** by the walk just performed?
+Three modes, chosen by two questions: does the fix change the **set** of
+downstream items, or only their **content**? And when the set — is the change
+**purely additive and fully determined** by the walk just performed?
 
 **Once a finding is localized and the fix is expressible in the artifacts,
 FIX IT in this run.** The localization table is a map of where the *source*
@@ -371,6 +379,24 @@ inside the located artifact itself (which component owns a new work_unit,
 what it is called) is one this run CAN get: ask it at Phase 3, then write it.
 A new finding is cheap to write and expensive to redeem: the next skill re-derives the cross-artifact
 walk cold, with no guarantee of the same reading.
+
+**Wave 2 — fix.** One worker per aggregate (`model: "opus"`, one turn per
+stage-wave, five in flight, rolling), briefed with paths: the aggregate's
+localize reports, `gate/answers.yaml`, `references/forward-propagation.md`,
+the snapshot, and a **write boundary** = the aggregate's write set — nothing
+else, ever. Inside the aggregate the worker runs each finding's sequence
+below SERIALLY, each one's verification (Phase 5) before the next starts —
+never interleave two findings' sequences, so each stamp claims only what its
+own sequence reviewed — and writes a breadcrumb after every phase and a
+report per finding (`.claude/skills-state/sdlc-repair/reports/<FND>.report.yaml`).
+Disjoint aggregates of one stage-wave run in parallel; the next stage-wave
+starts only after the previous one drained (Phase 5). A worker never asks: a
+decision the gate did not take is reported `blocked` with the question, and
+a walk that proves wrong mid-fix is reported `relocated` with the artifact it
+points at, nothing edited — the session re-plans it or names it on the card.
+**The reconcile chain is never printed here**; a re-invoke records its owed
+commands in the report and the session prints the consolidated chain once, at
+close. Without the Agent tool, run the sequences yourself in plan order.
 
 - **`surgical`** (content) — scripted, in this order, no hand edits to any
   task JSON:
@@ -389,9 +415,10 @@ walk cold, with no guarantee of the same reading.
      task embed is edited (with its own bump), unaffected (`how`), or
      deferred (`reason`) — each a `sites_considered` entry. When the fix
      retires, renames, or ADDS a named token, sweep the corpus for it first
-     (`grep -rn <token> docs/` - a text search, never the index's symbol-only
+     (`grep -rn <token> docs/` — a text search, never the index's symbol-only
      `--find`) and add every hit: the sibling test or prose restatement in
-     the file you just edited is the typical miss (Phase 2, "Token sweep");
+     the file just edited is the typical miss (`back-propagation.md`, "Token
+     sweep");
   5. `python .claude/sdlc/docs_index.py --stamp docs/<artifact> --upstream docs/<reviewed-upstream> --hold-upstream docs/<other-recorded-upstream>`
      (one flag per file; each flag takes exactly one) for every artifact
      reconciled by hand, upstream-first — a stamp moves the stamped file's own
@@ -401,61 +428,59 @@ walk cold, with no guarantee of the same reading.
      `--hold-upstream` needs `docs_index.py` capability 6, and an older
      install rejects it with exit 2 (the plugin's form is
      `"${CLAUDE_SKILL_DIR}/../setup/docs_index.py" --docs-dir docs`).
-     **`--upstream` only for a pair that was fresh before
-     this run's first write.** A stamp claims that EVERY delta between the
-     recorded upstream and the current one was reviewed, and this run
-     reviewed one finding's change. It also re-hashes EVERY upstream the
-     artifact already records, not only the ones named, so every other entry
-     in its `metadata.upstream_provenance` takes `--hold-upstream`, which
-     leaves that entry byte-identical: an upstream this run did not review,
-     and a pair the Phase 2 snapshot (`sdlc-repair.doctor.json`,
-     `provenance.stale`) already listed. Such a pair owes an older, unreviewed
-     delta to `/sdlc:<skill> … --reconcile`, and stamping it now would forge
-     that review. An artifact with no fresh reviewed pair is not stamped at
-     all. Name each held pre-existing pair on the close card's `Attention:`
-     row and route the owed reconcile in `Next:`. **Then read what the stamp printed:** a `re-stamped
+     **`--upstream` only for a pair that was fresh before this run's first
+     write.** A stamp claims that EVERY delta between the recorded upstream
+     and the current one was reviewed, and this sequence reviewed one
+     finding's change. It also re-hashes EVERY upstream the artifact already
+     records, so every other entry in its `metadata.upstream_provenance`
+     takes `--hold-upstream`, which leaves that entry byte-identical: an
+     upstream this run did not review, and a pair the Phase 2 snapshot
+     (`sdlc-repair.doctor.json`, `provenance.stale`) already listed — such a
+     pair owes an older, unreviewed delta to `/sdlc:<skill> … --reconcile`,
+     and stamping it now would forge that review (the session's re-stamp of
+     a `re-stamp only` row between waves is the one exception, and it holds
+     every other upstream the same way). An artifact with no fresh reviewed
+     pair is not stamped at all; a held pair goes in the report's
+     `held_pairs`. **Then read what the stamp printed:** a `re-stamped
      <upstream>: … since the last stamp - reviewed by this run?` line names
-     an upstream it re-hashed that had moved. For an upstream this run
+     an upstream it re-hashed that had moved. For an upstream this sequence
      reviewed that is expected; for any other a hold is missing, so restore
      the artifact's old record of that upstream from git (`git diff
      docs/<artifact>` shows the old lines), confirm `--drift docs/<artifact>`
      names that upstream again, and stamp again with the hold. The printout
      catches a missing hold after the fact; the holds are what prevent the
      forgery (`forward-propagation.md`, "What a stamp claims");
-  6. `python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --symbol <cid>/<component>/<work_unit>`
+  6. `python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --symbol <cid>/<component>/<work_unit>` (edition-ok: demo edition skips it — see below)
      (or `--tst TST-NNN` / `--entity <Name>` / `--operation <operation_id>`)
-     — LAST, so the shard is stamped against the final upstream bytes;
+     — LAST, so the shard is stamped against the final upstream bytes; it
      re-slices every embed copied from the changed symbol, bumps the shard,
-     refreshes its `upstream_provenance`, prints the moved task ids with their
-     before/after fingerprints. **Add `--hold-stamp docs/<upstream>` for every
-     pair the Phase 2 snapshot listed**: the embed still moves (a mechanical
-     copy, not a review), but the shard's stamp for that upstream stays, so
-     the owed `--reconcile` still sees the whole delta — the re-slice's own
-     stamp refresh would otherwise forge it exactly as a hand `--stamp` would.
-     A pre-existing embed drift on such a pair is a baseline
-     failure for Phase 5, not this run's to clear;
-  7. verify (Phase 5) — `reslice_embeds.py --check` green, the validators
-     bare, and `docs_index.py --stale` listing nothing this run reconciled —
-     a row the Phase 2 snapshot already held is the owed reconcile step 5
-     left alone, not a missed stamp;
-  8. `python "${CLAUDE_SKILL_DIR}/../code/topo_order.py" --scope <cid> --state .claude/skills-state/sdlc-code.state.yaml`
-     plus `--affected <FR-NNN…>` for a PRD change → `resolution.stale_tasks`
-     (stale + affected, with the reason recorded).
+     refreshes its `upstream_provenance` and prints the moved task ids.
+     **Add `--hold-stamp docs/<upstream>` for every pair the Phase 2 snapshot
+     listed**: the embed still moves (a mechanical copy, not a review), but
+     the shard's stamp for that upstream stays, so the owed `--reconcile`
+     still sees the whole delta. A pre-existing embed drift on such a pair is
+     a baseline failure for Phase 5, not this run's to clear;
+  7. verify (Phase 5), exit codes captured into the report;
+  8. `python "${CLAUDE_SKILL_DIR}/../code/topo_order.py" --scope <cid> --state .claude/skills-state/sdlc-code.state.yaml` (edition-ok: demo edition skips it — see below)
+     plus `--affected <FR-NNN…>` for a PRD change → `stale_tasks` in the
+     report (stale + affected, with the reason recorded).
 
   Steps 6 and 8 call the `task` and `code` skills. In the **demo edition**
   (`${CLAUDE_SKILL_DIR}/../task/SKILL.md` absent) there is nothing to re-slice
   or schedule: skip both and say so. A project that still has
-  `docs/TASKS*.json` from an earlier full-edition install owes that re-slice — name it in
-  the close card's `Attention:` row; never edit a task file by hand instead.
+  `docs/TASKS*.json` from an earlier full-edition install owes that re-slice —
+  name it in the close card's `Attention:` row; never edit a task file by hand
+  instead.
 - **`additive`** (set, fully determined) — the fix **adds** downstream items
   and nothing else, and the walk already determined every field they need.
   All four must hold, or the mode is `re-invoke`:
   1. **purely additive** — no item is removed, renamed or re-scoped;
   2. **fully determined** — every field the new item's schema requires follows
-     from facts in hand (the source slice, its siblings, the walk); no
-     interview question is left. A field you would have to *decide* (a tier
-     the strategy never uses, a behaviour the PRD never stated, a name nobody
-     chose) fails this;
+     from facts in hand (the source slice, its siblings, the walk, a decision
+     the plan gate took); no interview question is left. A field you would
+     have to *decide* (a tier the strategy never uses, a behaviour the PRD
+     never stated, a name nobody chose) fails this — unless the gate decided
+     it, in which case the answer is copied verbatim, never re-decided;
   3. **validator-provable** — after the write, each touched artifact's
      `validate_schema.py`, `reslice_embeds.py --check` and `doctor.py --quick`
      are green, bare, with captured exit codes (Phase 5);
@@ -465,26 +490,18 @@ walk cold, with no guarantee of the same reading.
      structured deferral); a new entity obliges its traces. Every link must
      itself pass 2 — one undetermined link makes the whole fix `re-invoke`.
 
-  Mechanics: steps 1–2 of `surgical` on the source; then author each new item
-  directly in its own artifact. A new task's embed (`test_spec`,
-  `interface_contract`) is *copied* from the source slice and proven
-  byte-identical by `reslice_embeds.py --check` — the hard boundary on
-  embeds forbids *patching* a copy to a third value, not copying a corrected
-  source. `bump_artifact.py` every touched artifact; then **stamp, exactly as
-  `surgical` step 5 prescribes** — `docs_index.py --stamp` each artifact this mode
-  authored into, against the upstream it authored from, upstream-first (the
-  source before the shard that copies it; other additive shapes stamp a whole
-  chain), `--hold-upstream` for every other recorded upstream, then read the
-  `re-stamped …` printout. This mode may claim that pair because it WROTE the
-  whole delta between the recorded upstream and the current one — but step 5's
-  other rules still bind: a pair the Phase 2 snapshot already listed owed an
-  older, unreviewed delta, so it stays held and named on the close card, never
-  stamped. Then refresh the index; verify
-  (Phase 5). The new task is simply `pending` to `topo_order.py` — no ledger
-  edit. Close `resolved` with `mode: additive`, `artifacts_touched` naming
-  every file, one `source` hop and one `downstream` hop per authored item,
-  and `downstream_rerun: []` — nothing is owed downstream (a stamp records a
-  review, it is not a re-run); if something is, the mode was `re-invoke`.
+  Mechanics (`forward-propagation.md`, "Additive mode"): steps 1–2 of
+  `surgical` on the source; then author each new item directly in its own
+  artifact — a new task's embed is *copied* from the source slice and proven
+  byte-identical by `reslice_embeds.py --check`; `bump_artifact.py` every
+  touched artifact; then **stamp, exactly as `surgical` step 5 prescribes** —
+  `docs_index.py --stamp` each artifact this mode authored into, against the
+  upstream it authored from, upstream-first, `--hold-upstream` for every other
+  recorded upstream, then read the `re-stamped …` printout; a pair the Phase 2
+  snapshot listed stays held. Verify (Phase 5). Close `resolved` with `mode:
+  additive`, `artifacts_touched` naming every file, one `source` hop and one
+  `downstream` hop per authored item, and `downstream_rerun: []` — nothing is
+  owed downstream; if something is, the mode was `re-invoke`.
 
   A finding that splits into a **mechanical half and a modelling half** is
   fixed in one run when the modelling half passes 1–4: `surgical` on the
@@ -492,71 +509,43 @@ walk cold, with no guarantee of the same reading.
   modelling half fails 2 only for want of a decision this run CAN obtain (a
   choice inside the located artifact — which of two contradictory values is
   right, which component owns a unit, what it is called), it does not leave
-  this run: mint it (`findings.py add … --related FND-NNN --raised-by
-  sdlc-repair`) so the audit trail has it, and it joins THIS run's queue —
-  Phase 1 re-reads the queue after each finding closes and works it through
-  the same Phase 3 gate, *decide it now* at position 1, the answer recorded
-  in that finding's `resolution.summary`. Only a half whose decision is not
-  this run's to take (`references/back-propagation.md`, "ask — do not decide
-  alone": a `missing_requirement`, a product-behaviour change, a walk ending
-  at PRD) becomes a sibling finding for a later run, and the close card says
-  so. The same holds for any defect the walk surfaces BESIDE the one being
-  fixed — an adjacent contradiction was routed to
-  "file a new finding" with the walk loaded and the user at the gate. Never
-  under-deliver silently, and never interleave two findings' surgical
-  sequences: the second starts after the first's Phase 5, so each stamp
-  claims only what its own run reviewed.
+  this run: the gate asked it (Phase 3), or the worker reports it `blocked`
+  and the session asks it at the drain. A defect the worker surfaces BESIDE
+  the one being fixed is minted (`findings.py add … --related FND-NNN
+  --raised-by sdlc-repair`, by the session, from the report's `lesson`-like
+  line) so the audit trail has it, and it joins THIS run's queue — Phase 1
+  re-reads the queue after each finding closes and after each drain, and
+  works it through the same gate, *decide it now* at position 1. Only a half
+  whose decision is not this run's to take (`references/back-propagation.md`,
+  "ask — do not decide alone": a `missing_requirement`, a product-behaviour
+  change, a walk ending at PRD) becomes a handoff, and the card says so.
 - **`re-invoke`** (set, not determined) — changes to the *set* of downstream
   items that fail the additive criterion: a removed/renamed component,
   work_unit, entity, operation, surface, TST or task; a restructured boundary;
-  a new item whose content needs an interview. Fix the source (steps 1–2) —
-  the located artifact is always edited HERE, never handed to its own
-  `--reconcile`: a reconcile reviews what moved upstream of its artifact, so
-  pointed at the file you just localized it finds no delta and the handoff
-  note has no card to land on. Then **stop and print the exact downstream
-  command sequence**, starting at the first stage BELOW the source — every
-  consumer stage has a `--reconcile` form (`/sdlc:ux --reconcile`,
-  `/sdlc:data --reconcile`, `/sdlc:arch <cid> --reconcile`, …): print those,
-  container-scoped on arch/test/task, the full interview only as the fallback
-  — and **`/sdlc:test <cid>` before `/sdlc:task <cid>` whenever work_units
-  were minted** (the test has to name the new subject before task can wire a
-  test task to it):
-
-  ```
-  # rooted in docs/API__tasks.yaml; a fix rooted in ARCH__demo-api.yaml starts at /sdlc:test demo-api --reconcile
-  /sdlc:arch demo-api --reconcile   then   /sdlc:test demo-api --reconcile   then   /sdlc:task demo-api --reconcile
-  (fallback when a reconcile stops at a structural question: the same skills without --reconcile)
-  ```
-
-  **Leave the walk's reasoning on disk: `resolution.handoff`.** The fresh
-  session that runs each reconcile never saw this walk, so write down what it
-  concluded — one entry per downstream item you already have a view on:
-  `{artifact: docs/<a file an owed command rewrites>, key: <the item as
-  docs_index.py --drift prints it, or null for the whole file>, note: <why it
-  moved and what you propose>, basis: measured | inferred}` (e.g. `key: demo-api/api/archive-task`,
-  `note: "now raises NotFound for an unknown id; that branch needs a unit TST
-  covering FR-014"`). Each reconcile reads its own notes (`findings.py list
-  --owed-by`) and offers them as the matching card's position-1 proposal.
-  **Say how each note was reached.** `basis: measured` means you read it off
-  the artifacts the note names (a call site checked against the caller's
-  declared order, a field read from the entity); `basis: inferred` means an
-  analogy or a precedent you did not verify there. A cold reconcile offers a
-  measured note as read and VERIFIES an inferred one against the cited
-  artifact before writing - one siting recommendation written by analogy was
-  wrong against the very files its note cited, and nothing marked it as a
-  guess. Never mix the two registers in one note. The
-  `bump_artifact.py --summary` line is the other half — every reconcile's
-  `--drift` quotes it as the upstream's "why" — so write that summary for the
-  reader who lacks this session.
-
-  This skill never runs another skill: those are interviews and the user owns
-  them. Nor does it walk the chain for them: each reconcile's `Next:` is the
-  next stale file (`docs_index.py --stale`), and the last one routes back to
-  `/sdlc:repair FND-NNN` to close this finding. **Always** record the sequence in `resolution.downstream_rerun` (the queue
-  validator requires it for `re-invoke`), record `artifacts_touched` so far,
-  and leave the finding `triaged` — a triaged finding may carry exactly this
-  partial resolution block — until the user reports the re-invocations done
-  (or `doctor.py --provenance` says they were).
+  a new item whose content needs an interview the gate declined to settle.
+  Fix the source (steps 1–2) — the located artifact is always edited HERE,
+  never handed to its own `--reconcile`: a reconcile reviews what moved
+  upstream of its artifact, so pointed at the file just localized it finds no
+  delta and the handoff note has no card to land on. Then record — never
+  print — the downstream command sequence, starting at the first stage BELOW
+  the source, every consumer stage's `--reconcile` form, container-scoped on
+  arch/test/task, the full interview only as the fallback, and
+  **`/sdlc:test <cid>` before `/sdlc:task <cid>` whenever work_units were
+  minted** (`forward-propagation.md`, "Re-invoke mode"). Leave the walk's
+  reasoning on disk as `resolution.handoff` — one entry per downstream item
+  you already have a view on: `{artifact: docs/<a file an owed command
+  rewrites>, key: <the item as docs_index.py --drift prints it, or null for
+  the whole file>, note: <why it moved and what you propose>, basis:
+  measured | inferred}`, `retired: [<token>…]` when a token goes; each
+  reconcile reads its notes (`findings.py list --owed-by`) and offers them as
+  its card's position-1 proposal. **Always** record the sequence in
+  `resolution.downstream_rerun` (the queue validator requires it for
+  `re-invoke`), record `artifacts_touched` so far, and leave the finding
+  `triaged` — a triaged finding may carry exactly this partial resolution
+  block — until the user reports the re-invocations done (or `doctor.py
+  --provenance` says they were). This skill never runs those skills: they
+  are interviews and the user owns them; the chain routes itself and the
+  last reconcile returns to `/sdlc:repair FND-NNN` to close.
 
 When in doubt between `surgical` and the set modes, prefer a set mode: a
 surgical edit that should have changed the set leaves a downstream artifact
@@ -566,18 +555,19 @@ means a criterion actually fails — not that the change feels big. Routing a
 fully-determined item to `re-invoke` costs the user two interviews and
 discards the only cross-artifact context the pipeline builds.
 
-### Phase 5 — Verify
+### Phase 5 — Verify, per finding and per stage-wave
 
-Re-run, **bare**, capturing every numeric exit code. Pass the **system file**
-of each touched family — the validators glob their own `__<slug>` siblings, and
-a shard path is refused:
+Every fix worker re-runs these **bare**, capturing every numeric exit code
+into its report, after each finding. Pass the **system file** of each touched
+family — the validators glob their own `__<slug>` siblings, and a shard path
+is refused:
 
 ```bash
 python "${CLAUDE_SKILL_DIR}/../arch/validate_schema.py" --path docs/ARCH.yaml
-python "${CLAUDE_SKILL_DIR}/../test/validate_schema.py" --path docs/TEST-STRATEGY.yaml
-python "${CLAUDE_SKILL_DIR}/../task/validate_schema.py" --path docs/TASKS.json
-python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --container <cid> --all --check
-python "${CLAUDE_SKILL_DIR}/../task/crosscheck_artifacts.py" --docs-dir docs
+python "${CLAUDE_SKILL_DIR}/../test/validate_schema.py" --path docs/TEST-STRATEGY.yaml                  # edition-ok: demo edition skips this line, and says so (Phase 4)
+python "${CLAUDE_SKILL_DIR}/../task/validate_schema.py" --path docs/TASKS.json                           # edition-ok: demo edition skips this line, and says so (Phase 4)
+python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --container <cid> --all --check   # edition-ok: demo edition skips this line, and says so (Phase 4)
+python "${CLAUDE_SKILL_DIR}/../task/crosscheck_artifacts.py" --docs-dir docs                             # edition-ok: demo edition skips this line, and says so (Phase 4)
 python .claude/sdlc/docs_index.py                 # regenerate the index - the PROJECT's copy only
 python .claude/sdlc/docs_index.py --check         # dangling-reference gate
 python .claude/sdlc/docs_index.py --stale         # must list nothing this run reconciled - a row here is a missed stamp,
@@ -588,18 +578,24 @@ python .claude/sdlc/docs_index.py --stale         # must list nothing this run r
 ```
 
 The `test` and `task` lines run only where those skills ship; in the demo
-edition skip them and say so.
+edition skip them and say so. The regenerate line runs only through the
+project's installed copy — absent, skip it and say so; never the plugin's
+copy bare (`references/edge-cases.md`, "Verification").
 
-**The regenerate line runs only through the project's installed copy.** When
-`.claude/sdlc/docs_index.py` is absent, skip that line and say so in the close
-report: either the project never ran `/sdlc:setup`, or it ships its own index
-generator (its `docs/INDEX.yaml` header names it, and the doctor's gate label
-reads `plugin copy, --check only` with the reason). In both cases
-`docs/INDEX.yaml` is not this skill's to rewrite. Never run the plugin's own
-`setup/docs_index.py` bare against a consumer project: it writes a stock-format
-index over whatever the project generates, and one project lost its
-project-owned index that way. Only the read-only `--check` may fall back to
-the plugin copy, exactly as the doctor does.
+**The drain.** When every worker of a stage-wave has reported, the session —
+before dispatching the next wave (`references/orchestration.md`, "Between
+waves"): reads each report's exit codes against `baseline_checks`; runs
+`python "${CLAUDE_SKILL_DIR}/doctor.py" --docs-dir docs --quick` and
+`python "${CLAUDE_SKILL_DIR}/validate_findings.py"` bare; re-stamps every
+row `docs_index.py --stale` marks `re-stamp only` that no pending aggregate
+holds — the session does this, with `--hold-upstream` for every other
+recorded upstream, because such a row's review is empty and the claim true —
+pre-existing ones right after the gate, wave-caused ones now; re-reads the
+queue; and asks the user each `blocked` report's question (four per call),
+re-dispatching that finding with the answer, while a `relocated` report is
+re-planned into a later aggregate or listed on the card's `Remaining:` row.
+A downstream wave dispatched before an upstream drain would stamp its shard
+against upstream bytes still moving.
 
 Validate **every artifact touched**, not just the source. Compare each exit
 against `baseline_checks`: a check that was already red before this repair, for
@@ -611,7 +607,9 @@ If verification cannot run at all, nothing is marked `resolved`.
 
 ### Phase 6 — Close & hand back
 
-Write each finding's `resolution` block (`by`, `at`, `located_stage`, `mode`,
+**Resolutions are written from the reports, never from memory.** For each
+finding, copy `.claude/skills-state/sdlc-repair/reports/<FND>.report.yaml`
+into its `resolution` block (`by`, `at`, `located_stage`, `mode`,
 `artifacts_touched`, `downstream_rerun`, `stale_tasks`, `fields_changed` /
 `symbols_changed` when known, `sites_considered` when required, `summary`)
 **and its `propagation` hops** — one per place the fix had to land, each
@@ -623,9 +621,9 @@ propagation:
   - {hop: embed,  target: "docs/TASKS__demo-api.json#TSK-004.interface_contract", verified_at: <now>, how: "reslice_embeds.py --check exit 0"}
 ```
 
-`resolved` requires every listed hop verified (queue version 2). A hop you
-could not verify means the finding does not close, and where it waits depends
-on the mode: a `re-invoke` keeps its block and stays `triaged`, while a
+`resolved` requires every listed hop verified (queue version 2). A hop the
+worker could not verify means the finding does not close, and where it waits
+depends on the mode: a `re-invoke` keeps its block and stays `triaged`, while a
 `surgical` fix leaves the finding `open` with no resolution block at all —
 only a re-invoke in progress may record partial progress on a triaged finding,
 and `validate_findings.py` makes that an error at *every* queue version, so
@@ -635,22 +633,15 @@ lines — fold it into the last one when the list is full): the artifacts alread
 edited, and the check that could not run. That line is what the next run
 re-verifies against disk (Phase 1) and what the statusboard prints under the
 still-open finding. Set the queue's `last_updated` and re-validate it with
-`validate_findings.py`.
+`validate_findings.py`; delete the finding's breadcrumb once its resolution
+is written.
 
-**Write it right the first time** — the queue's validator enforces rules
-the example above does not show, and each one costs a rejected round-trip
-when learned by trial (canonical: `FINDINGS.schema.yaml`):
+**Write it right the first time** — the rules the validator enforces beyond
+the example (the `hop` enum, `duplicate_of`, the `handoff` shape,
+`sites_considered`, `validate --upgrade`) are in
+`references/forward-propagation.md`, "The resolution write". Two of them
+decide where a finding waits:
 
-- `hop` is one of `source` (the artifact whose content was wrong), `embed` (a
-  write-time copy re-sliced from it), `downstream` (any other artifact the fix
-  propagated into — a TST acceptance, an entity trace, a UX shard) or `code`
-  (generated source the build re-made). Nothing else — an index refresh is
-  not a hop.
-- `duplicate_of` is present exactly when `status: duplicate`, and a duplicate
-  carries NO `resolution` block. A `wontfix` never carries `duplicate_of`;
-  say which finding it repeats in `resolution.summary` instead.
-- `resolved`, `wontfix` and `deferred` all carry a `resolution` block
-  (`deferred` with a `reason`).
 - `mode: additive` carries `downstream_rerun: []`, at least one
   `hop: downstream` (the item it authored), and every artifact it wrote into
   in `artifacts_touched`. An additive resolution that owes a re-run, or that
@@ -664,30 +655,25 @@ when learned by trial (canonical: `FINDINGS.schema.yaml`):
   from `findings_file_version: "2"` (CLAUDE.md §10 keeps a legacy queue from
   turning red on upgrade), so on a version-1 queue the warning scrolls past
   unread — one project closed ten such findings and four of them hid real
-  unpropagated defects, one for three weeks. So compute the sequence in Phase
-  4 and fill `downstream_rerun` in this same write, then keep the finding
+  unpropagated defects, one for three weeks. So take the sequence from the
+  report and fill `downstream_rerun` in this same write, then keep the finding
   `triaged` until the user reports those runs done. A re-invoke whose sequence
-  you cannot compute carries no resolution block at all — an empty one is the
-  state that hid those defects. What is still owed is reported by the row
-  table below.
-- `handoff` (re-invoke only) is `{artifact: docs/<file>, key, note, basis,
-  retired}` — `retired` carries the literal token(s), never which items use
-  them; `artifact` is a file an owed `downstream_rerun` command rewrites.
-  Warns only on a misplaced note or a malformed `retired`.
-- `sites_considered` (`{artifact, disposition: edited | resliced | unaffected
-  | deferred, reason, how}`, one per Phase-4 checklist artifact), REQUIRED
-  when `symbols_changed` is non-empty or `mode` is `re-invoke` (`findings_file_version: "3"`).
-- **Raise the floor when clean:** `python "${CLAUDE_SKILL_DIR}/findings.py"
-  validate --upgrade` at close instead of hand-stamping `findings_file_version`
-  — a no-op already at the floor, refused while any warning remains.
+  the worker could not compute carries no resolution block at all — an empty
+  one is the state that hid those defects.
+
+**The consolidated handoffs.** Build the command chain once, from every
+report's owed commands plus every already-`triaged` finding's recorded
+sequence — deduplicated, in pipeline order, test before task, container-scoped
+(`references/orchestration.md`, "The consolidated handoff chain") — write it
+to the state file's `handoffs:`, print it once above the card, and put the
+count and the FIRST command on the card's `Handoffs:` row. Nothing prints a
+reconcile command anywhere else in the run.
 
 Then compute the handback. There is no bespoke mechanism and there should not
 be: editing a task artifact changes each affected task's fingerprints, which
-`/sdlc:code` already classifies as `stale` (build-relevant content moved),
-`ring_recheck` (a provider's contract moved) or `refreshed` (nothing that
-matters moved) and gates at its plan approval. `topo_order.py`'s `stale` and
-`--affected` sections are the answer; they are already in
-`resolution.stale_tasks` from Phase 4.
+`/sdlc:code` already classifies as `stale`, `ring_recheck` or `refreshed` and
+gates at its plan approval; `topo_order.py`'s `stale` and `--affected`
+sections are already in `resolution.stale_tasks` from the reports.
 
 **Record the run** (CLAUDE.md 15): drain `lesson_notes` (one `lessons.py add` per surviving
 note, at most 2 unless one is a blocker), then `python .claude/sdlc/lessons.py record-run --skill repair --plugin-root "${CLAUDE_SKILL_DIR}/../.."`
@@ -703,107 +689,87 @@ Close with the report:
 
 ```
 ── /sdlc:repair — what changed ────────────────────────────
-Findings:  2 fixed and closed (FND-001, FND-002) · 1 fixed at its source, still owes 2 re-runs (FND-004) · 1 parked (FND-005)
-Located:   FND-001 → arch (suspected: task)  ·  FND-002 → api (suspected: test)
-Edited:    docs/ARCH__demo-api.yaml, docs/TASKS__demo-api.json (2 embeds re-sliced)
-Verified:  arch exit 0 · task exit 0 · reslice --check exit 0 · crosscheck exit 0 · index exit 0
-Stale:     demo-api/TSK-004, demo-api/TSK-006 will be offered for regeneration
-Commit:    {a1b2c3d  /sdlc:repair FND-001 FND-002 → <summary> | nothing to commit — only when auto-commit is on}
-Status:    {computed - e.g. repair's edits are done; FND-004 closes when its 2 re-runs finish, and you run them, one per new session}
+Findings:  3 fixed and closed (FND-001, FND-002, FND-006) · 1 fixed at its source, still owes 2 re-runs (FND-004) · 1 same defect as FND-002 (FND-007)
+Located:   FND-001 → prd (suspected: test)  ·  FND-002 → arch (suspected: arch)  ·  FND-004 → arch (suspected: task)
+Edited:    docs/PRD.yaml, docs/ARCH__demo-api.yaml, docs/TASKS__demo-api.json (2 embeds re-sliced) · 1 re-stamp (docs/TEST-STRATEGY__demo-api.yaml vs docs/PRD.yaml)
+Verified:  arch exit 0 · test exit 0 · task exit 0 · reslice --check exit 0 · crosscheck exit 0 · index exit 0 · stale exit 0
+Stale:     demo-api/TSK-003, demo-api/TSK-004 will be offered for regeneration
+Remaining: 1 open, not worked this run — FND-005 (outside the chosen extent: first wave)
+Handoffs:  2 re-runs owed for FND-004 — first: /sdlc:test demo-api --reconcile (each prints the next; the last routes back here)
+Workers:   6 localizers, 3 fixers (opus) - 1 relocated, 0 blocked
+Commit:    {a1b2c3d  /sdlc:repair → <summary> | nothing to commit — only when auto-commit is on}
+Status:    {computed - e.g. not finished - 1 open finding remains (FND-005)}
 Next:      {the computed next invocation}   ← in a NEW session
 Why new:   the artifacts and state files on disk are the handoff, not this
            transcript.
 ```
 
-**The `Findings:` and `Status:` rows** answer "is repair done, what is still
-owed, and who runs it" — the question a user asked when a card printed the
-queue's own words beside a `Next:` naming another skill. The
-queue's state names and field names are input to these rows, never their text
-(`prd/references/reporting-to-the-user.md`, "translates; it never pastes"):
-
-| The finding in the queue | What the `Findings:` row says |
-|---|---|
-| `resolved` | `fixed and closed` |
-| `triaged`, `mode: re-invoke`, commands recorded | `fixed at its source, still owes N re-run(s)` — N is the length of its `resolution.downstream_rerun`; the same owed work `doctor.py` labels `awaiting re-invocation per FND-NNN` |
-| `triaged`, `mode: re-invoke`, no commands recorded | `not closable - its re-runs were never recorded` |
-| `open`, a surgical fix whose hop this run could not verify | `fixed, not verified - <the check that could not run>` |
-| `deferred` / `wontfix` / `duplicate` | `parked (<reason>)` / `left as is (accepted)` / `same defect as FND-NNN` |
-
-Collapse same-state findings into one phrase listing their ids. Keep "closed"
-and "still owes" apart: a finding whose source is fixed but whose copies are
-not has not closed, and saying "fixed" alone is how a card reads as done when
-it is not — or as unfinished when it is.
+**The `Findings:` row** translates each finding's queue state into what is
+done and what is still owed — the table is in `references/orchestration.md`,
+"The close card"; the queue's own state and field names are input to the row,
+never its text (`prd/references/reporting-to-the-user.md`, "translates; it
+never pastes"). Collapse same-state findings into one phrase listing their
+ids, and keep "closed" and "still owes" apart. **`Remaining:`** names every
+finding that was open when the run started and was not worked, each with its
+reason (*outside the chosen extent* / *relocated to <stage> after that wave
+closed* / *its worker stopped on a question the run could not answer*) — it
+prints only when non-empty, and it is what makes a narrowed run honest.
+**`Handoffs:`** prints only when re-runs are owed: the count, the findings, the
+first command. `Workers:` says what was dispatched, on which model, and how
+many relocated or blocked (or `inline - the Agent tool was unavailable`).
 
 `Status:` — first match wins, always printed:
 
 1. **A finding is not closable or not verified** → `not finished - <FND-NNN>
    <what is missing>`; `Next:` re-invokes this skill naming it (the shared
    procedure's rule 1).
-2. **A finding still owes re-runs** → `repair's edits are done; <FND-NNN>
-   closes when its N re-run(s) finish - you run them, one per new session,
-   starting with Next:`. This skill never runs them (Phase 4).
-3. **Every finding worked is closed or parked** → `done - <the stage that was
-   blocked> can run` (or `done - nothing is blocked` when no stage was).
-4. **`--check`** → `health check only - nothing under docs/ was edited`.
+2. **Open findings were left unworked** (the `Remaining:` row is non-empty) →
+   `not finished - N open finding(s) remain (<ids>)`.
+3. **A finding still owes re-runs** → `repair's edits are done; N re-run(s)
+   owed across M finding(s) - you run them, one per new session, starting
+   with Next:`. This skill never runs them (Phase 4).
+4. **Every OPEN finding is closed, parked or handed off** → `done - <the stage
+   that was blocked> can run` (or `done - nothing is blocked` when no stage
+   was).
+5. **`--check`** → `health check only - nothing under docs/ was edited`.
 
 **Compute the `Next:` row; never copy the example literals.** Procedure and
 successor map: `${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`
 (CLAUDE.md 14). `repair` walks backwards, so its `Next:` is an **in-run
 position** (the located stage) while work remains, and the pipeline position
-once the run is done — print both as they apply:
+once the run is done — print both as they apply, first match wins:
 
 - **A finding is not closable or not verified** → `/sdlc:repair FND-NNN`, after
   saying what it lacks.
-- **A finding still owes re-runs** → the FIRST command of its sequence, with
-  its position and the terminus in words — one command on the row, never the
-  chain, e.g.
+- **An open finding was left unworked** → `/sdlc:repair FND-…` naming the
+  `Remaining:` ids (the shared procedure's rule 2: open findings name
+  artifacts this run consumed). This bullet ranks BEFORE the re-run one — a
+  reconcile is never recommended while a finding waits unworked.
+- **A finding still owes re-runs** → the FIRST command of the consolidated
+  chain, with its position and the terminus in words — one command on the
+  row, never the chain, e.g.
   `/sdlc:test demo-api --reconcile   (1 of 2 owed for FND-004 - each prints the next; the last routes back here to close it)`.
-- **All findings resolved** → `/sdlc:code <container>`, the stage that was
+- **All open findings resolved** → `/sdlc:code <container>`, the stage that was
   blocked; add the one-line consequence (`2 tasks are now stale and will be
   offered for regeneration`).
 - **Nothing was fixed** (`--check`, or every finding `wontfix`/`deferred`) →
   say the docs are clean (or what stays parked) and name no command.
 
-**The recommended loop**, for the user who asks "what do I run next time":
-`/sdlc:repair --check --no-emit` as pre-flight → `/sdlc:code <cid>` to a
-component boundary → findings batch there (continue to the container boundary
-while the blocked cascade stays inside the component; stop when a finding
-blocks later components or two findings name one symbol) → ONE `/sdlc:repair`
-over the batch → the printed `--reconcile` chain, only when printed (run the
-first; each names the next; the last routes back to `/sdlc:repair FND-NNN`)
-→ `/sdlc:code <cid>` in a NEW session. Never repair mid-component. There is no
-`--propagate` chain walker: propagation is `reslice_embeds.py` + refreshed provenance + the residual re-invoke list with its `handoff` notes, which routes itself.
+**The recommended loop**, for the user who asks "what do I run next time", is
+in `references/forward-propagation.md`, "Batching": pre-flight `--check
+--no-emit`, codegen to a component boundary, ONE `/sdlc:repair` over the whole
+batch, the printed chain only when printed, codegen again in a new session.
 
 Every target must have a `sdlc/skills/<name>/SKILL.md`; never route to
 `/sdlc:deploy`, which is planned and not yet implemented.
-
-## Localization at a glance
-
-Full rules: `references/back-propagation.md`. The one-line version of each:
-
-| Finding kind | Usual source | The check that decides |
-|---|---|---|
-| `contract_underdetermined` | `arch` work_unit | …unless it `traces_api_operation` (→ `api`), or filling it in would require inventing behaviour (→ `prd`) |
-| `contract_contradiction` | the *earlier* of the two stages | whichever statement PRD supports stands; PRD silent → `prd` |
-| `test_contradicts_contract` | `arch`/`api` **or** `test` | trace both to PRD; whichever the FR/NFR/ACR supports is right. Supports neither → `prd` |
-| `missing_requirement` | `prd` **or** the downstream stage | is the behaviour legitimate, or invented scope? Always the user's call |
-| `missing_operation` / `missing_entity` | `api` / `data` | …unless the container should not reach for it at all (→ `arch`) |
-| `unrealizable_item` | the stage that *defined* the item | the item's owner (UX surface → `ux`, operation → `api`, work_unit → `arch`) unless its inputs are what is missing (→ one stage earlier) |
-| `upstream_incomplete` | the named upstream, exactly | the fact is the finding: fill the null REQUIRED field there; never patch around it downstream |
-| `stale_downstream_claim` | usually the **downstream** artifact | the claim is stale, not the upstream item: reconcile the claimer (a `--reconcile` re-invoke) unless the upstream item was removed by mistake |
-| `drifted_embed` | upstream, or a stale slice | compare embed to source: same wrong thing → upstream; different → re-slice |
-| `wrong_path`, `missing_dependency_edge`, `impossible_acceptance` | `task` | …unless the acceptance was copied from an unsatisfiable ACR (→ `prd`) |
-| `validator_error` | the named artifact | …unless it is a coverage failure naming an upstream id |
-| `crosscheck_broken_ref`, `dangling_reference` | whichever side is stale | `docs_index.py --refs`: many inbound refs + absent definer → the definer; one dangling ref → the referencer |
-| any kind raised by an **interview skill** or the **user** | one stage *upstream* of the raiser | the raiser read its inputs and found them wanting; the `suspected_stage` it gives is usually its immediate upstream — check that one first, then keep walking |
 
 ## Hard boundaries
 
 - **Never writes source code** and never touches the generated tree. Code
   defects are `/sdlc:code`'s heal loop, not findings.
-- **Never runs another skill.** `re-invoke` prints a command sequence and
-  leaves its reasoning in `resolution.handoff`; the sequence routes itself
-  through each reconcile's `Next:`.
+- **Never runs another skill.** `re-invoke` records a command sequence and
+  leaves its reasoning in `resolution.handoff`; the session prints the chain
+  once at close, and it routes itself through each reconcile's `Next:`.
 - **Never edits `.claude/skills-state/sdlc-code.state.yaml`.** The `stale`
   handback works precisely because that ledger is left alone.
 - **Never patches a task embed.** Embeds move only through
@@ -816,6 +782,10 @@ Full rules: `references/back-propagation.md`. The one-line version of each:
 - **Never deletes an artifact item implicitly.** Deletion changes the downstream
   item set, so it is a `re-invoke` case requiring explicit approval that names
   what disappears and what references it.
+- **A worker never edits outside its write boundary**, never asks the user,
+  and never writes the queue, the state file or `docs/INDEX.yaml`; only the
+  session does (`references/orchestration.md`, "What the session never
+  delegates").
 
 ## Model policy
 
@@ -825,24 +795,31 @@ in view at once and deciding which of them is *actually* wrong. It is the
 opposite regime from `/sdlc:code`'s manager (sonnet/high bookkeeping), which is
 exactly why the two are separate skills rather than one — running this reasoning
 inside the codegen manager would both mis-model the work and consume the very
-context that codegen is trying to conserve.
+context that codegen is trying to conserve. The workers are opus for the same
+reason, and they exist for context isolation, not speed: every walk and every
+fix transcript stays in its worker, so the session's window holds the plan of
+the whole queue instead of the first four findings' archaeology.
 
 ## Quick reference: user inputs at gates
 
 | Input | Effect |
 |---|---|
 | `EXIT` | Stop; state persisted as `aborted`, edits so far confirmed and named, run recorded. |
+| *all N aggregates, in wave order* | The whole open set, upstream first (position 1). |
+| *the first stage-wave only* / *the first aggregate only* | A prefix of that order; the rest is named on `Remaining:` with `/sdlc:repair FND-…` as `Next:`. |
 | *fix as proposed* | Apply the localization and fix shown. |
 | *fix fully* | `additive` mode: author the new downstream item(s) in this run (criterion in Phase 4); the finding closes `resolved` with `mode: additive`. |
 | *fix differently* | Free text — your localization or fix overrides the proposal. |
+| *hand it off* | The missing decision stays with the owning skill's interview; the finding is a re-invoke and joins the consolidated chain. |
 | *defer* | Finding → `deferred` (mode none + reason); TASKS items go in the artifact's `deferrals` list. |
 | *accept as-is* | Finding → `wontfix` with `expected_count: N`; the doctor reports the check as accepted until the count moves. |
 | *wontfix* | Close with the reason; no artifact is touched. |
 | *it's the skill* | Record a lesson (`--related FND-NNN`); finding → `wontfix`. |
+| *it's the generated code* | Every upstream contract is right and only the code diverges: `wontfix` with `located_stage: code`, the owning tasks in `stale_tasks`. |
 
 ---
 
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.21"
+skill_version: "1.23"

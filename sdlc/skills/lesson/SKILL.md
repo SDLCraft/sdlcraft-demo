@@ -45,6 +45,7 @@ queue's ownership are documented in CLAUDE.md 15.
 | `SKILL.md` | This file — the flow. |
 | `LESSONS.schema.yaml` | Canonical schema for `.claude/skills-state/sdlc-lessons.yaml`, with per-field rationale. |
 | `lessons.py` | The queue's only writer (also what `/sdlc:setup` installs to `.claude/sdlc/lessons.py`). This skill calls its own copy, so it works in projects that never ran setup. |
+| `VERDICTS.yaml` | The maintainer's verdict on every collected lesson, keyed by opaque project id — generated in the skills repo, shipped here, read by `lessons.py reconcile` at every skill close. Never edited by a skill. |
 | `references/lessons-capture.md` | The doctrine: routing table, closed raising conditions, sanitization. Canonical for every skill; load it in step 2. |
 
 ## Flow
@@ -180,4 +181,4 @@ defect is an `LSN-NNN`, and all of them surface, generated, in
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.16"
+skill_version: "1.17"

@@ -535,7 +535,7 @@ def sweep(docs: Path, quick: bool, only: Optional[List[str]] = None) -> List[Che
         # Container task shards: the bulk of a real graph lives here, not in
         # TASKS.json, so a sweep that only validated the system file would miss
         # almost everything.
-        task_validator = SKILLS_DIR / "task" / "validate_schema.py"
+        task_validator = SKILLS_DIR / "task" / "validate_schema.py"  # edition-ok: .is_file() guard below
         if task_validator.is_file():
             for shard in sorted(docs.glob("TASKS__*.json")):
                 c = Check("task/validate_schema", shard.as_posix())
@@ -545,7 +545,7 @@ def sweep(docs: Path, quick: bool, only: Optional[List[str]] = None) -> List[Che
 
     # Cross-artifact linter — the only check --quick runs, because it is the one
     # that catches drift BETWEEN artifacts, which is what moves during a run.
-    crosscheck = SKILLS_DIR / "task" / "crosscheck_artifacts.py"
+    crosscheck = SKILLS_DIR / "task" / "crosscheck_artifacts.py"  # edition-ok: .is_file() guard below
     c = Check("crosscheck_artifacts", docs.as_posix())
     if not crosscheck.is_file():
         c.summary = "linter not present in this skill tree"

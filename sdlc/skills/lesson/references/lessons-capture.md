@@ -241,7 +241,13 @@ matter to you as the agent recording a lesson:
   the batch, and retries at the next close. Do not treat it as an error worth
   a lesson of its own.
 - **Delivery is not triage.** A sent lesson is still `status: open`; `sent_at`
-  only records that this machine handed it over.
+  only records that this machine handed it over. The maintainer's verdict
+  comes back on its own: the installed plugin ships `VERDICTS.yaml`, and
+  `record-run` stamps it at every skill close (`triaged` / `resolved` with
+  its `fixed_in` / `wontfix` / `dismissed`; `lessons.py list` shows each).
+  A lesson you record again after its fix is reopened, not duplicated — the
+  helper keeps the old verdict beside the new sighting so the maintainer
+  sees the fix regressed. Never set a verdict by hand.
 
 If the user asks where their lessons go, or asks to stop sending: `python
 .claude/sdlc/lessons.py consent` prints the current setting, and
