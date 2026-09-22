@@ -2680,11 +2680,13 @@ def _parse_provenance(lines: "list[str]", is_json: bool) -> "list[dict]":
     return entries
 
 
-def item_hash(lines: "list[str]", sym: SymbolSlice) -> str:
-    """The short body hash of one symbol: its line slice with blank and comment
-    lines dropped and trailing whitespace stripped - and, for kinds listed in
-    ``_DECLARATION_ONLY_KEYS``, with those child fields removed, so only a
-    behaviour-bearing edit changes the hash."""
+def item_body(lines: "list[str]", sym: SymbolSlice) -> str:
+    """One symbol's body TEXT: its line slice with blank and comment lines
+    dropped and trailing whitespace stripped - and, for kinds listed in
+    ``_DECLARATION_ONLY_KEYS``, with those child fields removed - the same
+    normalization ``item_hash`` hashes and ``--items-at`` (IMP-203) returns
+    verbatim, so a caller that needs the recovered OLD text (not just whether
+    it changed) reads exactly what the hash was computed over."""
     body = lines[sym.start - 1: sym.end]
     excluded = _DECLARATION_ONLY_KEYS.get(sym.kind, ())
     kept: list[str] = []
@@ -2703,29 +2705,50 @@ def item_hash(lines: "list[str]", sym: SymbolSlice) -> str:
                 skipping = True
                 continue
         kept.append(ln.rstrip())
-    return sha256("\n".join(kept).encode("utf-8")).hexdigest()[:_ITEM_HASH_LEN]
+    return "\n".join(kept)
 
 
-def items_of(index: DocIndex, docs_dir: Path, upstream: str) -> "dict[str, str]":
+def item_hash(lines: "list[str]", sym: SymbolSlice) -> str:
+    """The short body hash of one symbol - see ``item_body`` for what is
+    hashed and why."""
+    return sha256(item_body(lines, sym).encode("utf-8")).hexdigest()[:_ITEM_HASH_LEN]
+
+
+def items_of_full(index: DocIndex, docs_dir: Path, upstream: str) -> "dict[str, tuple[str, str]]":
     """Every symbol ``upstream`` (a file name inside docs/) defines, keyed the
-    way the index addresses it, with its body hash. Empty when the file is not
-    indexed or defines nothing addressable."""
+    way the index addresses it, with its (body hash, body TEXT) pair. Empty
+    when the file is not indexed or defines nothing addressable. ``items_of``
+    is the hash-only view of this that every existing caller (``--items``,
+    ``--stamp``, ``--drift``) keeps using; ``--items-at`` (IMP-203) is the one
+    caller that needs the text too."""
     path = docs_dir / upstream
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError):
         return {}
-    out: dict[str, str] = {}
+    out: dict[str, tuple[str, str]] = {}
+
+    def _entry(sym: SymbolSlice) -> "tuple[str, str]":
+        body = item_body(lines, sym)
+        return sha256(body.encode("utf-8")).hexdigest()[:_ITEM_HASH_LEN], body
+
     for name, sym in index.symbols.items():
         if sym.file == upstream:
-            out[name] = item_hash(lines, sym)
+            out[name] = _entry(sym)
     # A symbol another file defines first is absent from index.symbols; it is
     # still one of THIS file's items, and leaving it out made --drift report
     # "no item added" for exactly the item that was new.
     for sym in index.shadowed:
         if sym.file == upstream:
-            out.setdefault(_symbol_name(sym), item_hash(lines, sym))
+            out.setdefault(_symbol_name(sym), _entry(sym))
     return out
+
+
+def items_of(index: DocIndex, docs_dir: Path, upstream: str) -> "dict[str, str]":
+    """Every symbol ``upstream`` defines, keyed the way the index addresses
+    it, with its body hash. Empty when the file is not indexed or defines
+    nothing addressable."""
+    return {k: v[0] for k, v in items_of_full(index, docs_dir, upstream).items()}
 
 
 def _item_family(key: str, index: DocIndex) -> str:
@@ -3434,7 +3457,13 @@ def _recover_items_from_git(docs_dir: Path, up_name: str, recorded: str):
     ``recorded`` (the hash ``--hash`` prints: text-level, so a CRLF checkout and
     an LF blob agree); ``("miss", None, None)`` when history holds no such
     revision (an uncommitted stamp); ``("unavailable", None, None)`` when git is
-    absent or ``docs_dir`` is in no repository. Never raises."""
+    absent or ``docs_dir`` is in no repository. Never raises.
+
+    ``items`` is ``items_of_full``'s ``{id: (hash, text)}`` - hash for
+    ``--drift``'s item-by-item delta, text for ``--items-at`` (IMP-203), from
+    the SAME revision walk: no caller re-checks-out history for the text a
+    hash-only caller already found, because this is the only place a
+    revision's checkout ever gets built."""
     if not recorded:
         return "unavailable", None, None
     import subprocess
@@ -3466,7 +3495,7 @@ def _recover_items_from_git(docs_dir: Path, up_name: str, recorded: str):
             old_docs.mkdir()
             (old_docs / up_name).write_text(old_text, encoding="utf-8", newline="\n")
             old_index = build_index(old_docs)
-            return "hit", rev, items_of(old_index, old_docs, up_name)
+            return "hit", rev, items_of_full(old_index, old_docs, up_name)
     return "miss", None, None
 
 
@@ -3812,7 +3841,8 @@ def drift_report(docs_dir: Path, artifact: str) -> int:
         # No item snapshot in the stamp. Every recorded sha256 is a text hash a
         # committed revision of the upstream can match, so history is tried
         # first: a hit gives the same exact delta (ledger IMP-083, aicf LSN-065).
-        found, rev, old_items = _recover_items_from_git(docs_dir, up_name, recorded)
+        found, rev, old_full = _recover_items_from_git(docs_dir, up_name, recorded)
+        old_items = {k: v[0] for k, v in old_full.items()} if old_full is not None else None
         if found == "hit" and old_items is not None:
             delta_lines, relevant = _item_delta_lines(
                 index, docs_dir, up_name, old_items, my_refs,
@@ -4110,6 +4140,13 @@ def main(argv: "Optional[list[str]]" = None) -> int:
         help="Print every item UPSTREAM defines with its body hash (what --stamp records).",
     )
     ap.add_argument(
+        "--items-at", metavar="SHA256",
+        help="With --items UPSTREAM: instead of UPSTREAM's current items, recover its item TEXT "
+             "from the git revision whose content hash equals SHA256 (searched over the last "
+             "%d commits touching it, same as --drift). Always JSON: "
+             "{status: hit|miss|unavailable, items: {id: text}} (IMP-203)." % _GIT_REVISIONS,
+    )
+    ap.add_argument(
         "--stamp", metavar="ARTIFACT",
         help="Rewrite ARTIFACT's metadata.upstream_provenance with sha256 + per-item hashes "
              "of every upstream it records (plus each --upstream). Writes only ARTIFACT.",
@@ -4145,6 +4182,11 @@ def main(argv: "Optional[list[str]]" = None) -> int:
         if not target.is_file():
             print(f"[docs-items] cannot read {args.items}: no such file (looked in {docs_dir})", file=sys.stderr)
             return 2
+        if args.items_at:
+            status, _rev, full = _recover_items_from_git(docs_dir, target.name, args.items_at)
+            text_items = {k: v[1] for k, v in full.items()} if status == "hit" and full else {}
+            print(json.dumps({"status": status, "items": text_items}, indent=2, sort_keys=True))
+            return 0
         index = build_index(docs_dir)
         items = items_of(index, docs_dir, target.name)
         if args.json:

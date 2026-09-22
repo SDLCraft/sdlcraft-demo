@@ -226,10 +226,8 @@ Once Phase 8's refresh has run:
 
 - Set `status: complete` in the state file.
 - Keep the state file as an audit trail — do **not** delete it.
-- Tell the user the workflow finished and where the artifacts live:
-  *"UX spec written: `docs/UX.yaml` plus N surface files. CLAUDE.md
-  pointer updated. The downstream `sdlc:api` skill can now consume
-  these artifacts."*
+- Tell the user the workflow finished and where the artifacts live (the
+  close card, SKILL.md Phase 8).
 
 > **Field-level errors are the one thing you show verbatim** — the field path
 > *is* the fix, so paraphrasing it costs the user the answer. Everything else

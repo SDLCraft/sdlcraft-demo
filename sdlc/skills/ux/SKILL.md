@@ -625,16 +625,7 @@ map: `${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`
   successor and always the successor here — `ux` is not sharded.
 
 
-Rules: omit any row with nothing to say (never write "no warnings"). Add a
-`Lessons:` row only when this run recorded at least one — e.g. `Lessons: 1
-recorded (LSN-NNN) - about this skill, for its maintainer; nothing for you to
-do` — and never print "no lessons". Add the `Findings:` row only when this
-run recorded findings (the drain above) or open findings name an artifact
-this skill consumed — ids plus one consequence clause; never print "no
-findings".
-**`Attention:` is translated, never pasted validator output** - turn each
-finding into what happened, why it matters, and what to do. If the validator
-printed nothing worth acting on, drop the row.
+Omit any row with nothing to say and never print a "no X" row; `Attention:` is translated, never pasted (row rules: reporting-to-the-user.md).
 
 The card above is a *shape* and its `Next:` literal an example — the row is
 computed by the procedure every run, never copied through.
@@ -798,4 +789,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.23"
+skill_version: "1.24"

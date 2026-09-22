@@ -7,6 +7,11 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.16 (2026-09-22) — Phase 8 footer is one line; the closing bullet no longer claims a CLAUDE.md write
+
+- Phase 8's row-omission footer (two paragraphs) became one line pointing at `reporting-to-the-user.md`, which states the rules in full (ledger IMP-181, AUTHORING §19); SKILL_LINE_CEILINGS lowered in `lint_context_budget.py`.
+- `references/merge-validate.md`'s closing bullet no longer scripts a message claiming "CLAUDE.md pointer updated" and naming a hard-coded successor; it points at the Phase 8 close card, like prd's (ledger IMP-210, pinned by `lint_claude_md.py`'s whole-text arm and `lint_selftest.py`).
+
 ## 1.15 (2026-09-20) — Phase 8 commits the run when the project opted in (auto-commit, CLAUDE.md 20)
 
 - New close step after `record-run`, before the card: `python .claude/sdlc/autocommit.py commit --skill api --invocation "<as typed>" --summary "<one line>"` (mechanics in `setup/references/auto-commit.md`), its one printed line as the card's new `Commit:` row; runs on every exit path, never a blocker. The restated self-review paragraph is now a pointer at `lessons-capture.md`, paying for the lines (AUTHORING §19 ceilings unchanged). Pinned by `setup/_smoke/autocommit_lockstep_selftest.py`.

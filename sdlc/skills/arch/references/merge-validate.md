@@ -72,14 +72,24 @@ Same merge rules as above:
 Before writing a container file, set **every** component's
 `traces_data_entities` to
 `sorted(existing entries ∪ union of its work_units' touches_entities)`.
-The curated list may EXCEED the union (entities the component reads
-without a unit naming them) but must never lag it. **The subset law
-(`touches_entities ⊆ traces_data_entities`, cross-check #21) is maintained
-by derivation, not by hand** — twice now (ARCH v1.15, PLAN4) a
-touches-completion pass broke it corpus-wide because the component lists
-were being hand-maintained. A component whose units touch entities while
-its `traces_data_entities` is missing/empty draws an advisory (the subset
-check has no base to fire against there — the derive step was skipped).
+The curated list must never lag its own units' touches; a component may
+trace entities another unit of the container realizes (not necessarily one
+of its own work_units), but that entity must be touched by SOME work_unit
+somewhere in the container — an unconditional "may exceed the union"
+allowance is not the rule. **The subset law (`touches_entities ⊆
+traces_data_entities`, cross-check #21) is maintained by derivation, not by
+hand** — twice now (ARCH v1.15, PLAN4) a touches-completion pass broke it
+corpus-wide because the component lists were being hand-maintained. A
+component whose units touch entities while its `traces_data_entities` is
+missing/empty draws an advisory (the subset check has no base to fire
+against there — the derive step was skipped). Symmetrically, an entity a
+non-repository component traces that NO work_unit anywhere in the container
+touches also draws a cross-check #21 advisory, naming every component that
+traces it — no worker packet carries that entity's slice otherwise.
+Repository-archetype components are exempt: their traces are what they
+persist, realized by a migration/schema_model unit rather than a
+`touches_entities` callable (task-discovery.md's migration-task row) — an
+entity traced only by repository component(s) never fires.
 
 After writing, refresh the generated files (Phase 8):
 `python .claude/sdlc/docs_index.py` and `python .claude/sdlc/statusboard.py`.
@@ -298,7 +308,11 @@ This validates:
     ONE grouped advisory naming the component, never one row per unit. A
     via_unit-less `depends_on` edge never counts as reached (it proves an
     import, not an invocation — the same rule Gap-1's own `imported` set
-    already applies).
+    already applies). A contract-text mention counts only as the
+    own-component qualified `component.unit` form (no verb required) or as a
+    bare name in a sentence that also names it alongside a call verb — a
+    purely descriptive mention, and a name immediately followed
+    by `.<ext>` (a file reference, never a call), do not count.
 
 18. **Version gating (CLAUDE.md §10).** Checks **#21–#24** and the
     component-containment gate ERROR at schema version >= 2.0

@@ -7,6 +7,12 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.24 (2026-09-22) — Cross-check 21 reports an entity no work_unit touches; cross-check 32 stops counting a mention or a file name as a call; Phase 8 footer is one line
+
+- Cross-check 21 advisory: an entity a non-repository component traces that no work_unit in the container touches is named with every component tracing it (no worker packet carries its slice); repository components are exempt; ungated. `merge-validate.md`'s unconditional "may EXCEED the union" allowance is replaced by that rule (ledger IMP-208, pinned by `_smoke/trace_excess_selftest.py` + fixture 46).
+- Cross-check 32: a name followed by a file extension is a file reference, not a call; a qualified `component.unit` mention still counts with no verb; a bare-name mention counts only in a sentence of the same contract field that carries a call-verb stem - a heuristic, since no typed call field exists (ledger IMP-202, pinned by `_smoke/seam_and_path_selftest.py` + fixture 47). The demo corpus moves 42 -> 63 "called by nothing" units: 15 file-mention-only stage modules, 6 verb-less mentions.
+- Phase 8's row-omission footer (two paragraphs) became one line pointing at `reporting-to-the-user.md`, which states the rules in full (ledger IMP-181, AUTHORING §19); SKILL_LINE_CEILINGS lowered in `lint_context_budget.py`.
+
 ## 1.23 (2026-09-20) — Phase 8 commits the run when the project opted in (auto-commit, CLAUDE.md 20)
 
 - New close step after `record-run`, before the card: `python .claude/sdlc/autocommit.py commit --skill arch --invocation "<as typed>" --summary "<one line>"` (mechanics in `setup/references/auto-commit.md`), its one printed line as the card's new `Commit:` row; runs on every exit path, never a blocker. The restated self-review paragraph is now a pointer at `lessons-capture.md`, paying for the lines (AUTHORING §19 ceilings unchanged). Pinned by `setup/_smoke/autocommit_lockstep_selftest.py`.

@@ -2079,6 +2079,12 @@ def check_component_work_units(
           UNION the units' touches).
         * Gap-2 (per unit) and Gap-1 (per component) advisories — see the
           inline comments below.
+        * excess-trace (IMP-208, container-wide): a non-repository
+          component's `traces_data_entities` entry that no `work_unit`
+          anywhere in the container touches — one advisory per entity,
+          naming every component that traces it. Repository-archetype
+          components are exempt (see the inline comment above the main
+          loop).
 
     Name uniqueness is checked here (not as a raising model_validator) so a draft
     with duplicate names stays loadable and reports a fixable error.
@@ -2105,6 +2111,42 @@ def check_component_work_units(
         for u in (c.work_units or [])
     )
     entrypoint_candidates: List[Tuple[str, str, int]] = []
+    # Cross-check #21 (container-wide excess-trace advisory, IMP-208): a
+    # component's traces_data_entities entry that no work_unit ANYWHERE IN
+    # THIS CONTAINER touches is invisible to every worker packet (task slices
+    # entity_slice off a work_unit's touches_entities, never off the raw
+    # component-level trace). Repository-archetype components are exempt
+    # outright - their traces are what they persist, realized by a
+    # migration/schema_model unit, not a touches_entities callable
+    # (references/merge-validate.md "Derive component traces from unit
+    # touches"; task-discovery.md's migration-task row). An entity traced
+    # ONLY by repository component(s) never fires; one traced by any
+    # non-repository component, with nothing in the container touching it,
+    # fires once, naming every component that traces it.
+    container_touched_ents: Set[str] = set()
+    entity_tracers: Dict[str, List[str]] = {}
+    entity_non_repo: Set[str] = set()
+    for comp0 in container.components or []:
+        comp0_archetype = comp0.archetype.value if comp0.archetype else None
+        for u0 in comp0.work_units or []:
+            container_touched_ents.update(
+                str(e0).strip() for e0 in (u0.touches_entities or [])
+            )
+        for e0 in comp0.traces_data_entities or []:
+            es0 = str(e0).strip()
+            entity_tracers.setdefault(es0, []).append(comp0.component_id)
+            if comp0_archetype != ComponentArchetype.repository.value:
+                entity_non_repo.add(es0)
+    for es0 in sorted(entity_tracers):
+        if es0 not in entity_non_repo or es0 in container_touched_ents:
+            continue
+        tracers = ", ".join(sorted(set(entity_tracers[es0])))
+        warns.append(
+            f"{file_label}: [cross-check 21] {es0} is traced by {tracers} but "
+            f"no work_unit in this container touches it - no worker packet "
+            f"carries its entity slice; add it to the realizing unit's "
+            f"touches_entities, or drop the stale trace"
+        )
     for i, comp in enumerate(container.components or []):
         cid = comp.component_id
         archetype = comp.archetype.value if comp.archetype else None
@@ -3652,6 +3694,29 @@ _FRAMEWORK_INVOKED_ARCHETYPES = {
     "config_loader", "dev_tool", "content_asset",
 }
 
+# A bare-name substring hit anywhere in free prose over-accepts a purely
+# descriptive mention as a call (ledger IMP-202: "escalator run_security_review
+# consumed a GateResult nothing produced" exempted a genuinely-orphaned unit
+# with no call verb anywhere near it). No typed calls/invokes field exists on
+# a work_unit (only via_unit on edges, consumed earlier in this function), so
+# this stays a heuristic, tuned against the corpus, not a general fix: a
+# bare-name mention counts only when the SAME sentence of the SAME contract
+# field also carries one of these call-verb stems. The qualified
+# `<component_id>.<name>` form (ledger IMP-189) needs no verb - the dotted
+# qualifier is itself the call assertion.
+_CALL_VERB_RE = re.compile(
+    r"\b(?:call\w*|invok\w*|delegat\w*|dispatch\w*|run\w*|execut\w*|"
+    r"trigger\w*|enforc\w*|appl\w*|check\w*|us(?:e|es|ing)\b)",
+    re.IGNORECASE,
+)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+# A name immediately followed by `.<ext>` is a file reference, never a call
+# (ledger IMP-202: a unit named the same as the file it lives in - e.g.
+# `docs_index` mentioned only as "docs_index.py" - is not reached by that
+# mention). Checked before the call-verb gate, and unconditionally: a verb
+# elsewhere in the sentence does not turn a filename back into a call.
+_FILE_REF_EXCLUDE = r"(?!\.\w)"
+
 
 def check_unreachable_work_units(
     containers: Dict[str, ArchContainer], dindex: "DeferralIndex",
@@ -3665,7 +3730,13 @@ def check_unreachable_work_units(
     internal_edges / external_edges `via_unit` (in any container) points at
     it; an API operation routes to it (traces_api_operation); another unit's
     contract text (summary / inputs / output / raises / signature /
-    owns_callables) names it; its component's archetype is framework-invoked;
+    owns_callables) names it EITHER in its own component's qualified
+    `<component_id>.<name>` form (no verb required - the qualifier IS the
+    call assertion, ledger IMP-189) OR as a bare name in a sentence that also
+    carries a call-verb stem (ledger IMP-202 - a purely descriptive mention
+    with no call verb, or a name immediately followed by `.<ext>` - a file
+    reference, checked first and unconditionally - does not count); its
+    component's archetype is framework-invoked;
     its kind is a non-callable deliverable (module / content / tooling); a
     top-level `deferrals` entry names it (`<cid>/<component>/<unit>`,
     `<component>/<unit>`, or the bare name); OR (IMP-126) an internal `calls`
@@ -3702,6 +3773,7 @@ def check_unreachable_work_units(
         if not pins_a_caller:
             continue
         unit_texts: Dict[Tuple[str, str], str] = {}
+        unit_sentences: Dict[Tuple[str, str], List[str]] = {}
         for comp in c.components or []:
             for u in comp.work_units or []:
                 if not (u.name or "").strip():
@@ -3710,7 +3782,17 @@ def check_unreachable_work_units(
                 parts += [str(x) for x in (u.inputs or [])]
                 parts += [str(x) for x in (u.raises or [])]
                 parts += [str(x) for x in (u.owns_callables or [])]
-                unit_texts[(comp.component_id, u.name.strip())] = " ".join(parts)
+                key = (comp.component_id, u.name.strip())
+                unit_texts[key] = " ".join(parts)
+                # Per field, per sentence (IMP-202) - a field boundary never
+                # lets a trailing verb from one field bleed into the next
+                # field's name, and a sentence boundary keeps an unrelated
+                # call verb elsewhere in a long field from covering a
+                # purely-descriptive sentence about a different name.
+                sentences: List[str] = []
+                for p in parts:
+                    sentences.extend(s for s in _SENTENCE_SPLIT_RE.split(p) if s.strip())
+                unit_sentences[key] = sentences
         for comp in c.components or []:
             archetype = comp.archetype.value if comp.archetype else None
             if archetype in _FRAMEWORK_INVOKED_ARCHETYPES:
@@ -3740,14 +3822,35 @@ def check_unreachable_work_units(
                 # callee. A second arm accepts exactly that form, keyed to
                 # THIS unit's own component_id, so a differently-qualified
                 # same-name hit (`other_component.unit`) still correctly
-                # fails to match (ledger IMP-189).
-                qualified = re.escape(comp.component_id) + r"\." + re.escape(name)
-                pat = re.compile(
-                    r"(?:(?<![\w.])" + re.escape(name) + r"(?![\w])"
-                    r"|(?<![\w])" + qualified + r"(?![\w]))"
+                # fails to match (ledger IMP-189). Neither arm counts a name
+                # immediately followed by `.<ext>` - that is a file
+                # reference, never a call (ledger IMP-202).
+                qualified_pat = re.compile(
+                    r"(?<![\w])" + re.escape(comp.component_id) + r"\." + re.escape(name)
+                    + r"(?![\w])" + _FILE_REF_EXCLUDE
                 )
-                if any(pat.search(t) for k, t in unit_texts.items()
-                       if k != (comp.component_id, name)):
+                bare_pat = re.compile(
+                    r"(?<![\w.])" + re.escape(name) + r"(?![\w])" + _FILE_REF_EXCLUDE
+                )
+                this_key = (comp.component_id, name)
+                # The qualified form needs no call verb - the dotted
+                # qualifier is itself the assertion (ledger IMP-189); it
+                # still searches the whole joined contract text, unscoped
+                # to one sentence.
+                is_reached = any(
+                    qualified_pat.search(t)
+                    for k, t in unit_texts.items() if k != this_key
+                )
+                if not is_reached:
+                    # The bare-name form needs a call-verb stem co-occurring
+                    # in the SAME sentence of the SAME field (ledger IMP-202)
+                    # - a purely descriptive mention grants nothing.
+                    is_reached = any(
+                        bare_pat.search(s) and _CALL_VERB_RE.search(s)
+                        for k, sentences in unit_sentences.items() if k != this_key
+                        for s in sentences
+                    )
+                if is_reached:
                     continue
                 unreached_names.append(name)
             if not unreached_names:

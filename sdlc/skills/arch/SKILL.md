@@ -1006,15 +1006,7 @@ The card above is a *shape*; every literal in it is an example. A close report
 that echoes a template literal unchanged has guessed, not reported — compute
 each row from this run's actual state.
 
-Rules: omit any row with nothing to say (never write "no warnings"). Add a
-`Lessons:` row only when this run recorded at least one — e.g. `Lessons: 1
-recorded (LSN-NNN) - about this skill, for its maintainer; nothing for you to
-do` — and never print "no lessons". Add the `Findings:` row only when findings
-were recorded (or open findings name an input of this run) — the ids plus one
-consequence clause routing to `/sdlc:repair`.
-**`Attention:` is translated, never pasted validator output** - turn each
-finding into what happened, why it matters, and what to do. If the validator
-printed nothing worth acting on, drop the row.
+Omit any row with nothing to say and never print a "no X" row; `Attention:` is translated, never pasted (row rules: reporting-to-the-user.md).
 
 ## Session state file
 
@@ -1224,4 +1216,4 @@ The architecture interview can be long. Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.23"
+skill_version: "1.24"

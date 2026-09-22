@@ -12,8 +12,22 @@ the user answered). A re-run of `setup` carries the block forward verbatim. No
 other skill ever asks the question: a skill reads the answer through the helper
 and does what it says.
 
-- `python .claude/sdlc/autocommit.py mode` prints the current mode and whether
-  the project is a git repository; `mode --set on|off` changes it.
+- `python .claude/sdlc/autocommit.py mode` prints the current mode, the
+  project's `also` list, and whether the project is a git repository;
+  `mode --set on|off` changes the mode.
+- `mode --also <path> [<path> ...]` replaces (never merges into) the
+  project's standing pathspec list — extra files committed alongside every
+  skill's own set (never `lesson`'s or `setup`'s; see "What is staged"
+  below). Bare `mode --also` with no values clears it. Each `<path>` must be
+  a repo-relative **literal** file: no glob characters (`*`, `?`, `[`), no
+  leading `:`, no absolute path, no `..` segment, and nothing under `docs/`
+  or `.claude/skills-state/` (the pipeline's own tables already own those
+  trees) — a call naming a refused path writes nothing and names the entry.
+  A marker hand-edited to carry a refused entry anyway is not fatal: the
+  entry is silently dropped and counted (` · ignored N auto_commit.also
+  entr(ies) outside the project`) rather than failing the whole commit. Each
+  surviving entry is staged as a literal git pathspec
+  (`:(literal)<entry>`), never interpreted as a glob.
 - `SDLC_AUTO_COMMIT=on|off` in the environment overrides the stored mode for
   one session or a CI job.
 - Helper absent (the project never ran `/sdlc:setup`, or ran an older one):
@@ -58,6 +72,19 @@ typed them, whitespace collapsed, flag spelling kept (`-d` stays `-d`):
   dispatch resolved to (`/sdlc:arch --system`)
 - never include arguments the dispatch rejected.
 
+The helper checks this shape itself rather than trusting the caller: if
+`--invocation`'s leading token is missing the `/sdlc:<skill>` prefix
+entirely (a close phase that passed only the collapsed `$ARGUMENTS` half,
+e.g. `--system --reconcile`), or spells `/<skill>` or `sdlc:<skill>`
+without it, it prepends `/sdlc:<skill>` itself and notes the repair with a
+` · invocation prefixed with /sdlc:<skill>` suffix on the one printed line
+(dry-run included) — no skill-name list, the only comparison is against
+`--skill`. If the leading token instead names a genuinely *different*
+skill than `--skill` (a dispatch mismatch, not a missing prefix), the
+helper refuses rather than commit real files under the wrong identity:
+`[DRAFT] not committed - --invocation names /sdlc:<x> but --skill is
+<skill>`.
+
 **`--summary`** is one line, at most about 80 characters, in the vocabulary
 CLAUDE.md 14 prescribes for the terminal: the artifact and its version, what
 happened to it, and the container / finding / unit it concerns. Counts are
@@ -84,16 +111,21 @@ welcome when the reader can act on them. Examples, one per form:
 
 Only the files the running skill owns — never a blanket sweep of `docs/`, and
 never `git add -A`. The helper carries the table; `--paths` adds a file a run
-wrote outside it.
+wrote outside it; the marker's `auto_commit.also` list (`mode --also`, above)
+adds a project-declared standing file, honoured by every skill in the table
+below **except `lesson` and `setup`** — a narrow, project-opt-in exception to
+"never a sweep", not a reversal of it: the list is explicit, per-file, and the
+project itself wrote it, unlike a sweep of whatever `git status` happens to
+show.
 
 | Skill | Its own files, plus the common set |
 |---|---|
-| every artifact skill | its artifact and shards (`docs/API.yaml` + `docs/API__*.yaml`, …), `docs/INDEX.yaml`, `.claude/skills-state/sdlc-<skill>.state.yaml`, the findings and lessons queues, `.claude/rules/sdlc-statusboard.md`, `.claude/sdlc/STATUS.md`, the marker |
+| every artifact skill | its artifact and shards (`docs/API.yaml` + `docs/API__*.yaml`, …), `docs/INDEX.yaml`, `.claude/skills-state/sdlc-<skill>.state.yaml`, the findings and lessons queues, `.claude/rules/sdlc-statusboard.md`, `.claude/sdlc/STATUS.md`, the marker, the `auto_commit.also` list |
 | `arch` | also `.claude/skills-state/sdlc-arch.derivation-report-*.yaml` |
-| `code` | `docs/CODE-MANIFEST.json`, the ledger, `sdlc-code/inflight/` and `stuck/`, and every generated file the ledger's `files_written` and the manifest name — never `packets/` or `stack/` (regenerable caches) |
-| `repair` | every artifact under `docs/` (it edits whichever holds the defect and re-slices task shards), its state file and doctor report — never `code`'s ledger |
-| `lesson` | only the lessons queue and the marker — it is model-invocable in ambient sessions and must never sweep a hand edit |
-| `setup` | `.claude/sdlc/`, `.claude/rules/sdlc-*.md`, `docs/INDEX.yaml`, the lessons queue, `CLAUDE.md`, `.claude/settings.json` |
+| `code` | `docs/CODE-MANIFEST.json`, the ledger, `sdlc-code/inflight/` and `stuck/`, and every generated file the ledger's `files_written` and the manifest name — never `packets/` or `stack/` (regenerable caches); the `auto_commit.also` list |
+| `repair` | every artifact under `docs/` (it edits whichever holds the defect and re-slices task shards), its state file and doctor report — never `code`'s ledger; the `auto_commit.also` list |
+| `lesson` | only the lessons queue and the marker — it is model-invocable in ambient sessions and must never sweep a hand edit; **never** the `auto_commit.also` list, for the same reason |
+| `setup` | `.claude/sdlc/`, `.claude/rules/sdlc-*.md`, `docs/INDEX.yaml`, the lessons queue, `CLAUDE.md`, `.claude/settings.json` — **never** the `auto_commit.also` list: `setup`'s EXACT-ness is about install ownership, not project convention files |
 
 A gitignored path is never added (the helper asks `git status`, which never
 lists ignored files). A file the user had staged outside the set stays staged

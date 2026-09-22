@@ -563,15 +563,7 @@ map: `${CLAUDE_SKILL_DIR}/../prd/references/reporting-to-the-user.md`
 - **Complete and green** → `/sdlc:ux` is the pipeline successor and always the successor here — `prd` is not sharded.
 
 
-Rules: omit any row with nothing to say (never write "no warnings"). Add a
-`Lessons:` row only when this run recorded at least one — e.g. `Lessons: 1
-recorded (LSN-NNN) - about this skill, for its maintainer; nothing for you to
-do` — and never print "no lessons". Add a `Findings:` row only when the
-Phase 8 drain recorded at least one — e.g. `Findings: 1 recorded (FND-007)
--> /sdlc:repair` — and never print "no findings".
-**`Attention:` is translated, never pasted validator output** - turn each
-finding into what happened, why it matters, and what to do. If the validator
-printed nothing worth acting on, drop the row.
+Omit any row with nothing to say and never print a "no X" row; `Attention:` is translated, never pasted (row rules: reporting-to-the-user.md).
 
 There is no literal `Next:` value to copy anywhere in this file — the row is
 computed at every close by the procedure above, never echoed from an example.
@@ -714,4 +706,4 @@ The interview is potentially long. Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.21"
+skill_version: "1.22"

@@ -13,7 +13,9 @@ phase then runs this helper as its last action before the close card:
 which, when the mode is `on`, stages ONLY the files that skill owns (its
 artifact and shards, docs/INDEX.yaml, its state file, the findings/lessons
 queues, the statusboard files, the marker; `code` adds the source files its
-ledger and manifest say it wrote) and commits them as
+ledger and manifest say it wrote; every skill but `lesson` and `setup` also
+adds the marker's `auto_commit.also` pathspecs, a project-declared standing
+list) and commits them as
 
     <invocation> → <summary>
 
@@ -28,8 +30,10 @@ paths). Hooks run and may refuse. A failure here is never a run failure:
 every reason not to commit is one printed line, and the exit code is 0.
 
 Subcommands:
-    mode [--set on|off]        read or set the stored answer (setup owns the
-                               marker; this never creates one)
+    mode [--set on|off] [--also PATH ...]
+                               read or set the stored answer, or replace the
+                               project's standing `also` pathspec list (setup
+                               owns the marker; this never creates one)
     commit --skill S --invocation "..." --summary "..."
            [--paths P ...] [--trailer "Key: value" ...] [--dry-run]
 
@@ -40,7 +44,8 @@ Exit codes:
     0 — committed, nothing to commit, mode off, or not committed for an
         environmental reason (not a repository, git missing or too old,
         identity unset, a hook refused) — the printed line says which.
-    1 — `mode --set` refused (unknown value, or no marker: run /sdlc:setup).
+    1 — `mode --set` or `mode --also` refused (unknown value, an unsafe
+        `--also` entry, or no marker: run /sdlc:setup).
     2 — usage error.
 """
 
@@ -61,11 +66,11 @@ try:
 except Exception:
     pass
 
-HELPER_VERSION = "1"
+HELPER_VERSION = "2"
 MARKER_REL = Path(".claude/sdlc/sdlc-plugin.json")
 ENV_OVERRIDE = "SDLC_AUTO_COMMIT"
 MODES = ("off", "on")
-DEFAULTS = {"mode": "off", "decided_on": None}
+DEFAULTS = {"mode": "off", "decided_on": None, "also": []}
 SEPARATOR = " → "
 MIN_GIT = (2, 25)  # --pathspec-from-file on `git add` and `git commit`
 MODE_CMD = "python .claude/sdlc/autocommit.py mode"
@@ -301,13 +306,83 @@ def owned_pathspecs(skill: str, root: Path, extra: "list[str]") -> "list[str]":
 
 
 # ---------------------------------------------------------------------------
+# auto_commit.also - a project-declared standing pathspec list (IMP-209)
+# ---------------------------------------------------------------------------
+
+_ALSO_GLOB_CHARS = "*?["
+
+
+def _also_refuse_reason(entry: str) -> "str | None":
+    """Why `entry` cannot be a project-declared `auto_commit.also` pathspec,
+    or None when it is a plain repo-relative literal path.
+
+    ONE predicate, applied both at write time (`mode --also` refuses and
+    writes nothing, naming the entry) and at read time (`_also_pathspecs`
+    drops the entry and counts it, so a hand-edited marker never fails a
+    whole commit over one bad entry). The `also` list is additive to the
+    fixed COMMON/OWN/EXACT tables, never a replacement for them, so it may
+    not reach into a tree those tables already own.
+    """
+    if not isinstance(entry, str) or not entry.strip():
+        return "is empty"
+    if entry == ".":
+        return "is '.'"
+    if entry.startswith(":"):
+        return "starts with ':' (a git pathspec magic prefix)"
+    if any(c in entry for c in _ALSO_GLOB_CHARS):
+        return f"contains a glob character (one of {_ALSO_GLOB_CHARS})"
+    if entry.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:[\\/]", entry) or Path(entry).is_absolute():
+        return "is an absolute path"
+    if ".." in Path(entry).as_posix().split("/"):
+        return "contains a '..' segment"
+    posix = Path(entry).as_posix()
+    if posix == "docs" or posix.startswith("docs/"):
+        return "is under docs/ (the pipeline's own tables already own that tree)"
+    if posix == STATE or posix.startswith(STATE + "/"):
+        return f"is under {STATE}/ (the pipeline's own tables already own that tree)"
+    return None
+
+
+def _also_pathspecs(skill: str, cfg: dict) -> "tuple[list[str], int]":
+    """The project's `auto_commit.also` list, filtered to safe entries -
+    `(valid, dropped_count)`. Anything not a list is treated as empty.
+
+    Never applied to `lesson` or `setup` (EXACT): `lesson` is model-invocable
+    in an ambient session and must never sweep a hand edit outside its own
+    queue; `setup`'s EXACT-ness is about install ownership, not a project's
+    own convention files.
+    """
+    if skill in EXACT:
+        return [], 0
+    also = cfg.get("also")
+    if not isinstance(also, list):
+        return [], 0
+    valid: "list[str]" = []
+    dropped = 0
+    for entry in also:
+        if isinstance(entry, str) and _also_refuse_reason(entry) is None:
+            valid.append(entry)
+        else:
+            dropped += 1
+    return valid, dropped
+
+
+# ---------------------------------------------------------------------------
 # commit
 # ---------------------------------------------------------------------------
 
 def _pathspec_file(paths: "list[str]") -> str:
+    """`paths` are already-resolved real repo-relative file paths straight out
+    of `git status` (never a user-typed pattern), so every line is written
+    `:(literal)`-prefixed - otherwise `git add`/`git commit
+    --pathspec-from-file` would re-parse a filename that itself contains a
+    pathspec-magic character (`*`, `?`, `[`; possible via a bracketed
+    subdirectory, or an `also` entry whose OWN name is clean but whose
+    project-root prefix is not) as a glob, matching sibling files it must
+    not touch."""
     f = tempfile.NamedTemporaryFile("wb", suffix=".pathspec", delete=False)
     with f:
-        f.write("\0".join(paths).encode("utf-8"))
+        f.write("\0".join(f":(literal){p}" for p in paths).encode("utf-8"))
     return f.name
 
 
@@ -325,10 +400,53 @@ def _first_line(text: str) -> str:
     return "git reported no reason"
 
 
+REPAIR_SUFFIX = " · invocation prefixed with /sdlc:{skill}"
+
+
+def _normalize_invocation(invocation: str, skill: str) -> "tuple[str, bool, str | None]":
+    """Shape-check `--invocation` against `--skill` (the one fact the caller
+    always has right, even when the collapsed $ARGUMENTS half under-substitutes
+    the documented `/sdlc:<skill> ` prefix).
+
+    Returns `(invocation, repaired, refused_reason)`:
+    - already `/sdlc:<skill> ...` — unchanged: `(invocation, False, None)`.
+    - `/sdlc:<other> ...` — a real dispatch mismatch, never silently repaired:
+      `(invocation, False, "<reason>")`.
+    - leading token spells `/<skill>` or `sdlc:<skill>` (no full prefix), or
+      the prefix is missing entirely (the lesson's `--system --reconcile`, or
+      an empty string) — repaired: `(fixed, True, None)`. No skill name list:
+      the only comparison is against `--skill` itself.
+    """
+    parts = invocation.split(maxsplit=1)
+    first = parts[0] if parts else ""
+    rest = parts[1] if len(parts) > 1 else ""
+
+    if first.startswith("/sdlc:"):
+        x = first[len("/sdlc:"):]
+        if x == skill:
+            return invocation, False, None
+        return invocation, False, f"--invocation names /sdlc:{x} but --skill is {skill}"
+
+    for lead in ("/", "sdlc:"):
+        if first.startswith(lead) and first[len(lead):] == skill:
+            fixed = f"/sdlc:{skill}" + (f" {rest}" if rest else "")
+            return fixed, True, None
+
+    fixed = f"/sdlc:{skill}" + (f" {invocation}" if invocation else "")
+    return fixed, True, None
+
+
 def cmd_commit(args) -> int:
     root = Path(args.project_root).resolve()
     invocation = " ".join(args.invocation.split())
     summary = " ".join(args.summary.split())
+
+    invocation, repaired, refused = _normalize_invocation(invocation, args.skill)
+    if refused:
+        print(f"[DRAFT] not committed - {refused}. Nothing is lost: the files are on disk.")
+        return 0
+    note = REPAIR_SUFFIX.format(skill=args.skill) if repaired else ""
+
     subject = f"{invocation}{SEPARATOR}{summary}"
 
     cfg = auto_commit_config(root)
@@ -351,17 +469,26 @@ def cmd_commit(args) -> int:
         return 0
 
     prefix = _prefix(root, toplevel)
+    also_paths, dropped_also = _also_pathspecs(args.skill, cfg)
+    if dropped_also:
+        note += (f" · ignored {dropped_also} auto_commit.also "
+                 f"entr{'y' if dropped_also == 1 else 'ies'} outside the project")
     specs = [prefix + s for s in owned_pathspecs(args.skill, root, args.paths or [])]
+    # `:(literal)` goes at the very start of the pathspec token, BEFORE the
+    # subdirectory prefix is joined into the path part - git's magic prefix
+    # is only recognised there, so `prefix + ":(literal)" + entry` would not
+    # disable glob interpretation at all.
+    specs += [f":(literal){prefix}{entry}" for entry in also_paths]
     files = _status_paths(toplevel, specs)
     if files is None:
         print("[DRAFT] not committed - git status failed. Nothing is lost: the files are on disk.")
         return 0
     if not files:
-        print(f"[OK] nothing to commit - {invocation} changed no file the pipeline owns")
+        print(f"[OK] nothing to commit - {invocation} changed no file the pipeline owns{note}")
         return 0
 
     if args.dry_run:
-        print(f"[DRY-RUN] would commit: {subject}")
+        print(f"[DRY-RUN] would commit: {subject}{note}")
         for p in files:
             print(f"          {p}")
         return 0
@@ -394,7 +521,7 @@ def cmd_commit(args) -> int:
 
     sha = _git(toplevel, "rev-parse", "--short", "HEAD")
     short = sha.stdout.strip() if sha is not None and sha.returncode == 0 else "HEAD"
-    line = f"[OK] committed {short} - {subject} ({len(files)} file{'s' if len(files) != 1 else ''})"
+    line = f"[OK] committed {short} - {subject} ({len(files)} file{'s' if len(files) != 1 else ''}){note}"
     left = _status_paths(toplevel, [prefix + "docs", prefix + ".claude"])
     if left:
         line += f" · {len(left)} other pipeline file(s) changed by something else, left uncommitted"
@@ -410,27 +537,52 @@ def cmd_mode(args) -> int:
     root = Path(args.project_root).resolve()
     cfg = auto_commit_config(root)
 
-    if not args.set:
+    # Neither --set nor --also given: read-only, print mode + the also list.
+    if args.set is None and args.also is None:
         decided = f" (decided {cfg['decided_on']})" if cfg.get("decided_on") else ""
         print(f"[OK] auto-commit is {cfg['mode']!r} for this project{decided}.")
         env = os.environ.get(ENV_OVERRIDE)
         if env in MODES:
             print(f"      {ENV_OVERRIDE}={env} in this environment is overriding whatever the marker says.")
         print(f"      {repo_status_line(root)}")
+        also = cfg.get("also") if isinstance(cfg.get("also"), list) else []
+        print(f"      also: {', '.join(also) if also else '(none)'}")
         print(f"\nNEXT: change it with: {MODE_CMD} --set on|off")
         return 0
 
-    if args.set not in MODES:
-        print(f"[FAIL] {args.set!r} is not one of {'|'.join(MODES)}.")
-        return 1
-    if not write_auto_commit(root, {"mode": args.set, "decided_on": _iso_today()}):
+    # --also given (even with no values, which clears the list) validates and
+    # replaces the stored list; --set given validates and replaces the mode.
+    # Both may be given in one call; either refusal writes NOTHING at all.
+    updates: dict = {}
+    if args.also is not None:
+        for entry in args.also:
+            reason = _also_refuse_reason(entry)
+            if reason:
+                print(f"[FAIL] --also {entry!r} {reason} - nothing written.")
+                return 1
+        updates["also"] = list(args.also)
+
+    if args.set is not None:
+        if args.set not in MODES:
+            print(f"[FAIL] {args.set!r} is not one of {'|'.join(MODES)}.")
+            return 1
+        updates["mode"] = args.set
+        updates["decided_on"] = _iso_today()
+
+    if not write_auto_commit(root, updates):
         print(f"[FAIL] no .claude/sdlc/sdlc-plugin.json in {root} - run /sdlc:setup first; "
               f"it owns that file.")
         return 1
-    if args.set == "on":
-        print("[OK] auto-commit is on. Every /sdlc:* run now commits its own files when it closes.")
-    else:
-        print("[OK] auto-commit is off. Nothing is committed on its own.")
+
+    lines: "list[str]" = []
+    if "mode" in updates:
+        lines.append("auto-commit is on. Every /sdlc:* run now commits its own files when it closes."
+                     if args.set == "on" else "auto-commit is off. Nothing is committed on its own.")
+    if "also" in updates:
+        lines.append(f"also: {', '.join(updates['also'])} will be committed alongside every skill's "
+                     "own files (never lesson's or setup's)."
+                     if updates["also"] else "also: cleared - no extra files.")
+    print("[OK] " + " ".join(lines))
     print("\nNEXT: nothing to run - this takes effect at the next skill close.")
     return 0
 
@@ -448,6 +600,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("mode", help="Read or set auto-commit (on|off).")
     p.add_argument("--set", default=None, metavar="MODE", help="on (commit at every skill close) or off.")
+    p.add_argument("--also", nargs="*", action="extend", default=None, metavar="PATH",
+                   help="Replace the project's standing pathspec list - extra files committed "
+                        "alongside every skill's own set (never lesson's or setup's). No values "
+                        "clears it. Each PATH is a repo-relative literal file, no globs.")
     p.add_argument("--project-root", default=".", help="Project root (default: cwd).")
     p.set_defaults(func=cmd_mode)
 
@@ -465,7 +621,33 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _merge_flag_values(argv: "list[str]") -> "list[str]":
+    """Rewrite an adjacent `--invocation X` / `--summary X` pair to
+    `--invocation=X` / `--summary=X` before `parse_args` sees them.
+
+    Both values can legitimately start with `-` (an under-substituted
+    `--invocation` is exactly `$ARGUMENTS`, e.g. `-d` or `--reconcile`; a
+    `-`-led one-word `--summary` is the same shape). Passed as two argv
+    tokens, argparse's own next-token-looks-like-an-option heuristic refuses
+    them (`error: argument --invocation: expected one argument`, exit 2) -
+    the caller's malformed call would not even reach `cmd_commit`'s repair.
+    The `--flag=value` form sidesteps that heuristic entirely.
+    """
+    out: "list[str]" = []
+    i, n = 0, len(argv)
+    while i < n:
+        tok = argv[i]
+        if tok in ("--invocation", "--summary") and i + 1 < n:
+            out.append(f"{tok}={argv[i + 1]}")
+            i += 2
+            continue
+        out.append(tok)
+        i += 1
+    return out
+
+
 def main(argv=None) -> int:
+    argv = _merge_flag_values(list(argv if argv is not None else sys.argv[1:]))
     args = build_parser().parse_args(argv)
     return args.func(args)
 
