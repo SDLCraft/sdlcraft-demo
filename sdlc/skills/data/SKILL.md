@@ -159,10 +159,10 @@ bootstrapped by `/sdlc:setup`. Use it to read large upstream docs by slice:
 `sections.<file>.<key>` range. This keeps the scan within budget on big
 projects — exactly the case this skill produces. Fall back to whole-file reads
 when `INDEX.yaml` is absent. Protocol: `.claude/rules/sdlc-docs-access.md`.
-Every `python .claude/sdlc/docs_index.py …` in this file runs the copy
-`${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once per
-run: an installed copy older than the plugin's counts as absent, and every
-fallback this file gives for a missing `docs_index.py` applies to it.
+Every `python .claude/sdlc/<helper>.py …` in this file (`docs_index.py` and
+the close-phase helpers alike) runs the copy `${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md`
+picks once per run: an installed copy older than the plugin's counts as
+absent, and every fallback this file gives for a missing helper applies to it.
 
 Required upstream artifacts:
 
@@ -931,4 +931,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.21"
+skill_version: "1.22"

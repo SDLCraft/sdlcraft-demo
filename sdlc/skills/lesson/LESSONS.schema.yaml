@@ -84,7 +84,20 @@
 # something went missing.
 # =============================================================================
 
-lessons_file_version: "1"                  # REQUIRED
+lessons_file_version: "2"                  # REQUIRED — the queue's format version,
+                                           #   stamped by every write with the
+                                           #   helper's own LESSONS_FILE_VERSION.
+                                           #   "1" = statuses open|collected;
+                                           #   "2" = the six statuses + the verdict
+                                           #   fields. It moves whenever an enum
+                                           #   the helper validates widens: a copy
+                                           #   that finds a file AHEAD of its own
+                                           #   number prints one line (exit 4) and
+                                           #   neither checks nor writes it — an
+                                           #   older emitter would drop what it
+                                           #   does not know, and an older checker
+                                           #   would blame the file for a value the
+                                           #   newer plugin defined.
 last_updated: <ISO-8601 UTC>               # OPTIONAL — bumped on every write
 
 last_ids:                                  # REQUIRED — writer-managed counters

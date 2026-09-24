@@ -130,7 +130,20 @@ and an LF checkout of the same file hash the same. Every skill that records a
 provenance hash reads it from ``INDEX.yaml`` or calls ``--hash`` — never a raw
 ``sha256(bytes)`` of its own, which differs on CRLF.
 
-Capability version: 9 (ARCH ``failure_modes[].id`` / ``security_concerns[].id``
+Capability version: 10 (the system ``ARCH.yaml`` is itemized: every
+``containers[].container_id`` as kind ``container``, keyed ``container/<cid>``
+- the bare id is an alias when nothing else claims it - and every ``edges[]``
+entry as kind ``edge``, keyed ``<from>-><to>``. Every container TASKS shard,
+TEST-STRATEGY and CODE-MANIFEST records ARCH.yaml as an upstream, and until
+now ``--drift`` could only say "no item to itemize" about it and ``--stamp``
+recorded ``ARCH.yaml (0 item(s))``; a shard's delta now names the container
+block or edge that moved, ``[referenced here]`` when it is the shard's own
+container or an edge touching it, and ``re-stamp only`` when another
+container's block moved. The same release makes ``--drift`` print ONE count
+line for a family the recorded side held none of - "a family added whole, or
+one the stamp could not itemize" - instead of every current id as "added
+upstream" (a git-recovered PRD revision itemized 0 ACR and 0 QUE, and the
+report listed all 121 as added). Version 9 (ARCH ``failure_modes[].id`` / ``security_concerns[].id``
 - container- and component-level - are indexed, keyed qualified ``<cid>/<id>``
 so a risk id never shares a component id's bare-id namespace; a test's
 ``targets_failure_mode`` / ``targets_security_concern`` resolve the bare id
@@ -188,7 +201,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-CAPABILITY_VERSION = 9
+CAPABILITY_VERSION = 10
 
 
 # =============================================================================
@@ -1323,7 +1336,82 @@ def _extract_tests(
 # Which extractors run for which file, keyed by the base (canonical) filename.
 # Canonical files and shards can differ: ARCH.yaml (system) has no symbols of
 # its own, while every ARCH__<cid>.yaml shard defines components + work units.
+_CONTAINER_KEY_PREFIX = "container/"
+
+
+def _extract_arch_system(
+    lines: list[str], sections: "dict[str, tuple[int, int]]", filename: str
+) -> "list[SymbolSlice]":
+    """Index the system ``ARCH.yaml``'s ``containers[].container_id`` (kind
+    ``container``, keyed ``container/<cid>`` so a container never shadows a
+    component or work unit of the same bare name; the bare id becomes an
+    alias when nothing else claims it) and ``edges[]`` (kind ``edge``, keyed
+    ``<from>-><to>``; a pair defined twice gets ``#2``, ``#3`` so neither
+    shadows the other). These two families are what every container shard,
+    TEST-STRATEGY and CODE-MANIFEST records ARCH.yaml as an upstream FOR;
+    the file's other blocks stay un-itemized (capability 10)."""
+    out: list[SymbolSlice] = []
+    cont_range = sections.get("containers")
+    if cont_range is not None:
+        for cid, c_start, c_end, c_indent in _list_items(lines, cont_range, "container_id"):
+            kid = c_indent + 2
+            purpose = _find_child_value(lines, (c_start, c_end), kid, "purpose")
+            archetype = _find_child_value(lines, (c_start, c_end), kid, "archetype")
+            out.append(
+                SymbolSlice(
+                    file=filename,
+                    path=f"containers[{cid}]",
+                    start=c_start,
+                    end=c_end,
+                    kind="container",
+                    context=_unquote(archetype) if archetype else None,
+                    summary=_summarize(_unquote(purpose)) if purpose else "",
+                    name=f"{_CONTAINER_KEY_PREFIX}{cid}",
+                )
+            )
+    edge_range = sections.get("edges")
+    if edge_range is None:
+        return out
+    seen: dict[str, int] = {}
+
+    def _edge(from_id: str, to_id: str, edge_type: Optional[str], start: int, end: int) -> None:
+        base = f"{from_id}->{to_id}"
+        seen[base] = seen.get(base, 0) + 1
+        key = base if seen[base] == 1 else f"{base}#{seen[base]}"
+        out.append(
+            SymbolSlice(
+                file=filename,
+                path=f"edges[{key}]",
+                start=start,
+                end=end,
+                kind="edge",
+                context=edge_type or None,
+                summary=f"{from_id} {edge_type or '->'} {to_id}",
+                name=key,
+            )
+        )
+
+    for from_id, e_start, e_end, e_indent in _list_items(lines, edge_range, "from"):
+        to_id = _find_child_value(lines, (e_start, e_end), e_indent + 2, "to")
+        if not to_id:
+            continue
+        edge_type = _find_child_value(lines, (e_start, e_end), e_indent + 2, "type")
+        _edge(from_id, _unquote(to_id), _unquote(edge_type) if edge_type else None, e_start, e_end)
+    # Flow-mapping edges (``- {from: a, to: b, type: calls}``) on one line.
+    for i in range(edge_range[0], edge_range[1]):
+        line = lines[i]
+        if not _FLOW_ITEM_START_RE.match(line):
+            continue
+        pairs, closed = _tokenize_flow(line)
+        if not closed or not pairs.get("from") or not pairs.get("to"):
+            continue
+        _edge(_unquote(pairs["from"].strip()), _unquote(pairs["to"].strip()),
+              _unquote(pairs["type"].strip()) if pairs.get("type") else None, i + 1, i + 1)
+    return out
+
+
 _EXTRACTORS = {
+    "ARCH.yaml": (_extract_arch_system,),
     "DATA-MODEL.yaml": (_extract_entities, _extract_enums),
     "PRD.yaml": (
         _extract_frs,
@@ -2214,6 +2302,14 @@ def build_index(docs_dir: Path) -> DocIndex:
     for bare, qualified in bare_units.items():
         if len(qualified) == 1 and bare not in named:
             aliases[bare] = qualified[0]
+    # A container's bare id resolves too (``--show backend``) when no other
+    # symbol or unit alias claims it - the qualified ``container/<cid>`` key is
+    # what the items map and --drift print (capability 10).
+    for name, sym in named.items():
+        if sym.kind == "container":
+            bare = name[len(_CONTAINER_KEY_PREFIX):]
+            if bare not in named and bare not in aliases:
+                aliases[bare] = name
 
     prd_lines = lines_by_file.get("PRD.yaml")
     retired = _load_retired_ids(docs_dir, prd_lines, all_sections.get("PRD.yaml", {}), warnings)
@@ -2562,7 +2658,8 @@ _PROV_KEYS = ("file", "sha256", "session_id", "last_updated", "version", "capabi
 # 8->9 bump must not report every one of those as a phantom addition). A kind
 # absent here predates per-item provenance itself (version 4) and is never
 # suspect.
-_KIND_CAPABILITY: "dict[str, int]" = {"failure_mode": 9, "security_concern": 9}
+_KIND_CAPABILITY: "dict[str, int]" = {"failure_mode": 9, "security_concern": 9,
+                                      "container": 10, "edge": 10}
 # Length of a per-item body hash recorded under upstream_provenance[].items.
 _ITEM_HASH_LEN = 12
 # Fields a change to which is a DECLARATION, not a behaviour change, per
@@ -2758,6 +2855,10 @@ def _item_family(key: str, index: DocIndex) -> str:
         return _family_of_definition(key, index)
     if _ID_ONLY_RE.match(key):
         return key.split("-", 1)[0]
+    if key.startswith(_CONTAINER_KEY_PREFIX):
+        return "container"
+    if "->" in key:
+        return "edge"
     if re.search(r"/TSK-\d+$", key):
         return "task"
     if key.count("/") == 2:
@@ -3544,7 +3645,8 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
                       recorded_capability: Optional[int] = None,
                       target_name: str = "",
                       changelog_lines: "Optional[list[str]]" = None,
-                      deferred: "Optional[set[str]]" = None) -> "tuple[list[str], bool]":
+                      deferred: "Optional[set[str]]" = None,
+                      recovered: bool = False) -> "tuple[list[str], bool]":
     """The per-family added / removed / changed-in-body lines of one upstream,
     diffed item by item against ``old_items`` (a stamp's items map, or the
     items of a revision recovered from git); ``basis`` names the old side.
@@ -3581,6 +3683,14 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
     it is a standing decision whose reason the change may have outdated -
     marked instead of silently re-stamped as reviewed.
 
+    ``recovered`` says ``old_items`` came from a git revision indexed by
+    TODAY's extractor over OLD text (a sha-only stamp), not from a stamp's own
+    items map. A family that side holds none of is then ambiguous - added
+    whole, or written in a shape the index cannot itemize - and is printed as
+    one count line instead of every current id as "added upstream" (a
+    recovered PRD revision itemized 0 ACR and 0 QUE and the report listed all
+    121 as added). An exact stamp's 0 is a real 0, so there the ids stay.
+
     Returns ``(lines, relevant)``: ``relevant`` is False when nothing this
     artifact references or cites was removed or changed, so the upstream's
     move owes a re-stamp, not a review. When BOTH ``old_items`` and the
@@ -3611,9 +3721,15 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
 
     def mark(key: str) -> "tuple[str, bool]":
         bare = key.rsplit("/", 1)[-1]
+        tokens = [key, bare] if bare != key else [key]
+        if "->" in key and _item_family(key, index) == "edge":
+            # An edge is referenced by whoever names either endpoint
+            # container - a shard's own container_id, a system task's
+            # involves_containers (capability 10).
+            tokens = [t for t in key.split("#", 1)[0].split("->") if t]
         structured = prose = 0
         if art_lines is not None:
-            for token in ([key, bare] if bare != key else [key]):
+            for token in tokens:
                 s, p = _cite_counts(art_lines, art_skip or [], token)
                 structured += s
                 prose += p
@@ -3641,6 +3757,18 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
     for bucket, keys in (("added", added_keys), ("removed", removed_keys), ("modified", modified_keys)):
         for k in sorted(keys, key=_id_sort_key):
             by_fam.setdefault(_item_family(k, index), {}).setdefault(bucket, []).append(k)
+    # Per-family totals on each side (the ``recovered`` rule above): a family
+    # the recovered side held NONE of, every member of which is now "added",
+    # is one count line, never every current id as an operand.
+    old_totals: dict[str, int] = {}
+    cur_totals: dict[str, int] = {}
+    if recovered:
+        for k in old_items:
+            fam = _item_family(k, index)
+            old_totals[fam] = old_totals.get(fam, 0) + 1
+        for k in current_items:
+            fam = _item_family(k, index)
+            cur_totals[fam] = cur_totals.get(fam, 0) + 1
     # These lists are the DELTA a --reconcile run takes verbatim, so they are
     # printed whole. A capped sample is for a verdict a person skims, where the
     # remedy handles the class or a re-run shows the rest; an operand a later
@@ -3652,7 +3780,12 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
         marked_here = 0
         if buckets.get("added"):
             ks = buckets["added"]
-            bits.append(f"{len(ks)} added upstream since this file was written ({join_ids(ks, len(ks))})")
+            if recovered and old_totals.get(family, 0) == 0 and len(ks) == cur_totals.get(family, 0):
+                bits.append(f"{len(ks)} defined now, none in the recovered revision - a family "
+                            f"added whole, or one written in a shape the index cannot itemize; "
+                            f"re-stamping records it either way")
+            else:
+                bits.append(f"{len(ks)} added upstream since this file was written ({join_ids(ks, len(ks))})")
         if buckets.get("removed"):
             marked = [mark(k) for k in buckets["removed"]]
             marked_here += sum(1 for _t, hit in marked if hit)
@@ -3848,7 +3981,7 @@ def drift_report(docs_dir: Path, artifact: str) -> int:
                 index, docs_dir, up_name, old_items, my_refs,
                 f"revision {str(rev)[:8]} of docs/{up_name}, recovered from git (its content "
                 f"matches the hash this stamp recorded)", lines, art_skip,
-                deferred=deferred)
+                deferred=deferred, recovered=True)
             details.extend(delta_lines)
             if not relevant:
                 details.append(_RESTAMP_ONLY)

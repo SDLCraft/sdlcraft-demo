@@ -7,6 +7,10 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.25 (2026-09-24) — The helper-resolution clause covers every `.claude/sdlc/<helper>.py` the file runs, not `docs_index.py` alone
+
+- `SKILL.md` (ledger IMP-218): the Phase-2 clause reads "every `python .claude/sdlc/<helper>.py …` in this file (`docs_index.py` and the close-phase helpers alike) runs the copy `helper-resolution.md` picks once per run", so a lagging install runs the plugin's `statusboard.py`, `lessons.py` and `autocommit.py` at the close too - a run on a 0.9.16 install had drawn the old statusboard and would have stamped no verdicts. Pinned by `setup/_smoke/helper_resolution_selftest.py` arm 4.
+
 ## 1.24 (2026-09-22) — Cross-check 21 reports an entity no work_unit touches; cross-check 32 stops counting a mention or a file name as a call; Phase 8 footer is one line
 
 - Cross-check 21 advisory: an entity a non-repository component traces that no work_unit in the container touches is named with every component tracing it (no worker packet carries its slice); repository components are exempt; ungated. `merge-validate.md`'s unconditional "may EXCEED the union" allowance is replaced by that rule (ledger IMP-208, pinned by `_smoke/trace_excess_selftest.py` + fixture 46).

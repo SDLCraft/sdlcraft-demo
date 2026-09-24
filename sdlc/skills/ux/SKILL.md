@@ -139,10 +139,10 @@ or a top-level section up in `INDEX.yaml` (or `python .claude/sdlc/docs_index.py
 --show <symbol>`) and `Read` only its `[start, end]` range, rather than loading
 the whole PRD to pull a handful of workflows/features. Fall back to whole-file
 reads when `INDEX.yaml` is absent. Protocol: `.claude/rules/sdlc-docs-access.md`.
-Every `python .claude/sdlc/docs_index.py …` in this file runs the copy
-`${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once per
-run: an installed copy older than the plugin's counts as absent, and every
-fallback this file gives for a missing `docs_index.py` applies to it.
+Every `python .claude/sdlc/<helper>.py …` in this file (`docs_index.py` and
+the close-phase helpers alike) runs the copy `${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md`
+picks once per run: an installed copy older than the plugin's counts as
+absent, and every fallback this file gives for a missing helper applies to it.
 
 Read these files at startup:
 
@@ -789,4 +789,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.24"
+skill_version: "1.25"

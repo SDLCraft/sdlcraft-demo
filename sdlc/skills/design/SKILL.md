@@ -161,10 +161,10 @@ Before anything else, check `.claude/skills-state/sdlc-design.state.yaml`:
 `/sdlc:setup`), read `PRD.yaml` / `UX.yaml` by slice via the index (or
 `python .claude/sdlc/docs_index.py --show <symbol>`) rather than whole-file.
 Protocol: `.claude/rules/sdlc-docs-access.md`. Every `python
-.claude/sdlc/docs_index.py …` in this file runs the copy
-`${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once per
-run: an installed copy older than the plugin's counts as absent, and every
-fallback this file gives for a missing `docs_index.py` applies to it.
+.claude/sdlc/<helper>.py …` in this file (`docs_index.py` and the close-phase
+helpers alike) runs the copy `${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md`
+picks once per run: an installed copy older than the plugin's counts as
+absent, and every fallback this file gives for a missing helper applies to it.
 
 Read at startup:
 
@@ -660,4 +660,4 @@ Design is a creative interview — keep it concrete and energetic:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.15"
+skill_version: "1.16"

@@ -281,9 +281,9 @@ wave. The shape of every walk, whoever runs it:
   the gate, put `re-invoke` in position 1, and never refuse `surgical`;
 - compute the blast radius — the write set — with `docs_index.py --refs` plus
   the token sweep (`back-propagation.md`, Step 3½), never by guessing; every
-  `python .claude/sdlc/docs_index.py …` in this file runs the copy
-  `${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once
-  per run, and the bare regenerate in Phase 5 is the exception that file names.
+  `python .claude/sdlc/<helper>.py …` here (`docs_index.py` and the close-phase
+  helpers alike) runs the copy `${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md`
+  picks once per run; the bare regenerate in Phase 5 is the exception it names.
 
 **Step 0 — is it the skill?** (CLAUDE.md 15). Sometimes the walk ends not at
 a wrong artifact but at the *plugin itself*: a validator check the user
@@ -822,4 +822,4 @@ the whole queue instead of the first four findings' archaeology.
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.23"
+skill_version: "1.24"

@@ -10,7 +10,7 @@ This is the **demo edition** (MIT). It takes a project from idea to a complete,
 validated architecture. The full edition, SDLCraft, continues from there to
 tested code — see [Editions](#editions).
 
-> Pre-1.0 (version 0.9.17): expect the skills to keep changing.
+> Pre-1.0 (version 0.9.18): expect the skills to keep changing.
 
 ## Install
 
@@ -203,6 +203,7 @@ In the consumer project's repo root:
 | `.claude/sdlc/findings.py` (+ `validate_findings.py`) | the findings-queue writer + its validator models, for recording a spec defect noticed outside a skill run |
 | `.claude/sdlc/bump_artifact.py` | the `metadata.<name>_version` + changelog bumper artifact skills and `repair` share |
 | `.claude/sdlc/autocommit.py` | the opt-in close-step committer: when you said yes at `/sdlc:setup`, every run commits its own files as `<the command you typed> → <what changed>` (see below) |
+| `.claude/sdlc/plugin_root.py` | which sdlc plugin is running, for a hook or project script that has no skill in view: `python .claude/sdlc/plugin_root.py` prints `0.9.18 @ <marketplace>` (the newest enabled install in Claude Code's plugin registry); `--path` for the folder alone |
 | `.claude/rules/sdlc-output-glossary.md` | plain-language meanings for the words the skills print (from `/sdlc:setup`) |
 | `.claude/rules/sdlc-lessons.md` | when and how to record a lesson (from `/sdlc:setup`) |
 | `.claude/rules/sdlc-findings.md` | when and how to record a finding — the ambient analog of the lessons rule (from `/sdlc:setup`) |

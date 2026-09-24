@@ -244,7 +244,8 @@ matter to you as the agent recording a lesson:
   only records that this machine handed it over. The maintainer's verdict
   comes back on its own: the installed plugin ships `VERDICTS.yaml`, and
   `record-run` stamps it at every skill close (`triaged` / `resolved` with
-  its `fixed_in` / `wontfix` / `dismissed`; `lessons.py list` shows each).
+  its `fixed_in` / `wontfix` / `dismissed`; `lessons.py list` shows each,
+  `list --json` gives the same as data).
   A lesson you record again after its fix is reopened, not duplicated — the
   helper keeps the old verdict beside the new sighting so the maintainer
   sees the fix regressed. Never set a verdict by hand.

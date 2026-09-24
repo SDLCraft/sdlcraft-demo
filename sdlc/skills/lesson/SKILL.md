@@ -135,6 +135,10 @@ python .claude/sdlc/autocommit.py commit --skill lesson --invocation "/sdlc:less
 ```
 
 Its one printed line is the card's `Commit:` row; off, or helper absent → no row.
+Every `python .claude/sdlc/<helper>.py …` in this file runs the copy
+`${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once per
+run: an installed copy older than the plugin's counts as absent (this skill's
+own `lessons.py` is always the plugin's).
 
 ```
 -- /sdlc:lesson - recorded ---------------------------
@@ -181,4 +185,4 @@ defect is an `LSN-NNN`, and all of them surface, generated, in
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.17"
+skill_version: "1.18"

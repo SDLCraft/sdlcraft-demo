@@ -7,6 +7,10 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.24 (2026-09-24) — The helper-resolution clause covers every `.claude/sdlc/<helper>.py` the file runs, not `docs_index.py` alone
+
+- `SKILL.md` (ledger IMP-218): the Phase-2 helper bullet reads "every `python .claude/sdlc/<helper>.py …` in this file (`docs_index.py` and the close-phase helpers alike) runs the copy `helper-resolution.md` picks once per run", so a lagging install runs the plugin's `statusboard.py`, `lessons.py` and `autocommit.py` at the close too - a run on a 0.9.16 install had drawn the old statusboard and would have stamped no verdicts. Pinned by `setup/_smoke/helper_resolution_selftest.py` arm 4.
+
 ## 1.23 (2026-09-22) — No shipped repair file cites a Pro-only skill by path, every guarded call is marked on its own line, and the edition boundary is a release gate
 
 - `references/orchestration.md` (new in 1.22) and `references/forward-propagation.md` each named a `code` skill reference by path as a "why" citation. In the demo edition no `code` skill exists, so `release_build.py` refused the free build - after every gate had passed and both editions were built. Both citations now name the mechanism in words: a citation nothing executes carries no path (AUTHORING 17).

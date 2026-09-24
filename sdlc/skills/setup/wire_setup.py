@@ -42,6 +42,12 @@ What it installs into the target project root (default: cwd):
                                           runs when the project opted in
                                           (CLAUDE.md §20; copied from this
                                           skill folder).
+  2j. .claude/sdlc/plugin_root.py       — which sdlc plugin is running, for a
+                                          hook or project script that has no
+                                          ${CLAUDE_SKILL_DIR}: the newest
+                                          ENABLED install in Claude Code's own
+                                          plugin registry (copied from this
+                                          skill folder).
   3. .claude/settings.json             — a `Write|Edit|MultiEdit` PostToolUse hook
                                           that runs the generator on every docs/
                                           edit, anchored on $CLAUDE_PROJECT_DIR so
@@ -109,6 +115,7 @@ STATUSBOARD_SRC = SKILL_DIR / "statusboard.py"
 MIGRATE_WARNINGS_SRC = SKILL_DIR.parent / "repair" / "migrate_warnings.py"
 WARNING_ITEM_SRC = SKILL_DIR.parent / "repair" / "warning_item.py"
 AUTOCOMMIT_SRC = SKILL_DIR / "autocommit.py"
+PLUGIN_ROOT_SRC = SKILL_DIR / "plugin_root.py"
 PLUGIN_MANIFEST = SKILL_DIR.parent.parent / ".claude-plugin" / "plugin.json"
 # Skills only the Pro edition ships. Their absence beside setup/ is how an
 # install knows it is the free edition; the marker records it so the
@@ -130,6 +137,7 @@ STATUSBOARD_DEST_REL = ".claude/sdlc/statusboard.py"
 MIGRATE_WARNINGS_DEST_REL = ".claude/sdlc/migrate_warnings.py"
 WARNING_ITEM_DEST_REL = ".claude/sdlc/warning_item.py"
 AUTOCOMMIT_DEST_REL = ".claude/sdlc/autocommit.py"
+PLUGIN_ROOT_DEST_REL = ".claude/sdlc/plugin_root.py"
 MARKER_DEST_REL = ".claude/sdlc/sdlc-plugin.json"
 HOOK_MATCHER = "Write|Edit|MultiEdit"
 # Idempotency marker inside the hook command: the stock generator's PATH, not
@@ -877,6 +885,7 @@ def run(
         (MIGRATE_WARNINGS_SRC, MIGRATE_WARNINGS_DEST_REL),
         (WARNING_ITEM_SRC, WARNING_ITEM_DEST_REL),
         (AUTOCOMMIT_SRC, AUTOCOMMIT_DEST_REL),
+        (PLUGIN_ROOT_SRC, PLUGIN_ROOT_DEST_REL),
     ):
         written += _copy(src, project_root / dest_rel, dry, log)
 
@@ -899,6 +908,7 @@ def run(
                 ("statusboard", helper_version(STATUSBOARD_SRC)),
                 ("migrate_warnings", helper_version(MIGRATE_WARNINGS_SRC)),
                 ("autocommit", helper_version(AUTOCOMMIT_SRC)),
+                ("plugin_root", helper_version(PLUGIN_ROOT_SRC)),
             )
             if ver
         }

@@ -129,9 +129,9 @@ slice rather than whole: look an `FR-###` or a top-level section up in
 `INDEX.yaml` (or `python .claude/sdlc/docs_index.py --show <symbol>`) and `Read`
 only its range. A fresh PRD is small, so this matters mainly on re-runs of a
 mature spec. Protocol: `.claude/rules/sdlc-docs-access.md`. Every `python
-.claude/sdlc/docs_index.py …` in this file runs the copy
-`${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once per
-run: an installed copy older than the plugin's counts as absent.
+.claude/sdlc/<helper>.py …` in this file (`docs_index.py` and the close-phase
+helpers alike) runs the copy `${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md`
+picks once per run: an installed copy older than the plugin's counts as absent.
 
 Start with the shared sweep, which handles the traversal, the skip list and
 the cost caps in one place:
@@ -706,4 +706,4 @@ The interview is potentially long. Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.22"
+skill_version: "1.23"

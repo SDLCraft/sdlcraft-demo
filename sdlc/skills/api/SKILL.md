@@ -152,11 +152,11 @@ look the needed section/symbol up in `INDEX.yaml` (`sections` /
 `Read` only that slice — the extraction lists below name exactly which
 blocks each upstream contributes. Fall back to a whole-file read only
 when `INDEX.yaml` is absent or the doc is genuinely small. See
-`.claude/rules/sdlc-docs-access.md`. Every `python .claude/sdlc/docs_index.py …`
-in this file runs the copy
+`.claude/rules/sdlc-docs-access.md`. Every `python .claude/sdlc/<helper>.py …`
+in this file (`docs_index.py` and the close-phase helpers alike) runs the copy
 `${CLAUDE_SKILL_DIR}/../setup/references/helper-resolution.md` picks once per
 run: an installed copy older than the plugin's counts as absent, and every
-fallback this file gives for a missing `docs_index.py` applies to it.
+fallback this file gives for a missing helper applies to it.
 
 1. **`docs/PRD.yaml`** — required.
 
@@ -846,4 +846,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.16"
+skill_version: "1.17"

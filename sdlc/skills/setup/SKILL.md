@@ -8,7 +8,7 @@ description: >
   --hash/--drift/--stale/--items/--stamp), a Write|Edit PostToolUse hook that refreshes the index on
   every docs/ edit, the slice-don't-slurp access rule, and the CLAUDE.md
   pointer — plus the shared helpers every later skill calls (lessons.py,
-  findings.py, bump_artifact.py, repo_scan.py, autocommit.py) and their ambient rules. Trigger only on
+  findings.py, bump_artifact.py, repo_scan.py, autocommit.py, plugin_root.py) and their ambient rules. Trigger only on
   /sdlc:setup or a direct request to set up the sdlc docs toolchain / docs
   index. Idempotent — safe to re-run; a re-run also upgrades previously
   installed helpers.
@@ -44,7 +44,7 @@ reconcile-chain list `--stale` after a re-run.
 
 | Target | Purpose |
 |---|---|
-| `.claude/sdlc/docs_index.py` | Stdlib-only index generator (zero deps; copied from this skill; capability version 9). Sections the canonical docs, symbol-indexes DATA-MODEL entities + enums, every PRD id family (`FR/NFR/WKF/ENT/PER/USR/…`), UX surfaces, **and every shard**: ARCH__ components + work units (`<cid>/<component>/<unit>`), TEST-STRATEGY tests (`TST-NNN`, `TST-<PREFIX>-NNN`), API__ operations (`OPR`), DESIGN__assets assets (`AST`), TASKS__ tasks (`<cid>/TSK-NNN`). Builds the cross-reference graph over id families **and field-anchored named references** (`touches_entities`, `via_unit`, `target_symbol`, `component_ref`, `depends_on`, …). Power tools: `--show <symbol>`, `--refs <symbol>` (blast-radius), `--check` (dangling-reference gate; only a STRUCTURED reference counts, a prose mention is never dangling), `--find <filters>`, `--hash <file>` (the canonical 16-hex content hash), `--drift <artifact>` (recorded `upstream_provenance` vs the upstreams now — item by item when the stamp carries `items`, with each moved upstream's changelog lines since the stamp as the why), `--stale` (every artifact built against an upstream that has moved since, in the order to reconcile it, with its owning skill's `--reconcile` command), `--items <upstream>` (every item with its body hash), `--stamp <artifact> [--upstream <file>…]` (rewrite the artifact's provenance with sha256 + per-item hashes + each upstream's version; writes only that artifact). Capability version 5. |
+| `.claude/sdlc/docs_index.py` | Stdlib-only index generator (zero deps; copied from this skill; capability version 10). Sections the canonical docs, symbol-indexes DATA-MODEL entities + enums, every PRD id family (`FR/NFR/WKF/ENT/PER/USR/…`), UX surfaces, the system ARCH's containers (`container/<cid>`) and edges (`<from>-><to>`), **and every shard**: ARCH__ components + work units (`<cid>/<component>/<unit>`), TEST-STRATEGY tests (`TST-NNN`, `TST-<PREFIX>-NNN`), API__ operations (`OPR`), DESIGN__assets assets (`AST`), TASKS__ tasks (`<cid>/TSK-NNN`). Builds the cross-reference graph over id families **and field-anchored named references** (`touches_entities`, `via_unit`, `target_symbol`, `component_ref`, `depends_on`, …). Power tools: `--show <symbol>`, `--refs <symbol>` (blast-radius), `--check` (dangling-reference gate; only a STRUCTURED reference counts, a prose mention is never dangling), `--find <filters>`, `--hash <file>` (the canonical 16-hex content hash), `--drift <artifact>` (recorded `upstream_provenance` vs the upstreams now — item by item when the stamp carries `items`, with each moved upstream's changelog lines since the stamp as the why), `--stale` (every artifact built against an upstream that has moved since, in the order to reconcile it, with its owning skill's `--reconcile` command), `--items <upstream>` (every item with its body hash), `--stamp <artifact> [--upstream <file>…]` (rewrite the artifact's provenance with sha256 + per-item hashes + each upstream's version; writes only that artifact). |
 | `.claude/settings.json` | A `Write\|Edit\|MultiEdit` **PostToolUse hook** — `<python> "$CLAUDE_PROJECT_DIR/.claude/sdlc/docs_index.py" --hook --project-root "$CLAUDE_PROJECT_DIR"` — that regenerates the index after any `docs/` edit (canonical, shard or `INDEX.allow.yaml`), from any working directory. Merged in — existing settings preserved; a shared entry keeps its own matcher. |
 | `.claude/rules/sdlc-docs-access.md` | The slice-don't-slurp retrieval protocol agents follow. |
 | `.claude/rules/sdlc-output-glossary.md` | Plain-language meanings for the words the skills print, for the USER to look up (CLAUDE.md §14). |
@@ -57,6 +57,7 @@ reconcile-chain list `--stale` after a re-run.
 | `.claude/sdlc/repo_scan.py` | Bounded evidence sweep over the project's OWN files, one domain per skill (`--domain prd\|ux\|design\|data\|api\|arch\|test\|task`, `--json`). Finds the migrations, route files, Dockerfiles, token files and test layout already on disk so a brownfield project's Phase-3 pre-fill starts from what exists rather than from the upstream specs alone. Costs are capped: the file list comes from `git ls-files` (so `.gitignore` is honoured for free), files and bytes per file are capped, and an excerpt is one trimmed line - it never emits a file body. Everything it returns is a CANDIDATE tagged `inferred`, confirmed item by item in the interview. |
 | `.claude/sdlc/sdlc-plugin.json` | Plugin-version marker, also naming the version of every helper installed (`helpers: {docs_index, lessons, findings, bump_artifact, …, autocommit}`), so recorded runs, lessons and findings say what they ran against. Carries the `telemetry` block too — the answer to step 4's sharing question, seeded `off`, plus the batch thresholds and the project's opaque ids: a random `project_uuid` minted on the first delivery (stable across a move, and with no path to guess back out of it) beside the legacy path-hash `project_id`. A re-run preserves it verbatim. Likewise the `auto_commit` block — the answer to step 4's second question (`mode: on \| off`, seeded `off`, `decided_on`), preserved verbatim on re-run. Also records the installed `edition` — `free` when test, task and code do not ship beside setup, with the free build's `homepage` as `pro_url` — which the statusboard reads to label those stages instead of routing to them. |
 | `.claude/sdlc/autocommit.py` | The close-step committer (CLAUDE.md 20; copied from this skill). When the project opted in, every skill's close runs `python .claude/sdlc/autocommit.py commit …` as its last action: it stages only that skill's own files and commits them as `<the command as typed> → <what changed>`. Never pushes, never `git add -A`, never a run failure. `autocommit.py mode [--set on\|off]` reads or changes the answer. Mechanics: `references/auto-commit.md`. |
+| `.claude/sdlc/plugin_root.py` | Which sdlc plugin is running, for a caller that has no `${CLAUDE_SKILL_DIR}` — a `SessionStart` hook, a project script, CI (copied from this skill). Reads Claude Code's own plugin registry and prints the newest ENABLED install: `python .claude/sdlc/plugin_root.py` → `0.9.17 @ sdlcraft`; `--path` for the folder alone, `--json` for the details; `SDLC_PLUGIN_ROOT` overrides it for bisecting. Rule and uses: `references/helper-resolution.md` → "Callers with no skill in view". |
 | `CLAUDE.md` (`## SDLC Documents`) | Slice-first access note + the `docs/INDEX.yaml` pointer. Coexists with the per-artifact bullets `prd`/`ux`/`data`/`arch` add to the same section. |
 | `docs/INDEX.yaml` | Generated once now (no-op if `docs/` is empty). |
 
@@ -74,6 +75,7 @@ have the sdlc plugin installed, and the toolchain upgrades only when
 | `docs_index.py` | The generator that gets copied into the target. Read it only if asked to extend index coverage. |
 | `wire_setup.py` | Deterministic installer that performs all of the above. The skill calls it; you do not hand-edit the targets. |
 | `autocommit.py` | The close-step committer copied into the target (CLAUDE.md 20); `references/auto-commit.md` is the rule every skill's close phase points at. |
+| `plugin_root.py` | The plugin-root resolver copied into the target for hooks and project scripts; `references/helper-resolution.md` carries its rule. `_smoke/plugin_root_selftest.py` pins it. |
 | `assets/sdlc-docs-access.md` | The rule-file template copied into the target. |
 | `assets/sdlc-output-glossary.md` | The user-facing glossary copied into the target. |
 | `assets/sdlc-lessons.md` | The lessons rule-file template copied into the target. |
@@ -293,7 +295,7 @@ is what belongs in `Attention:` — do not drop it.
 ```
 -- /sdlc:setup - what you have now -------------------
 Wrote:     .claude/sdlc/docs_index.py + lessons.py + findings.py + bump_artifact.py
-           + autocommit.py, .claude/rules/*, docs/INDEX.yaml, the docs hook in
+           + autocommit.py + plugin_root.py, .claude/rules/*, docs/INDEX.yaml, the docs hook in
            .claude/settings.json, the static CLAUDE.md section, the plugin-version marker
 Status:    complete - /sdlc:prd can run
 Sharing:   lesson reports are {sent automatically | offered each time | not
@@ -355,4 +357,4 @@ versions, and refreshes the index. Use `--dry-run` to preview.
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.24"
+skill_version: "1.25"
