@@ -357,4 +357,4 @@ versions, and refreshes the index. Use `--dry-run` to preview.
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.25"
+skill_version: "1.26"

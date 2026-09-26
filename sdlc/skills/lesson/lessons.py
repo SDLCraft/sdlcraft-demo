@@ -173,6 +173,11 @@ CLOSED_STATUSES = ("resolved", "wontfix", "dismissed")
 LESSONS_FILE_VERSION = "2"
 MAX_EVIDENCE = 5
 MAX_EVIDENCE_LEN = 200
+# Per-sighting version record `stamp_recurrence` appends on each recurrence
+# (ledger IMP-231) - capped like `evidence`, newest last. The FIRST sighting's
+# version stays only in the top-level plugin_version/skill_version fields;
+# this list starts at the second.
+MAX_SIGHTINGS = 5
 
 # Field order for the emitter — mirrors LESSONS.schema.yaml.
 RUN_KEYS = (
@@ -917,27 +922,63 @@ def shared_tokens(a: dict, b: dict) -> "list[str]":
     return sorted((ta["anchor"] | ta["detail"]) & (tb["anchor"] | tb["detail"]))
 
 
+def _normalize_anchor(anchor) -> str:
+    """Casefold, collapse whitespace, strip surrounding punctuation - nothing
+    fuzzier. The EXACT-match bar `find_recurrence` uses before it will fold a
+    fresh report into a CLOSED lesson (ledger IMP-221): two closed-status
+    anchors that normalize the same are the same anchor; anything else is not,
+    however high the token score. Empty stays empty - two lessons with no
+    anchor at all are never "the same anchor" by this test."""
+    s = re.sub(r"\s+", " ", str(anchor or "").casefold()).strip()
+    return re.sub(r"^[\W_]+|[\W_]+$", "", s)
+
+
 def _occurrences(lesson: dict) -> int:
     """How many times this defect has been reported. Absent means once."""
     n = lesson.get("occurrences")
     return n if isinstance(n, int) and n > 0 else 1
 
 
+def latest_sighting(lesson: dict) -> "dict | None":
+    """The newest entry of `lesson["sightings"]`, or None when there isn't
+    one - either the lesson was never a recurrence, or it recurred before
+    this field existed (ledger IMP-231). Callers must read absence as
+    "the version of later sightings is unknown", never as "still the first
+    sighting's version": the top-level plugin_version/skill_version date
+    occurrence 1 only."""
+    sightings = lesson.get("sightings")
+    if isinstance(sightings, list) and sightings and isinstance(sightings[-1], dict):
+        return sightings[-1]
+    return None
+
+
 def stamp_recurrence(prior: dict, fresh: dict) -> dict:
     """Fold a repeat report into the lesson already in the queue.
 
-    Three things happen. The count goes up, because how often a defect bites is
+    Four things happen. The count goes up, because how often a defect bites is
     what ranks it for the maintainer. Evidence the repeat brought that the
     original lacked is appended (within the schema's cap) - the second sighting
-    usually knows something the first did not. And `sent_at` is cleared, so the
+    usually knows something the first did not. `sent_at` is cleared, so the
     updated entry rides the next batch instead of sitting at a stale count on
     the relay forever; the maintainer's merge is keyed on lsn_id, so it updates
-    in place rather than arriving twice.
+    in place rather than arriving twice. And the fresh sighting's own version
+    is appended to `sightings` (capped like `evidence`, newest last) - the
+    top-level plugin_version/skill_version keep dating occurrence 1 forever
+    otherwise, so a recurrence across a fix could never be told from one
+    before it (ledger IMP-231).
     """
     prior["occurrences"] = _occurrences(prior) + 1
     prior.setdefault("first_seen_at", prior.get("raised_at"))
     prior["last_seen_at"] = fresh.get("raised_at") or _iso_utc_now()
     prior.pop("sent_at", None)
+
+    sighting = {"at": prior["last_seen_at"]}
+    for key in ("plugin_version", "installed_version", "skill_version"):
+        if fresh.get(key):
+            sighting[key] = fresh[key]
+    sightings = prior.setdefault("sightings", [])
+    sightings.append(sighting)
+    del sightings[:-MAX_SIGHTINGS]
 
     have = {str(line).strip() for line in (prior.get("evidence") or [])}
     room = MAX_EVIDENCE - len(prior.get("evidence") or [])
@@ -1182,26 +1223,71 @@ def verdict_tag(lesson: dict, installed: "str | None") -> str:
     return status
 
 
+def _closed_reason(lesson: dict) -> str:
+    """'fixed in 0.9.8 by IMP-073' / 'wontfix (IMP-039)' / 'dismissed' - the
+    verdict phrase `add` prints beside a reopened or resembled lsn_id."""
+    status = lesson.get("status")
+    if status == "resolved" and lesson.get("fixed_in"):
+        by = f" by {lesson['imp_id']}" if lesson.get("imp_id") else ""
+        return f"fixed in {lesson['fixed_in']}{by}"
+    if status == "wontfix" and lesson.get("imp_id"):
+        return f"wontfix ({lesson['imp_id']})"
+    return str(status or "closed")
+
+
 def find_recurrence(queue: dict, lesson: dict, threshold: float = SIM_STRONG,
                      plugin_root=None):
-    """The open lesson in `queue` this one is a repeat of, or None.
+    """The existing lesson this one is a repeat of, plus a near miss to flag.
 
-    Mirrors findings.py's find_recurrence: same question, same answer shape.
-    The threshold is SIM_STRONG rather than SIM_PROPOSE because this one acts
-    on its own - a wrong bump silently merges two real defects, where a wrong
-    cluster proposal is just rejected by the maintainer. `plugin_root`
-    (ledger IMP-179) lets a same-project resend filed under a cross-skill
-    where.file prefix still be caught here, not only by the clusterer.
+    Mirrors findings.py's OWN split (`find_duplicate` vs `find_recurrence`),
+    not one fuzzy bar serving both: an OPEN lesson absorbs a fresh one on the
+    score alone, unchanged - a wrong bump there just merges two reports a
+    human can still pull apart. A CLOSED lesson (resolved / wontfix /
+    dismissed) is a REOPEN claim and needs the harder, findings.py-style bar
+    too: the score AND an EXACT normalized `where.anchor` match, because a
+    wrong fold there corrupts a closed record silently (ledger IMP-221).
+    `plugin_root` (ledger IMP-179) lets a same-project resend filed under a
+    cross-skill where.file prefix still be caught here, not only by the
+    clusterer.
+
+    Returns `(match, near_miss)`. `match` is `(lesson, score)` for the
+    lesson to fold `lesson` into, or `None`. `near_miss` is `(lesson,
+    score)` for the best-scoring CLOSED lesson that cleared `threshold` but
+    did not match exactly on anchor - the maintainer's signal that this may
+    be the same defect recurring, kept instead of dropped - and is only ever
+    set when `match` is `None`.
     """
-    best, best_score = None, 0.0
     tokens = lesson_tokens(lesson)
+    fresh_anchor = _normalize_anchor((lesson.get("where") or {}).get("anchor"))
+    best, best_score = None, 0.0
+    near, near_score = None, 0.0
     for existing in queue.get("lessons", []):
         if not isinstance(existing, dict) or existing is lesson:
             continue
         score = similarity(lesson, existing, a_tokens=tokens, plugin_root=plugin_root)
-        if score >= threshold and score > best_score:
+        if score < threshold:
+            continue
+        if existing.get("status") in CLOSED_STATUSES:
+            existing_anchor = _normalize_anchor((existing.get("where") or {}).get("anchor"))
+            # An exact anchor alone contributes SIM_WEIGHTS["anchor"], which
+            # already clears SIM_STRONG - so the reopen also needs the lessons'
+            # CONTENT (detail + summary, anchor excluded) to reach SIM_PROPOSE;
+            # two unrelated defects filed under one coarse anchor stay apart.
+            ex_tokens = lesson_tokens(existing)
+            content = sum(SIM_WEIGHTS[part] * _jaccard(tokens[part], ex_tokens[part])
+                          for part in SIM_WEIGHTS if part != "anchor")
+            if fresh_anchor and existing_anchor == fresh_anchor and content >= SIM_PROPOSE:
+                if score > best_score:
+                    best, best_score = existing, score
+            elif score > near_score:
+                near, near_score = existing, score
+        elif score > best_score:
             best, best_score = existing, score
-    return (best, best_score) if best else (None, 0.0)
+    if best is not None:
+        return (best, best_score), None
+    if near is not None:
+        return None, (near, near_score)
+    return None, None
 
 
 # =============================================================================
@@ -2261,13 +2347,40 @@ def cmd_add(args) -> int:
     # would send the maintainer two entries to reconcile by hand, and the
     # number that actually matters - how often this bites - would read as two
     # separate ones rather than one that recurred. --allow-duplicate is the
-    # escape hatch when the match is wrong.
-    prior, score = (None, 0.0)
+    # escape hatch when the match is wrong. An OPEN lesson absorbs on the
+    # score alone; a CLOSED one (resolved/wontfix/dismissed) is a REOPEN
+    # claim and needs the harder exact-anchor bar too (ledger IMP-221) - a
+    # near miss against a closed lesson is never silently dropped, it rides
+    # along as `resembles` on the fresh lesson recorded below.
+    prior, score = None, 0.0
+    near_lesson, near_score = None, 0.0
     if not getattr(args, "allow_duplicate", False):
-        prior, score = find_recurrence(queue, lesson, plugin_root=plugin_root)
+        match, near_miss = find_recurrence(queue, lesson, plugin_root=plugin_root)
+        if match is not None:
+            prior, score = match
+        if near_miss is not None:
+            near_lesson, near_score = near_miss
+    reopening = prior is not None and prior.get("status") in CLOSED_STATUSES
+
+    resembles_note = None
+    if near_lesson is not None:
+        lesson["resembles"] = {k: v for k, v in {
+            "lsn_id": near_lesson.get("lsn_id"),
+            "imp_id": near_lesson.get("imp_id"),
+            "fixed_in": near_lesson.get("fixed_in"),
+        }.items() if v}
+        resembles_note = (
+            f"resembles {near_lesson.get('lsn_id')}, {_closed_reason(near_lesson)} "
+            f"({int(near_score * 100)}% match) - reopen that item or mint a new one"
+        )
 
     if getattr(args, "dry_run", False):
-        if prior is not None:
+        if prior is not None and reopening:
+            print(
+                f"[OK] dry run - would reopen {prior.get('lsn_id')} "
+                f"(seen {_occurrences(prior) + 1}x); nothing written."
+            )
+        elif prior is not None:
             print(
                 f"[OK] dry run - would be recorded as a recurrence of "
                 f"{prior.get('lsn_id')} (seen {_occurrences(prior) + 1}x); nothing written."
@@ -2277,10 +2390,15 @@ def cmd_add(args) -> int:
                 f"[OK] dry run - {lsn_id} would be recorded about /sdlc:{args.skill} "
                 f"({args.kind}, {args.severity}); nothing written."
             )
+            if resembles_note:
+                print(f"       ({resembles_note})")
         _print_hints(hints, written=False)
         return 0
 
     if prior is not None:
+        # Captured BEFORE stamp_recurrence flips a closed status back to
+        # `open` - the reopen line names what it reopened FROM.
+        reopen_reason = _closed_reason(prior) if reopening else None
         stamp_recurrence(prior, lesson)
         queue["last_updated"] = lesson["raised_at"]
         try:
@@ -2288,12 +2406,20 @@ def cmd_add(args) -> int:
         except OSError as e:
             print(f"[FAIL] cannot write {queue_path}: {e}", file=sys.stderr)
             return 2
-        print(
-            f"[OK] recorded as a recurrence of {prior.get('lsn_id')} - "
-            f"seen {_occurrences(prior)}x now, still one lesson -> {queue_path}"
-        )
-        print(f"       (same skill, same file, {int(score * 100)}% match on what it "
-              f"names; use --allow-duplicate if it is a different defect)")
+        if reopening:
+            print(
+                f"[OK] this reopens {prior.get('lsn_id')} - {reopen_reason}, "
+                f"seen {_occurrences(prior)}x now -> {queue_path}"
+            )
+            print(f"       (same skill, same file, same anchor, {int(score * 100)}% match; "
+                  f"use --allow-duplicate if it is a different defect)")
+        else:
+            print(
+                f"[OK] recorded as a recurrence of {prior.get('lsn_id')} - "
+                f"seen {_occurrences(prior)}x now, still one lesson -> {queue_path}"
+            )
+            print(f"       (same skill, same file, {int(score * 100)}% match on what it "
+                  f"names; use --allow-duplicate if it is a different defect)")
         _print_hints(hints, written=True)
         _refresh_statusboard()
         flush(root, quiet=True)
@@ -2311,6 +2437,8 @@ def cmd_add(args) -> int:
         f"[OK] {lsn_id} recorded about /sdlc:{args.skill} "
         f"({args.kind}, {args.severity}) -> {queue_path}"
     )
+    if resembles_note:
+        print(f"       ({resembles_note})")
     _print_hints(hints, written=True)
     _refresh_statusboard()
     # A blocker goes out now; anything else joins the batch. Quiet, because the
@@ -2717,6 +2845,26 @@ def _check_queue(doc: dict) -> "list[str]":
                                         or occurrences < 1):
             errors.append(f"{tag}: occurrences must be a positive whole number "
                           f"(got {occurrences!r}) - it counts how often this was reported")
+        # Additive, optional, type-checks only (occurrences' own 1.17
+        # precedent) - a queue written before either field existed carries
+        # neither and stays green.
+        sightings = lesson.get("sightings")
+        if sightings is not None:
+            if not isinstance(sightings, list):
+                errors.append(f"{tag}: sightings must be a list")
+            else:
+                for j, sighting in enumerate(sightings):
+                    if not isinstance(sighting, dict) or not sighting.get("at"):
+                        errors.append(f"{tag}: sightings[{j}] must be a mapping with 'at'")
+        resembles = lesson.get("resembles")
+        if resembles is not None:
+            if not isinstance(resembles, dict) or not LSN_RE.match(
+                    str(resembles.get("lsn_id", ""))):
+                errors.append(f"{tag}: resembles.lsn_id must match LSN-NNN")
+            elif resembles.get("imp_id") is not None and not IMP_RE.match(
+                    str(resembles["imp_id"])):
+                errors.append(f"{tag}: resembles.imp_id {resembles['imp_id']!r} "
+                              f"does not match IMP-NNN")
 
     dupes = sorted({i for i in ids if ids.count(i) > 1})
     if dupes:

@@ -1146,7 +1146,7 @@ def emit_findings(path: Path, checks: List[Check], docs: Path,
     # the failing check is held exactly like an open finding's, and the
     # `reopen` hint (--provenance) stays the only new thing this run says
     # about it, never a second, handoff-less finding (ledger IMP-158).
-    owed.update(resolved_stale_registry(docs, data))
+    owed.update(resolved_stale_registry(docs, data)[0])
     entries: List[Dict[str, Any]] = []
     held = 0
     for c in checks:
@@ -1298,41 +1298,63 @@ def _family_stem(name: str) -> str:
 
 
 def resolved_stale_registry(docs: Path, data: Dict[str, Any],
-                            hasher: Optional[Hasher] = None) -> Dict[str, Tuple[str, str]]:
-    """artifact_key -> (fnd_id, reopen hint) for every artifact a RESOLVED
-    re-invoke finding rewrote that still reads a stale upstream hash - the
-    `downstream_rerun` the resolution recorded never actually ran, or ran and
-    the artifact drifted again with nobody telling the queue. Reuses the same
-    provenance-hash comparison `--provenance` already prints (never a second
-    comparator), worded as staleness only: a legitimate LATER upstream edit
-    looks identical from here, and this makes no claim about WHY the chain
-    never happened.
+                            hasher: Optional[Hasher] = None
+                            ) -> Tuple[Dict[str, Tuple[str, str]], List[str]]:
+    """(artifact_key -> (fnd_id, reopen hint), fnd_ids whose hint was
+    suppressed for an empty `artifacts_touched`) for every artifact a
+    RESOLVED re-invoke finding rewrote that still reads a stale upstream hash
+    - the `downstream_rerun` the resolution recorded never actually ran, or
+    ran and the artifact drifted again with nobody telling the queue. Reuses
+    the same provenance-hash comparison `--provenance` already prints (never
+    a second comparator), worded as staleness only: a legitimate LATER
+    upstream edit looks identical from here, and this makes no claim about
+    WHY the chain never happened.
 
     Gated on the resolution's own `artifacts_touched` (ledger IMP-195): the
     drifted upstream must belong to the same FAMILY (shard and system file
     stem alike, `_family_stem`) as something the resolution actually
     touched, or the hint is unrelated upstream churn, not this finding's
-    problem - offering it for re-litigation is worse than saying nothing.
-    An empty `artifacts_touched` (schema-legal, a legacy resolution) falls
-    back to today's unfiltered hint, silently: there is nothing to narrow
-    against.
+    problem - offering it for re-litigation is worse than saying nothing. An
+    empty `artifacts_touched` (schema-legal, a legacy resolution) now
+    SUPPRESSES the hint instead of falling back to firing unfiltered (ledger
+    IMP-195, second pass): an empty set matches NO family, so "nothing to
+    narrow against" means "no basis to claim reopening", not "no basis to
+    filter, so allow everything" - the schema itself already treats an empty
+    `artifacts_touched` on a re-invoke resolution as a defect to flag
+    (`validate_findings.py`'s `ARTIFACTS_TOUCHED_GATED_VERSION`), never a
+    documented "nothing to compare" state. A suppressed finding is not
+    silent: the caller counts it (`--provenance`'s count line) so a
+    genuinely undone legacy fix stays findable.
 
-    The caller merges this into `emit_findings`' `owed` registry BEFORE its
-    per-check loop, so a failing check on such an artifact is HELD rather than
-    minted as a fresh finding - the `reopen` hint stays the only channel; a
-    second, handoff-less finding about the same gap is not a second answer.
-    Narrowing this registry means a check on an artifact whose drift is NOT
-    traced to the resolution's own touched files no longer gets held here -
-    it flows through emit_findings' ordinary logic instead, correct per the
-    lesson (unrelated drift earns its own finding, not silence under a
-    closed one)."""
+    The family filter is applied to an artifact's upstream rows BEFORE the
+    first drifted one is picked, never after: picking the first drifted row
+    and only then checking ITS family let an unrelated upstream earlier in
+    `upstream_provenance` hide the finding's own drifted family further down
+    the list (ledger IMP-195, second pass) - a live false negative.
+
+    The caller merges the registry into `emit_findings`' `owed` registry
+    BEFORE its per-check loop, so a failing check on such an artifact is HELD
+    rather than minted as a fresh finding - the `reopen` hint stays the only
+    channel; a second, handoff-less finding about the same gap is not a
+    second answer. Narrowing this registry means a check on an artifact whose
+    drift is NOT traced to the resolution's own touched files no longer gets
+    held here - it flows through emit_findings' ordinary logic instead,
+    correct per the lesson (unrelated drift earns its own finding, not
+    silence under a closed one)."""
     reg: Dict[str, Tuple[str, str]] = {}
+    skipped: List[str] = []
     findings = resolved_reinvoke_findings(data)
     if not findings:
-        return reg
+        return reg, skipped
     hasher = hasher or Hasher(docs)
+
+    def _drifted(row: Tuple[str, str, Optional[str]]) -> bool:
+        _up, recorded, current = row
+        return current is None or bool(recorded and current[:len(recorded)] != recorded[:len(current)])
+
     for fnd_id, names, touched in findings:
         touched_families = {_family_stem(a) for a in touched}
+        fnd_skipped = False
         for name in names:
             key = artifact_key(name)
             if key in reg:
@@ -1340,25 +1362,28 @@ def resolved_stale_registry(docs: Path, data: Dict[str, Any],
             rows = artifact_provenance(docs, docs / name, hasher)
             if not rows:
                 continue
-            bad = next(((up, recorded, current) for up, recorded, current in rows
-                        if current is None
-                        or (recorded and current[:len(recorded)] != recorded[:len(current)])),
-                       None)
+            candidates = ([r for r in rows if _family_stem(r[0]) in touched_families]
+                          if touched_families else [])
+            bad = next((r for r in candidates if _drifted(r)), None)
             if bad is None:
+                if not touched_families and any(_drifted(r) for r in rows):
+                    fnd_skipped = True
                 continue
             up, recorded, current = bad
-            if touched_families and _family_stem(up) not in touched_families:
-                continue
             detail = (f"was built against docs/{up}, which is no longer in docs/" if current is None
                       else f"was built against docs/{up}@{recorded}, now @{current}")
             reg[key] = (fnd_id, f"{fnd_id} should be reopened: docs/{name} {detail}, but the "
                                 f"finding that owed rebuilding it is resolved - "
                                 f"`findings.py reopen {fnd_id}`")
-    return reg
+        if fnd_skipped:
+            skipped.append(fnd_id)
+    return reg, skipped
 
 
-def provenance_report(docs: Path, findings_path: Optional[Path]) -> Tuple[List[str], List[str], List[str]]:
-    """([stale] lines, 'can be marked resolved' hints, 'should be reopened' hints)."""
+def provenance_report(docs: Path, findings_path: Optional[Path]
+                      ) -> Tuple[List[str], List[str], List[str], List[str]]:
+    """([stale] lines, 'can be marked resolved' hints, 'should be reopened' hints,
+    fnd_ids whose reopen hint was suppressed for an empty `artifacts_touched`)."""
     hasher = Hasher(docs)
     stale: List[str] = []
     fresh_artifacts: Dict[str, bool] = {}
@@ -1411,8 +1436,9 @@ def provenance_report(docs: Path, findings_path: Optional[Path]) -> Tuple[List[s
                              f"rewrite ({join_ids(targets, 4)}) was rebuilt after the fix and reads fresh upstream hashes")
     else:
         data = {"findings": []}
-    reopen = [hint for _fnd_id, hint in resolved_stale_registry(docs, data, hasher).values()]
-    return stale, hints, reopen
+    reg, skipped = resolved_stale_registry(docs, data, hasher)
+    reopen = [hint for _fnd_id, hint in reg.values()]
+    return stale, hints, reopen, skipped
 
 
 # '/sdlc:test demo-api --reconcile' -> 'TEST-STRATEGY__demo-api.yaml'. Shared
@@ -1527,8 +1553,9 @@ def main() -> int:
     stale: List[str] = []
     hints: List[str] = []
     reopen_hints: List[str] = []
+    reopen_hints_skipped: List[str] = []
     if args.provenance:
-        stale, hints, reopen_hints = provenance_report(docs, findings_path)
+        stale, hints, reopen_hints, reopen_hints_skipped = provenance_report(docs, findings_path)
 
     if args.as_json:
         print(json.dumps(
@@ -1544,7 +1571,8 @@ def main() -> int:
                 "findings_added": added,
                 "findings_awaiting": held,
                 "queue_error": queue_error,
-                "provenance": {"stale": stale, "resolvable": hints, "reopenable": reopen_hints}
+                "provenance": {"stale": stale, "resolvable": hints, "reopenable": reopen_hints,
+                               "reopen_hints_skipped": reopen_hints_skipped}
                               if args.provenance else None,
             },
             indent=2,
@@ -1600,6 +1628,11 @@ def main() -> int:
         warnings.append(f"findings queue: {queue_error} - run validate_findings.py and repair it before "
                         f"the next /sdlc:repair")
     print_findings([], warnings)
+
+    if reopen_hints_skipped:
+        print()
+        print(f"{len(reopen_hints_skipped)} resolved finding(s) record no artifacts_touched - "
+              f"reopen hints are off for them: {join_ids(reopen_hints_skipped, 3)}")
 
     if hints:
         print()

@@ -428,9 +428,14 @@ The steps, in order:
    that item's **position-1 proposal**, shown with the note — still `⚠
    inferred`, confirmed like any candidate, never written unasked. Its
    `basis` says how far to trust it: `measured` was read off the artifacts
-   the note names, so offer it as read; `inferred` (or a note with no
-   basis) is an analogy the walk never checked there - read the artifact it
-   cites before offering it, and say on the card what you verified. A note with
+   the note names, so offer it as read for what it names — but its window is
+   the finding's own change, narrower than this step's full `--drift` delta,
+   so the delta always comes from step 2 and the handoff is a proposal
+   within it, never its extent (an `expect re-stamp only` note is a
+   prediction to check against the stamp, not a summary of it); `inferred`
+   (or a note with no basis) is an analogy the walk never checked there -
+   read the artifact it cites before offering it, and say on the card what
+   you verified. A note with
    `key: null` frames the whole file. This is how the reasoning of the repair
    session reaches a fresh one: on disk, not in a transcript.
    **A finding the delta cites is a decision, not a question.** Besides the
@@ -460,7 +465,8 @@ The steps, in order:
    surgical Phase 4 uses; repair's own corpus-wide sweep stays where it is —
    this is narrower, one family, not `docs/`). On a TASKS family a prose grep
    cannot see an embedded copy — run the reslicer's `--check` instead
-   (`reslice_embeds.py --docs-dir docs --container <cid> --all --check`); it
+   (`reslice_embeds.py --docs-dir docs --container <cid|TASKS> --all --check`,
+   `TASKS` for the system file); it
    re-derives every embed from its source, which is the only sweep that means
    anything there. Every hit becomes its own card (Step 4), never accepted
    from the note alone. A `key: null` handoff (the whole file) with `retired`

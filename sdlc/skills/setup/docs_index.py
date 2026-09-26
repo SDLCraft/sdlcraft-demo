@@ -113,7 +113,15 @@ revision item by item, labelled "recovered from git" (ledger IMP-083, aicf
 LSN-065: a 7-unit delta had printed as a 51-unit residue). Only a miss - an
 uncommitted stamp matches no revision - falls back to the artifact's own
 references as the old snapshot, subtracts its structured deferrals, and says
-plainly that the residue mixes "new upstream" with "never covered".
+plainly that the residue mixes "new upstream" with "never covered". The same
+recovery is tried, once per upstream, for an "index-new" item even inside an
+otherwise-exact items map: that bucket's old body was never recorded (the
+stamp predates the capability that tracks its family), so a hit settles it
+exactly (unchanged stays re-stamp only, changed is marked like any other
+changed item) and a miss can only rule a change out for an item nothing here
+references or cites - a referenced or cited one is hedged instead of silently
+folded into re-stamp only, which used to let a real edit under a
+stale-capability stamp report as nothing to review (ledger IMP-229).
 
 ``--stamp`` also records each upstream's ``metadata.<name>_version``, so
 ``--drift`` can print WHY an upstream moved: its changelog lines newer than the
@@ -129,6 +137,15 @@ Text-level on purpose: ``read_text`` normalises line endings, so a CRLF checkout
 and an LF checkout of the same file hash the same. Every skill that records a
 provenance hash reads it from ``INDEX.yaml`` or calls ``--hash`` — never a raw
 ``sha256(bytes)`` of its own, which differs on CRLF.
+
+Capability version: 11 (an item the recorded stamp never itemized - it
+predates the capability that tracks its family, or the stamp's ``items`` map
+is empty - is no longer an automatic ``re-stamp only``: ``--drift`` and
+``--stale`` first recover its old body from git at the recorded hash;
+unchanged stays ``re-stamp only``, changed is a delta item, and a miss on an
+item this file references or cites prints "no earlier body recorded or
+recoverable - a change cannot be ruled out" and never ``re-stamp only``.
+An older install printed an all-clear repair's drain then stamped.)
 
 Capability version: 10 (the system ``ARCH.yaml`` is itemized: every
 ``containers[].container_id`` as kind ``container``, keyed ``container/<cid>``
@@ -201,7 +218,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-CAPABILITY_VERSION = 10
+CAPABILITY_VERSION = 11
 
 
 # =============================================================================
@@ -3432,7 +3449,7 @@ def _stale_rows(docs_dir: Path) -> "tuple[list[dict], list[str]]":
                     _lines, relevant = _item_delta_lines(
                         index, docs_dir, up, items, index.refs_by_file.get(name, set()),
                         "the stamp", lines, art_skip, recorded_capability, name, changelog_raw,
-                        deferred)
+                        deferred, recorded_sha=recorded)
                     reviewable.append(relevant)
                 else:
                     reviewable.append(True)  # sha-only: cannot tell, so it is reviewed
@@ -3646,7 +3663,8 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
                       target_name: str = "",
                       changelog_lines: "Optional[list[str]]" = None,
                       deferred: "Optional[set[str]]" = None,
-                      recovered: bool = False) -> "tuple[list[str], bool]":
+                      recovered: bool = False,
+                      recorded_sha: str = "") -> "tuple[list[str], bool]":
     """The per-family added / removed / changed-in-body lines of one upstream,
     diffed item by item against ``old_items`` (a stamp's items map, or the
     items of a revision recovered from git); ``basis`` names the old side.
@@ -3664,7 +3682,20 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
     indexable at a LATER capability than that is never a document edit - the
     stamp's items map could not have carried it either way - so it is pulled
     out into its own "index-new" line instead of the normal added-upstream
-    count, and never makes the upstream's move "relevant" on its own.
+    count. Whether it makes the upstream's move "relevant" is decided by
+    git, not assumed either way (ledger IMP-229): ``recorded_sha`` (the
+    stamp's whole-file hash) is tried against the last ``_GIT_REVISIONS``
+    committed revisions of ``up_name`` exactly as the sha-only fallback
+    below does. A hit that recovers the item's own OLD body settles it -
+    unchanged stays index-new/re-stamp-only, changed is marked and can set
+    ``relevant`` like any other changed item. A miss (no committed revision
+    carries this stamp's content, or ``docs_dir`` is no repository) can only
+    rule OUT a change for an item nothing here references or cites; a
+    referenced or cited one is hedged instead of silently folded into
+    re-stamp-only, because an items map that predates the capability that
+    tracks a family never recorded that item's old body at all - the
+    "cannot be told apart" fallback below exists for exactly this reason,
+    it just never used to reach the index-new bucket.
 
     ``target_name`` (the artifact THIS delta is being computed for) and
     ``changelog_lines`` (the upstream's own raw changelog-since-stamp, from
@@ -3800,10 +3831,53 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
             relevant = relevant or marked_here > 0
         out.append(f"{family}: " + "; ".join(bits))
     if index_new_keys:
-        out.append(
-            f"{len(index_new_keys)} item(s) are new to the index, not to the document - "
-            f"re-stamp only ({join_ids(sorted(index_new_keys, key=_id_sort_key), len(index_new_keys))})"
-        )
+        # An index-new item's OLD body was never recorded (the stamp predates
+        # the capability that tracks its family) - git, not this map, is the
+        # only place that body could still exist. Same recovery the sha-only
+        # fallback below uses, tried once for the whole bucket (ledger IMP-229).
+        found = "unavailable"
+        old_full_new = None
+        rev = None
+        if recorded_sha:
+            found, rev, old_full_new = _recover_items_from_git(docs_dir, up_name, recorded_sha)
+        unverified: "list[str]" = []      # stays index-new / re-stamp only
+        confirmed_changed: "list[str]" = []  # git-hit, body provably differs
+        hedged: "list[str]" = []          # no old body to check, but referenced/cited
+        ordered_new = sorted(index_new_keys, key=_id_sort_key)
+        if found == "hit" and old_full_new is not None:
+            old_hashes_new = {k: v[0] for k, v in old_full_new.items()}
+            for k in ordered_new:
+                if old_hashes_new.get(k) == current_items.get(k):
+                    unverified.append(k)
+                else:
+                    confirmed_changed.append(k)
+        else:
+            for k in ordered_new:
+                _label, hit = mark(k)
+                (hedged if hit else unverified).append(k)
+        if unverified:
+            out.append(
+                f"{len(unverified)} item(s) are new to the index, not to the document - "
+                f"re-stamp only ({join_ids(unverified, len(unverified))})"
+            )
+        if confirmed_changed:
+            marked = [mark(k) for k in confirmed_changed]
+            marked_here = sum(1 for _t, hit in marked if hit)
+            tail = f"{marked_here} of them referenced or cited here" if marked_here \
+                else "none referenced or cited here"
+            out.append(
+                f"{len(confirmed_changed)} item(s) new to the index changed in body since "
+                f"revision {str(rev)[:8]} of {up_name}, recovered from git "
+                f"({', '.join(t for t, _h in marked)}) - {tail}"
+            )
+            relevant = relevant or marked_here > 0
+        if hedged:
+            marked = [mark(k) for k in hedged]
+            out.append(
+                f"{len(hedged)} item(s) new to the index with no earlier body recorded or "
+                f"recoverable - a change cannot be ruled out ({', '.join(t for t, _h in marked)})"
+            )
+            relevant = True
     if not (added_keys or removed_keys or modified_keys):
         if not index_new_keys:
             out.append(
@@ -3960,11 +4034,13 @@ def drift_report(docs_dir: Path, artifact: str) -> int:
             recorded_capability = 0
         if isinstance(recorded_items, dict):
             # Exact: the stamp recorded every item with its body hash, so the
-            # delta is item by item - no git, no guessing from references.
+            # delta is item by item for everything that map covers - git is
+            # tried only for the index-new remainder, whose old body this
+            # map never had a slot for (ledger IMP-229).
             delta_lines, relevant = _item_delta_lines(
                 index, docs_dir, up_name, recorded_items, my_refs,
                 "the snapshot recorded at the last write", lines, art_skip,
-                recorded_capability, name, changelog_raw, deferred)
+                recorded_capability, name, changelog_raw, deferred, recorded_sha=recorded)
             details.extend(delta_lines)
             if not relevant:
                 details.append(_RESTAMP_ONLY)

@@ -7,6 +7,11 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.26 (2026-09-26) — A measured handoff is read as a proposal within the `--drift` delta, never as its extent: its window is its finding's change, which can be narrower than the file's stamp window
+
+- `references/upstream-reconciliation.md` step 3 (ledger IMP-226, aicf LSN-112 / FND-125): the canonical reconcile step says a measured handoff's window is the finding's own change, so the delta is always taken from `--drift` and an "expect re-stamp only" note is a prediction to check against the stamp. Every other handoff site carries the same caveat (test's `references/reconcile-container.md`, task's restatement, repair's writer side). Pinned by the new `_smoke/handoff_scope_selftest.py`, which finds the sites by meaning (a paragraph naming a handoff with `basis` and `measured`), not by a fixed list.
+- `references/upstream-reconciliation.md`: the TASKS-family token sweep names `--container <cid|TASKS>` (`TASKS` for the system file) (ledger IMP-224; pinned by `task/_smoke/authoring_prose_selftest.py`).
+
 ## 1.25 (2026-09-24) — The helper-resolution clause covers every `.claude/sdlc/<helper>.py` the file runs, not `docs_index.py` alone
 
 - `SKILL.md` (ledger IMP-218): the Phase-2 clause reads "every `python .claude/sdlc/<helper>.py …` in this file (`docs_index.py` and the close-phase helpers alike) runs the copy `helper-resolution.md` picks once per run", so a lagging install runs the plugin's `statusboard.py`, `lessons.py` and `autocommit.py` at the close too - a run on a 0.9.16 install had drawn the old statusboard and would have stamped no verdicts. Pinned by `setup/_smoke/helper_resolution_selftest.py` arm 4.

@@ -365,11 +365,15 @@ The shape of a sequence, rooted in one artifact:
   **Say how each note was reached.** `basis: measured` means you read it off
   the artifacts the note names (a call site checked against the caller's
   declared order, a field read from the entity); `basis: inferred` means an
-  analogy or a precedent you did not verify there. A cold reconcile offers a
-  measured note as read and VERIFIES an inferred one against the cited
-  artifact before writing — one siting recommendation written by analogy was
-  wrong against the very files its note cited, and nothing marked it as a
-  guess. Never mix the two registers in one note.
+  analogy or a precedent you did not verify there. A measured note states
+  only the window it measured — its finding's own change — and never claims
+  the receiving file's whole delta: write `expect re-stamp only` only when
+  that measured window IS the file's whole stamp window, never as shorthand
+  for "nothing else moved". A cold reconcile offers a measured note as read
+  and VERIFIES an inferred one against the cited artifact before writing —
+  one siting recommendation written by analogy was wrong against the very
+  files its note cited, and nothing marked it as a guess. Never mix the two
+  registers in one note.
 
   **Retiring or renaming a token: put the token, never an authored consumer
   list.** When the fix removes or renames a named token, add
@@ -425,16 +429,13 @@ path (`--path docs/ARCH__demo-api.yaml`) is refused.
 python "${CLAUDE_SKILL_DIR}/../arch/validate_schema.py" --path docs/ARCH.yaml
 python "${CLAUDE_SKILL_DIR}/../test/validate_schema.py" --path docs/TEST-STRATEGY.yaml                  # edition-ok: runs only where test/task ship (below)
 python "${CLAUDE_SKILL_DIR}/../task/validate_schema.py" --path docs/TASKS.json                           # edition-ok: runs only where test/task ship (below)
-python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --container <cid> --all --check   # edition-ok: runs only where test/task ship (below)
+python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --container <cid|TASKS> --all --check   # edition-ok: runs only where test/task ship (below)
 python "${CLAUDE_SKILL_DIR}/../task/crosscheck_artifacts.py" --docs-dir docs                             # edition-ok: runs only where test/task ship (below)
 python .claude/sdlc/docs_index.py                 # regenerate the index - the PROJECT's copy only;
                                                   # absent -> skip and say so, never the plugin's copy (SKILL.md Phase 5)
 python .claude/sdlc/docs_index.py --check         # dangling-reference gate
-python .claude/sdlc/docs_index.py --stale         # must list nothing this run reconciled - a row here is a missed stamp (step 5),
-                                                  # the `re-stamp only` rows included (nothing the shard cites changed, so the
-                                                  # review is cheap - but the stamp is still owed), unless the Phase 2 snapshot
-                                                  # already held it: a pre-existing pair, owed to
-                                                  # its own --reconcile - named on the close card, never stamped
+python "${CLAUDE_SKILL_DIR}/doctor.py" --docs-dir docs --provenance --json   # re-run of the Phase 2 command; diff its stale PAIRS against `provenance_drift`, pair by pair - never the row count below
+python .claude/sdlc/docs_index.py --stale         # human read-out + the `re-stamp only` labels only (step 5) - a pair the snapshot already held (checked above) is pre-existing, owed to its own --reconcile - named on the close card, never stamped; never counted against the snapshot itself
 ```
 
 The `test` and `task` lines run only where those skills ship (demo edition:

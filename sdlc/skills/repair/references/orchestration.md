@@ -262,14 +262,19 @@ session, before the next wave is dispatched:
    captured;
 3. re-stamp the **re-stamp-only rows**: `docs_index.py --stale` marks a row
    `re-stamp only` when nothing the downstream artifact references or cites
-   changed, so its "review" is empty and the stamp's claim is true. The
-   session stamps such rows — pre-existing ones right after the plan gate,
-   ones a wave caused at that wave's drain — with `--upstream <the moved
-   file>` and `--hold-upstream` for every other upstream the artifact
-   records, then reads the `re-stamped …` printout exactly as surgical step 5
-   prescribes. This is the ONE case where a pair in the Phase-2 snapshot is
-   stamped. A row with real item drift inside a pending aggregate's boundary
-   belongs to that worker; outside every boundary it joins the handoff chain;
+   changed, so its "review" is empty and the stamp's claim is true — but the
+   row is never itself diffed against the snapshot for pre-existence: a row
+   is pre-existing only when EVERY (artifact, upstream) pair it names is
+   already in `provenance_drift` (the Phase 2 `doctor.py --provenance --json`
+   pairs, re-run and diffed pair by pair — never the `--stale` row count),
+   stamped right after the plan gate; a row naming even one pair the
+   snapshot lacks is wave-caused, stamped at that wave's drain instead — with
+   `--upstream <the moved file>` and `--hold-upstream` for every other
+   upstream the artifact records, then reads the `re-stamped …` printout
+   exactly as surgical step 5 prescribes. This is the ONE case where a pair
+   in the Phase-2 snapshot is stamped. A row with real item drift inside a
+   pending aggregate's boundary belongs to that worker; outside every
+   boundary it joins the handoff chain;
 4. re-read the queue (`findings.py list --open`): a finding minted by a
    worker's report (`lesson`, or a defect it surfaced beside its own) joins
    the next wave's plan through wave 1 for it alone;

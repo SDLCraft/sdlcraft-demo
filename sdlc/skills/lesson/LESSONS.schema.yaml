@@ -299,6 +299,40 @@ lessons:                                   # REQUIRED — list[Lesson]; may be e
                                            #   the updated count travels on the
                                            #   next batch and the maintainer's
                                            #   merge updates it in place.
+    sightings: []                          # OPTIONAL — [{at, plugin_version,
+                                           #   installed_version, skill_version}],
+                                           #   newest last, capped at 5 like
+                                           #   `evidence`. Appended by
+                                           #   `stamp_recurrence` on every
+                                           #   recurrence AFTER the first — the
+                                           #   top-level plugin_version /
+                                           #   skill_version above stay dated to
+                                           #   the FIRST sighting always, so this
+                                           #   is the only place a LATER
+                                           #   sighting's version is recorded.
+                                           #   Absent (occurrences > 1 but no
+                                           #   sightings) means the version of
+                                           #   the later report(s) is UNKNOWN —
+                                           #   never read it as "still the first
+                                           #   version" (ledger IMP-231).
+    resembles: null                        # OPTIONAL — {lsn_id, imp_id,
+                                           #   fixed_in} copied from a CLOSED
+                                           #   (resolved/wontfix/dismissed)
+                                           #   lesson `add` scored a near miss
+                                           #   against: the fuzzy score cleared
+                                           #   SIM_STRONG but `where.anchor` did
+                                           #   not match exactly, so the fresh
+                                           #   report was recorded as ITS OWN
+                                           #   lesson (never silently folded
+                                           #   into a closed record) with this
+                                           #   pointer for the maintainer to
+                                           #   judge — reopen the named item, or
+                                           #   this is really a new one. Written
+                                           #   by lessons.py alone; the
+                                           #   maintainer's digest lists a
+                                           #   lesson carrying it among the
+                                           #   REOPEN candidates (ledger
+                                           #   IMP-221).
 
     # --- the maintainer's verdict ----------------------------------------
     # `open` is this project's word; every other status is the maintainer's,

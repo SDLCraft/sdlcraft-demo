@@ -158,5 +158,6 @@ a project that wants the maintainer's verdicts before its next skill close.
 | 7 | `--drift` marks `[referenced here]` / `[cited in prose xN]` and calls an unreferenced move `re-stamp only` |
 | 9 | ARCH `failure_modes[].id` / `security_concerns[].id` indexed; `--stamp` records its capability |
 | 10 | the system `ARCH.yaml` is itemized (`container` by `container_id`, `edge` by `<from>-><to>`), so a shard's `--drift` names the container block or edge that moved instead of "no item to itemize"; a family the stamp held none of prints one count line, never every id as "added upstream" |
+| 11 | an item the stamp never itemized (a pre-capability family, an empty `items` map) is recovered from git before `re-stamp only` is printed; a referenced miss says a change cannot be ruled out |
 
 The authoritative list is the module docstring of `setup/docs_index.py`.

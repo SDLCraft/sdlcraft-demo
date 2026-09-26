@@ -535,7 +535,7 @@ close. Without the Agent tool, run the sequences yourself in plan order.
   reasoning on disk as `resolution.handoff` — one entry per downstream item
   you already have a view on: `{artifact: docs/<a file an owed command
   rewrites>, key: <the item as docs_index.py --drift prints it, or null for
-  the whole file>, note: <why it moved and what you propose>, basis:
+  the whole file>, note: <why it moved and what you propose — this finding's own change, never the whole file>, basis:
   measured | inferred}`, `retired: [<token>…]` when a token goes; each
   reconcile reads its notes (`findings.py list --owed-by`) and offers them as
   its card's position-1 proposal. **Always** record the sequence in
@@ -566,15 +566,12 @@ is refused:
 python "${CLAUDE_SKILL_DIR}/../arch/validate_schema.py" --path docs/ARCH.yaml
 python "${CLAUDE_SKILL_DIR}/../test/validate_schema.py" --path docs/TEST-STRATEGY.yaml                  # edition-ok: demo edition skips this line, and says so (Phase 4)
 python "${CLAUDE_SKILL_DIR}/../task/validate_schema.py" --path docs/TASKS.json                           # edition-ok: demo edition skips this line, and says so (Phase 4)
-python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --container <cid> --all --check   # edition-ok: demo edition skips this line, and says so (Phase 4)
+python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --container <cid|TASKS> --all --check   # edition-ok: demo edition skips this line, and says so (Phase 4)
 python "${CLAUDE_SKILL_DIR}/../task/crosscheck_artifacts.py" --docs-dir docs                             # edition-ok: demo edition skips this line, and says so (Phase 4)
 python .claude/sdlc/docs_index.py                 # regenerate the index - the PROJECT's copy only
 python .claude/sdlc/docs_index.py --check         # dangling-reference gate
-python .claude/sdlc/docs_index.py --stale         # must list nothing this run reconciled - a row here is a missed stamp,
-                                                  # the `re-stamp only` rows included (nothing the shard cites changed, so
-                                                  # the review is cheap - but the stamp is still owed), unless the Phase 2
-                                                  # snapshot already held it (a pre-existing pair, owed to its own
-                                                  # --reconcile: name it on the close card, never stamp it)
+python "${CLAUDE_SKILL_DIR}/doctor.py" --docs-dir docs --provenance --json   # re-run of the Phase 2 command; diff its stale PAIRS against `provenance_drift`, pair by pair - never the row count below
+python .claude/sdlc/docs_index.py --stale         # human read-out + the drain's `re-stamp only` labels only; a pair the snapshot already held (checked above) is pre-existing, owed to its own --reconcile - never counted against the snapshot itself
 ```
 
 The `test` and `task` lines run only where those skills ship; in the demo
@@ -589,9 +586,12 @@ waves"): reads each report's exit codes against `baseline_checks`; runs
 `python "${CLAUDE_SKILL_DIR}/validate_findings.py"` bare; re-stamps every
 row `docs_index.py --stale` marks `re-stamp only` that no pending aggregate
 holds — the session does this, with `--hold-upstream` for every other
-recorded upstream, because such a row's review is empty and the claim true —
-pre-existing ones right after the gate, wave-caused ones now; re-reads the
-queue; and asks the user each `blocked` report's question (four per call),
+recorded upstream, because such a row's review is empty and the claim true.
+A row is pre-existing only when EVERY (artifact, upstream) pair it names is
+already in `provenance_drift` — the Phase 2 pair snapshot, never the
+`--stale` row count — and such rows are stamped right after the gate; a row
+naming even one pair the snapshot lacks is wave-caused and is stamped now;
+re-reads the queue; and asks the user each `blocked` report's question (four per call),
 re-dispatching that finding with the answer, while a `relocated` report is
 re-planned into a later aggregate or listed on the card's `Remaining:` row.
 A downstream wave dispatched before an upstream drain would stamp its shard
@@ -822,4 +822,4 @@ the whole queue instead of the first four findings' archaeology.
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.24"
+skill_version: "1.25"
