@@ -16,8 +16,10 @@ started with twelve open findings worked one to four, printed the first
 handoff it met, and stopped. The findings it never reached were not refused;
 they were never seen again.
 
-Workers exist for **context isolation, not speed** — the same reason the full
-edition's `code` skill dispatches one worker per work unit. A walk's reads,
+Workers exist first for **context isolation** — the same reason the full
+edition's `code` skill dispatches one worker per work unit — and only the
+localize wave also buys speed, by running N of them at once ("Choosing N"
+below). A walk's reads,
 a fix's validator output and a heal transcript stay in the worker; what comes
 back is a small report on disk. The session keeps what only it can do:
 the sweep, the plan, the one gate, the queue, the verification between waves,
@@ -26,6 +28,67 @@ the handoffs and the card.
 Two waves rather than one because the human gate sits between localizing and
 fixing. Workers never ask the user, so every walk has to finish before one
 plan gate can show the whole table — and only then is the fix dispatched.
+
+## Choosing N (localize only)
+
+N is how many **localize** workers may be in flight. It is resolved **flag >
+gate answer > remembered value > 6**: `--parallel N` (clamped to 1–8 with a
+one-line note, never an error), else the answer to the dispatch question, else
+`run_defaults.parallel` from the state file, else 6. The effective value is
+`min(N, findings to localize)`; report both, so an N of 6 over two findings
+reads as the scheduler working, not the setting being ignored.
+
+**Why the localize wave may run wide.** A localizer is read-only against a
+corpus nothing writes until the plan gate has been answered, and it writes one
+file of its own. Two localizers cannot disturb each other, whatever they walk;
+two that walk to the same defect are folded afterwards by `findings.py plan`
+(same symbol and kind → duplicate; shared write set → one aggregate). The
+independence is known in advance, by construction, so the default is wide (6).
+What N costs: under a per-window token cap, N opus walks finish no sooner per
+window than one — they spend the budget N times faster — and an interrupted
+wave loses up to N unfinished walks (the reports already on disk survive, and a
+resume dispatches only the missing ones).
+
+**Why the fix wave never runs wide.** A fix aggregate's *write* boundary is
+disjoint from every other aggregate's by construction, but its *reads* are not:
+
+- its verification is family- and corpus-wide — a validator is passed the
+  system file and globs every `__<slug>` sibling, and `crosscheck`,
+  `docs_index.py --check` and `doctor.py --provenance` read the whole corpus —
+  so a second fixer's half-finished sequence would read as this fixer's red;
+- every `docs/` edit fires the project's index hook, which rewrites
+  `docs/INDEX.yaml` and the statusboard whole, so two fixers would race on
+  shared files neither owns;
+- two additive fixes in sibling shards can mint the same id in one numbering
+  family, each green alone;
+- a provenance pair diff cannot tell a sibling's in-flight stale pair from one
+  this fixer caused.
+
+None of that can be settled before the fixes run, so fixes run **one aggregate
+at a time, in plan order**. The plan still records `max_wave_width` — the most
+disjoint aggregates any one stage-wave holds — and the run copies it into
+`metrics`, so how much a wider fix wave could ever have bought is measured, not
+guessed.
+
+**The dispatch question** (Phase 2, before wave 1). Options, one
+`AskUserQuestion`: position 1 the resolved N labelled with its source — *"6 —
+remembered from your last run"*, *"6 — the default, never chosen"* — then the
+other rungs of `6` / `3` / `1`, deduplicated against position 1; "Other" takes
+any N. Label each by its consequence, not its rationale: *6 — fastest; an
+interruption loses up to 6 unfinished walks*, *1 — slowest; an interruption
+loses one walk*. The `preview` is the provisional plan table. Skipped when
+`--parallel N` answered it, when at most one finding needs localizing, and
+without the Agent tool (then say, in one line, that a remembered N above 1
+cannot be honoured this run).
+
+**Memory.** `run_defaults: {parallel, parallel_set_at}` lives in
+`sdlc-repair.state.yaml` and is **sticky**: every new, restarted or discarded
+state file carries it forward. Only a decision writes it — the flag or an
+answer; a skipped question, `EXIT` at the question, and a run with nothing to
+localize leave it untouched. A value that is missing, non-integer or outside
+1–8 is clamped when it can be, otherwise read as never chosen (6), said in one
+line; a preference never fails a run. `concurrency: {requested, source,
+effective}` records what this run used.
 
 ## Layout on disk
 
@@ -54,8 +117,8 @@ off, and needs no second walk.
 
 **Dispatch:** the Agent tool, `model: "opus"` (the walk is the cross-artifact
 reasoning this skill's model policy reserves opus for), `run_in_background:
-true`, the whole wave in ONE turn. Keep at most five in flight and dispatch the
-next the moment one returns — rolling, not batched. A worker is **read-only**:
+true`. Keep N in flight ("Choosing N") and dispatch the next the moment one
+returns — rolling, not batched; at N = 1 it is still a worker. A worker is **read-only**:
 it edits nothing, asks nothing, and writes one file.
 
 **The brief carries paths, never bodies.** Every byte typed into a brief is a
@@ -149,8 +212,8 @@ pipeline position of its located artifact (`prd → ux → design → data → a
 arch → test → task`), and an aggregate whose located artifact is downstream of
 another aggregate's write set runs in a later wave even when the two are
 disjoint — a downstream stamp or re-slice must see the final upstream bytes.
-Inside a wave, disjoint aggregates run in parallel; `related`, `recurrence_of`
-and same-symbol findings sit in one aggregate. The close-first findings close
+Inside a wave, aggregates run one after another in id order ("Choosing N");
+`related`, `recurrence_of` and same-symbol findings sit in one aggregate. The close-first findings close
 before wave 1.
 
 **One `AskUserQuestion`**, with the whole table inside it (AUTHORING's
@@ -177,8 +240,9 @@ with the next aggregate.
 
 ## Wave 2 — fix
 
-One worker per aggregate, `model: "opus"`, dispatched the same way as wave 1
-(one turn per stage-wave, five in flight, rolling). The brief:
+One worker per aggregate, `model: "opus"`, `run_in_background: true`, **one
+aggregate at a time, in plan order** — never two side by side, however
+disjoint ("Choosing N"). The brief:
 
 ```
 Fix one repair aggregate. Non-interactive: never ask the user - a decision the
@@ -320,7 +384,9 @@ disk, then re-dispatch the aggregate with `RESUME FROM: <breadcrumb path>`
 in the brief; nothing at all → dispatch fresh. A finding that became `open`
 after `plan.planned_at` gets wave 1 for itself alone. Phase 1's existing rule
 holds throughout: re-verify every artifact a partial record names against
-disk before touching it.
+disk before touching it. A resumed wave 1 keeps the recorded `concurrency`
+and dispatches only the findings with no localize report; the dispatch
+question is not asked again.
 
 ## Without the Agent tool
 
@@ -371,7 +437,7 @@ Verified:  arch exit 0 · test exit 0 · task exit 0 · reslice --check exit 0 �
 Stale:     demo-api/TSK-003, demo-api/TSK-004 will be offered for regeneration
 Remaining: 1 open, not worked this run — FND-005 (outside the chosen extent: first wave)
 Handoffs:  2 re-runs owed for FND-004 — first: /sdlc:test demo-api --reconcile (each prints the next; the last routes back here)
-Workers:   6 localizers, 3 fixers (opus) - 1 relocated, 0 blocked
+Workers:   6 localizers (N 6 remembered, effective 6), 3 fixers one at a time (opus) - 1 relocated, 0 blocked
 Commit:    a1b2c3d  /sdlc:repair → 3 findings closed at prd/arch, 1 handed off
 Status:    not finished - 1 open finding remains (FND-005)
 Next:      /sdlc:repair FND-005   ← in a NEW session

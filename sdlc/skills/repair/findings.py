@@ -1228,9 +1228,14 @@ def order_waves(aggregates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def _assemble(source: str, closable: List[str], duplicates: List[Dict[str, str]],
               owed: List[Dict[str, Any]], aggregates: List[Dict[str, Any]],
               unplaced: List[Dict[str, str]]) -> Dict[str, Any]:
+    waves = order_waves(aggregates)
+    # the most aggregates any one stage-wave holds: how wide a fix wave COULD
+    # run. Fixes run one at a time (orchestration.md, "Choosing N"); this is
+    # the measurement, copied into the run's metrics, never a dispatch width.
+    width = max((len(w["aggregates"]) for w in waves), default=0)
     return {"source": source, "planned_at": _iso_utc_now(), "close_first": sorted(closable, key=_fnd_num),
-            "duplicates": duplicates, "owed": owed, "waves": order_waves(aggregates),
-            "unplaced": unplaced}
+            "duplicates": duplicates, "owed": owed, "waves": waves,
+            "max_wave_width": width, "unplaced": unplaced}
 
 
 def render_plan(plan: Dict[str, Any]) -> str:

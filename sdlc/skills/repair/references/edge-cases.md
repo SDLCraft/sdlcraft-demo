@@ -193,6 +193,29 @@ read for what it is:
   be gone, in which case close it `resolved` with `mode: none` and a note that
   it was fixed elsewhere.
 
+### Remembered localize concurrency
+
+- **No state file, or no `run_defaults`** (a first run) → N is 6, labelled
+  *never chosen*, and the dispatch question is still asked: "never chosen" is
+  not "chose 6", and the question is how a project chooses at all.
+- **A hand-edited `run_defaults.parallel`** that is missing, non-integer or
+  outside 1–8 → clamp what can be clamped, otherwise read it as never chosen
+  (6); say which in one line and carry on. A malformed preference must never
+  fail a repair run: it decides how fast to localize, not whether the fix is
+  right.
+- **`--parallel N` with at most one finding to localize** (a named-finding run,
+  a `--flag` intake) → the flag is still a deliberate statement, so it updates
+  the remembered value; this run's effective concurrency is 1. Say both in one
+  line rather than implying N applied.
+- **Restart or discard at the resume prompt** → the new state file carries
+  `run_defaults` forward unchanged; restarting a run is not re-deciding the
+  project's preference.
+- **`EXIT` at the dispatch question, or any run that never asked** →
+  `run_defaults` is untouched. Only a decision writes it.
+- **`--parallel N` looks like it should speed up the fixes** → it never does:
+  fixes run one aggregate at a time (`orchestration.md`, "Choosing N"). If the
+  user asks, say why in one line; never widen the fix wave on request.
+
 ## Boundaries
 
 - This skill **never writes source code** and never touches the generated tree.

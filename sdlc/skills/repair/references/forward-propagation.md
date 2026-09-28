@@ -431,8 +431,9 @@ python "${CLAUDE_SKILL_DIR}/../test/validate_schema.py" --path docs/TEST-STRATEG
 python "${CLAUDE_SKILL_DIR}/../task/validate_schema.py" --path docs/TASKS.json                           # edition-ok: runs only where test/task ship (below)
 python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --container <cid|TASKS> --all --check   # edition-ok: runs only where test/task ship (below)
 python "${CLAUDE_SKILL_DIR}/../task/crosscheck_artifacts.py" --docs-dir docs                             # edition-ok: runs only where test/task ship (below)
-python .claude/sdlc/docs_index.py                 # regenerate the index - the PROJECT's copy only;
-                                                  # absent -> skip and say so, never the plugin's copy (SKILL.md Phase 5)
+python .claude/sdlc/docs_index.py                 # regenerate the index - the PROJECT's copy only; the SESSION's line
+                                                  # (a fixer never writes docs/INDEX.yaml); absent -> skip and say so,
+                                                  # never the plugin's copy (SKILL.md Phase 5)
 python .claude/sdlc/docs_index.py --check         # dangling-reference gate
 python "${CLAUDE_SKILL_DIR}/doctor.py" --docs-dir docs --provenance --json   # re-run of the Phase 2 command; diff its stale PAIRS against `provenance_drift`, pair by pair - never the row count below
 python .claude/sdlc/docs_index.py --stale         # human read-out + the `re-stamp only` labels only (step 5) - a pair the snapshot already held (checked above) is pre-existing, owed to its own --reconcile - named on the close card, never stamped; never counted against the snapshot itself

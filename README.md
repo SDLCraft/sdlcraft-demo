@@ -10,7 +10,7 @@ This is the **demo edition** (MIT). It takes a project from idea to a complete,
 validated architecture. The full edition, SDLCraft, continues from there to
 tested code — see [Editions](#editions).
 
-> Pre-1.0 (version 0.9.19): expect the skills to keep changing.
+> Pre-1.0 (version 0.9.20): expect the skills to keep changing.
 
 ## Install
 
@@ -163,8 +163,11 @@ Not steps in the linear chain — invoke these whenever they're needed, independ
 | `/sdlc:repair --check [--no-emit] [--provenance]` | Read-only doctor sweep (pre-flight / CI). `--no-emit` also suppresses recording new findings; `--provenance` adds the upstream-drift check. |
 | `/sdlc:repair FND-003 FND-005` | Skip the sweep, work only the named findings. |
 | `/sdlc:repair --flag "<reason>" [--stage <s>] [--path <p>]` | Hand-raise a defect you noticed yourself; records it as a finding, then localizes and fixes it like any other. |
+| `… --parallel N` | With any form that localizes: how many findings are traced back at once (1–8). Each run asks, offering your last answer (6 until you choose one); the flag answers up front and is remembered. |
 
 The only skill that **walks backward**: it runs a doctor sweep (every validator, the cross-artifact linter, the dangling-reference gate), merges that with the `FND-NNN` findings raised during codegen, then localizes each defect to the *earliest* artifact whose content is actually wrong — not the stage that noticed it — fixes it there, and propagates the fix forward along the computed reference graph.
+
+Tracing findings back runs in parallel, because it only reads. Fixes are applied one group at a time: each fix's checks read the whole doc set, so a second fix running alongside would look like the first one's failure.
 
 Two fix modes: **surgical** when only the content of existing items changes (edit the source, bump its version, re-slice every task embed copied from it), and **re-invoke** when the *set* of downstream items changes — then it fixes the source and hands you the exact downstream command sequence, because those stages are interviews you own.
 

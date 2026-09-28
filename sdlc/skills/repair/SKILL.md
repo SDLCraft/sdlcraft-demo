@@ -11,8 +11,9 @@ description: >
   handing the user the exact downstream re-invocation sequence (each stage's
   --reconcile form; the walk's reasoning is left on the finding as handoff
   notes, and the chain routes itself). The session orchestrates: opus workers
-  localize every finding in parallel, one plan gate orders the whole queue
-  upstream-first, workers fix per artifact aggregate. Forms: /sdlc:repair
+  localize every finding, up to N in flight (--parallel N, remembered per
+  project; initially 6), one plan gate orders the whole queue upstream-first,
+  then workers fix one artifact aggregate at a time. Forms: /sdlc:repair
   (full flow), /sdlc:repair --check [--no-emit] [--provenance] (sweep only,
   edits no docs/ artifact), /sdlc:repair FND-003 FND-005 (named findings),
   /sdlc:repair --flag "<reason>" [--stage <stage>] [--path <id|schema_path>]
@@ -88,7 +89,10 @@ defect is an `LSN-NNN`, and all of them surface, generated, in
 
 ## Invocation dispatch
 
-Classify `$ARGUMENTS`:
+Classify `$ARGUMENTS`. The modifier **`--parallel <N>`** (1–8, clamped with a
+one-line note) sets how many localize workers may be in flight, answers the
+dispatch question (Phase 2) and becomes the remembered `run_defaults.parallel`;
+absent, it means "ask me". Order: **flag > gate answer > remembered value > 6**.
 
 1. **No arguments** → **full flow**: sweep, merge with open findings, localize
    every one of them, plan, confirm once, fix, verify, hand back. Phases 1–6
@@ -147,7 +151,7 @@ Read `.claude/skills-state/sdlc-repair.state.yaml` if present. `in_progress`
 → offer resume / restart / discard. Load and validate the findings queue.
 Prune `.claude/skills-state/sdlc-repair/localize/` and `reports/` left by an
 earlier run that is `complete` or `aborted` (they are that run's audit trail,
-not this one's input).
+not this one's input). Restart, discard and a new run keep `run_defaults`.
 
 The state file's schema (written at the plan gate, updated after every
 finding worked and every drain, kept as audit trail):
@@ -161,14 +165,16 @@ status: in_progress          # in_progress | complete | aborted
 findings_worked: []          # FND ids resolved/triaged/wontfixed/deferred this session
 current_finding: null
 dispatch: agent              # agent | inline (the Agent tool was unavailable)
+concurrency: {}              # localize N this run: {requested, source, effective}
+run_defaults: {}             # STICKY {parallel, parallel_set_at}: carried into every new state file
 plan: {}                     # Phase 3: `findings.py plan --json` + extent, decisions,
                              #   per-aggregate status (planned | dispatched | done | relocated)
 handoffs: []                 # Phase 6: the consolidated command chain, printed once
 baseline_checks: {}          # Phase 2: {"<check name> <target>": <exit>} copied from
                              #   doctor.py --json, so Phase 5 can say "red before, red after"
 provenance_drift: []         # Phase 2: the [stale] lines doctor.py --provenance printed
-metrics: {}                  # run telemetry (CLAUDE.md 15): validator_runs,
-                             # validator_failures, resumes, workers_dispatched
+metrics: {}                  # run telemetry (CLAUDE.md 15): validator_runs, validator_failures,
+                             # resumes, workers_dispatched, localize_concurrency, max_wave_width
 lesson_notes: []             # mid-run lesson scratch (CLAUDE.md 15): noted, never
                              # acted on mid-run; drained by the Phase-6 self-review
 ```
@@ -181,12 +187,8 @@ one evidence line naming them (Phase 6 — an `open` finding carries no
 resolution block at all, and a `triaged` one only while a re-invoke is in
 progress). Re-verify every artifact so named against disk before touching it.
 The common failure mode here is re-applying an edit that already landed. The
-`plan:` block, the breadcrumbs under `sdlc-repair/inflight/` and the reports
-under `sdlc-repair/reports/` say where each aggregate stands
-(`references/orchestration.md`, "Resume"): an aggregate with a report and a
-written resolution is done, one with a breadcrumb is re-dispatched from its
-last phase after its `files_written` hashes are re-verified, one with nothing
-is dispatched fresh.
+`plan:` block, the `inflight/` breadcrumbs and the `reports/` say where each
+aggregate stands (`references/orchestration.md`, "Resume").
 
 **The queue is re-read after every finding closes and after every stage-wave
 drains.** A finding minted mid-run (`--raised-by sdlc-repair`: a defect a
@@ -249,19 +251,23 @@ marked resolved`) name the `triaged` re-invoke findings whose downstream
 artifacts have all been rebuilt since the fix: verify their hops (Phase 5) and
 close them (Phase 6) before any wave — they need no walk.
 
-**Wave 1 — localize.** Load `references/orchestration.md` now. Every finding
-in the open set that carries no `resolution.located_stage` gets ONE read-only
-worker (the Agent tool, `model: "opus"`, `run_in_background: true`, the whole
-wave in one turn, five in flight, rolling) whose brief carries paths only —
-the finding id and queue path, `references/back-propagation.md`, the index,
-the snapshot, and the report path
-`.claude/skills-state/sdlc-repair/localize/<FND>.yaml`. The worker walks,
-computes the write set (Step 3½) and writes that one file; it edits nothing
-and asks nothing. Without the Agent tool, walk them yourself, one at a time,
-and say so on the card. While the wave runs,
-`python "${CLAUDE_SKILL_DIR}/findings.py" plan` (no `--from`) prints the
-provisional table from the queue's own fields; the exact one comes after the
-wave. The shape of every walk, whoever runs it:
+**The dispatch question.** Load `references/orchestration.md` now; "Choosing
+N" holds the options and labels. Before wave 1, ONE `AskUserQuestion` — how
+many localize workers in flight, the resolved N with its source at position 1,
+the provisional table (`python "${CLAUDE_SKILL_DIR}/findings.py" plan`, no
+`--from`) as its `preview` — **skipped** when `--parallel N` answered it, when
+at most one finding needs localizing, and when the Agent tool is unavailable.
+Record `concurrency:`; only a decided N (flag or answer) rewrites `run_defaults.parallel`.
+
+**Wave 1 — localize.** Every finding in the open set that carries no
+`resolution.located_stage` gets ONE read-only worker (the Agent tool, `model:
+"opus"`, `run_in_background: true`, N in flight, rolling — a worker even at
+N = 1, for context isolation) whose brief carries paths only — the finding id
+and queue path, `references/back-propagation.md`, the index, the snapshot, and
+the report path `.claude/skills-state/sdlc-repair/localize/<FND>.yaml`. The
+worker walks, computes the write set (Step 3½) and writes that one file; it
+edits nothing and asks nothing. Without the Agent tool, walk them yourself,
+one at a time, and say so on the card. The shape of every walk, whoever runs it:
 
 - walk **backwards** from where the finding surfaced to the earliest artifact
   whose content is wrong; a finding raised by an interview skill usually
@@ -380,8 +386,8 @@ what it is called) is one this run CAN get: ask it at Phase 3, then write it.
 A new finding is cheap to write and expensive to redeem: the next skill re-derives the cross-artifact
 walk cold, with no guarantee of the same reading.
 
-**Wave 2 — fix.** One worker per aggregate (`model: "opus"`, one turn per
-stage-wave, five in flight, rolling), briefed with paths: the aggregate's
+**Wave 2 — fix.** One worker per aggregate (`model: "opus"`), **one aggregate
+at a time, in plan order**, whatever N is, briefed with paths: the aggregate's
 localize reports, `gate/answers.yaml`, `references/forward-propagation.md`,
 the snapshot, and a **write boundary** = the aggregate's write set — nothing
 else, ever. Inside the aggregate the worker runs each finding's sequence
@@ -389,8 +395,8 @@ below SERIALLY, each one's verification (Phase 5) before the next starts —
 never interleave two findings' sequences, so each stamp claims only what its
 own sequence reviewed — and writes a breadcrumb after every phase and a
 report per finding (`.claude/skills-state/sdlc-repair/reports/<FND>.report.yaml`).
-Disjoint aggregates of one stage-wave run in parallel; the next stage-wave
-starts only after the previous one drained (Phase 5). A worker never asks: a
+Even disjoint aggregates never run side by side (`references/orchestration.md`,
+"Choosing N"); the next stage-wave starts only after the previous one drained (Phase 5). A worker never asks: a
 decision the gate did not take is reported `blocked` with the question, and
 a walk that proves wrong mid-fix is reported `relocated` with the artifact it
 points at, nothing edited — the session re-plans it or names it on the card.
@@ -568,7 +574,7 @@ python "${CLAUDE_SKILL_DIR}/../test/validate_schema.py" --path docs/TEST-STRATEG
 python "${CLAUDE_SKILL_DIR}/../task/validate_schema.py" --path docs/TASKS.json                           # edition-ok: demo edition skips this line, and says so (Phase 4)
 python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --container <cid|TASKS> --all --check   # edition-ok: demo edition skips this line, and says so (Phase 4)
 python "${CLAUDE_SKILL_DIR}/../task/crosscheck_artifacts.py" --docs-dir docs                             # edition-ok: demo edition skips this line, and says so (Phase 4)
-python .claude/sdlc/docs_index.py                 # regenerate the index - the PROJECT's copy only
+python .claude/sdlc/docs_index.py                 # regenerate the index - the PROJECT's copy only; the SESSION's line (a fixer never writes docs/INDEX.yaml)
 python .claude/sdlc/docs_index.py --check         # dangling-reference gate
 python "${CLAUDE_SKILL_DIR}/doctor.py" --docs-dir docs --provenance --json   # re-run of the Phase 2 command; diff its stale PAIRS against `provenance_drift`, pair by pair - never the row count below
 python .claude/sdlc/docs_index.py --stale         # human read-out + the drain's `re-stamp only` labels only; a pair the snapshot already held (checked above) is pre-existing, owed to its own --reconcile - never counted against the snapshot itself
@@ -649,17 +655,13 @@ decide where a finding waits:
   below that version the validator states the gate in its own note ("it blocks
   from findings_file_version 2") rather than failing the file.
 - `mode: re-invoke` names its command sequence in `downstream_rerun`; empty
-  means the propagation never happened, which is not a resolution. **This
-  skill never closes a re-invoke finding `resolved` with an empty
-  `downstream_rerun`, at any queue version.** The validator blocks it only
-  from `findings_file_version: "2"` (CLAUDE.md §10 keeps a legacy queue from
-  turning red on upgrade), so on a version-1 queue the warning scrolls past
-  unread — one project closed ten such findings and four of them hid real
-  unpropagated defects, one for three weeks. So take the sequence from the
-  report and fill `downstream_rerun` in this same write, then keep the finding
-  `triaged` until the user reports those runs done. A re-invoke whose sequence
-  the worker could not compute carries no resolution block at all — an empty
-  one is the state that hid those defects.
+  means the propagation never happened. **This skill never closes a re-invoke
+  finding `resolved` with an empty `downstream_rerun`, at any queue version**
+  — the validator blocks it only from `findings_file_version: "2"` (CLAUDE.md
+  §10), and below that its warning scrolls past unread while real defects
+  hide. Take the sequence from the report, fill `downstream_rerun` in this same
+  write, and keep the finding `triaged` until the user reports those runs done.
+  A re-invoke whose sequence the worker could not compute carries no resolution block at all.
 
 **The consolidated handoffs.** Build the command chain once, from every
 report's owed commands plus every already-`triaged` finding's recorded
@@ -696,7 +698,7 @@ Verified:  arch exit 0 · test exit 0 · task exit 0 · reslice --check exit 0 �
 Stale:     demo-api/TSK-003, demo-api/TSK-004 will be offered for regeneration
 Remaining: 1 open, not worked this run — FND-005 (outside the chosen extent: first wave)
 Handoffs:  2 re-runs owed for FND-004 — first: /sdlc:test demo-api --reconcile (each prints the next; the last routes back here)
-Workers:   6 localizers, 3 fixers (opus) - 1 relocated, 0 blocked
+Workers:   6 localizers (N 6 remembered, effective 6), 3 fixers one at a time (opus) - 1 relocated, 0 blocked
 Commit:    {a1b2c3d  /sdlc:repair → <summary> | nothing to commit — only when auto-commit is on}
 Status:    {computed - e.g. not finished - 1 open finding remains (FND-005)}
 Next:      {the computed next invocation}   ← in a NEW session
@@ -715,8 +717,9 @@ reason (*outside the chosen extent* / *relocated to <stage> after that wave
 closed* / *its worker stopped on a question the run could not answer*) — it
 prints only when non-empty, and it is what makes a narrowed run honest.
 **`Handoffs:`** prints only when re-runs are owed: the count, the findings, the
-first command. `Workers:` says what was dispatched, on which model, and how
-many relocated or blocked (or `inline - the Agent tool was unavailable`).
+first command. `Workers:` says what was dispatched, on which model, the
+localize N with its source and effective value, and how many relocated or
+blocked (or `inline - the Agent tool was unavailable`).
 
 `Status:` — first match wins, always printed:
 
@@ -789,16 +792,12 @@ Every target must have a `sdlc/skills/<name>/SKILL.md`; never route to
 
 ## Model policy
 
-**opus / xhigh** (frontmatter), and deliberately so. This is the one skill whose
-core operation is cross-artifact archaeology: holding eight artifacts' semantics
-in view at once and deciding which of them is *actually* wrong. It is the
-opposite regime from `/sdlc:code`'s manager (sonnet/high bookkeeping), which is
-exactly why the two are separate skills rather than one — running this reasoning
-inside the codegen manager would both mis-model the work and consume the very
-context that codegen is trying to conserve. The workers are opus for the same
-reason, and they exist for context isolation, not speed: every walk and every
-fix transcript stays in its worker, so the session's window holds the plan of
-the whole queue instead of the first four findings' archaeology.
+**opus / xhigh** (frontmatter), deliberately: the core operation is
+cross-artifact archaeology — deciding which of eight artifacts is *actually*
+wrong — the opposite regime from `/sdlc:code`'s sonnet/high manager, which is
+why the two are separate skills. The workers are opus for the same reason;
+they exist first for context isolation, and the localize wave's N buys speed
+on top (`references/orchestration.md`, "Why two waves", "Choosing N").
 
 ## Quick reference: user inputs at gates
 
@@ -822,4 +821,4 @@ the whole queue instead of the first four findings' archaeology.
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.25"
+skill_version: "1.26"
