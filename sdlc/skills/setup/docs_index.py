@@ -138,6 +138,15 @@ and an LF checkout of the same file hash the same. Every skill that records a
 provenance hash reads it from ``INDEX.yaml`` or calls ``--hash`` — never a raw
 ``sha256(bytes)`` of its own, which differs on CRLF.
 
+Capability version: 12 (an item ADDED upstream since the stamp that this file
+already references or cites - an id it covered before the item existed, a
+container it already names - is marked ``[referenced here]`` / ``[cited in
+prose xN]`` like a removed or changed one, and the move is then a delta to
+review, never ``re-stamp only``. Only a reference or a cite marks an added
+item: the changelog and deferred marks do not, and the "none in the recovered
+revision" count line stays unmarked. An older install printed ``re-stamp
+only`` over such an addition.)
+
 Capability version: 11 (an item the recorded stamp never itemized - it
 predates the capability that tracks its family, or the stamp's ``items`` map
 is empty - is no longer an automatic ``re-stamp only``: ``--drift`` and
@@ -218,7 +227,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-CAPABILITY_VERSION = 11
+CAPABILITY_VERSION = 12
 
 
 # =============================================================================
@@ -3669,12 +3678,15 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
     diffed item by item against ``old_items`` (a stamp's items map, or the
     items of a revision recovered from git); ``basis`` names the old side.
 
-    Every removed or changed item this artifact REFERENCES (a structured
+    Every removed, changed or added item this artifact REFERENCES (a structured
     field) or CITES (a mention in prose, a unit's bare name inside a directive
     string included) is marked, and each family says how many of its items
     are - the reconcile's "only items this file traces or covers" filter is
     computed here, not by the reader (ledger IMP-147, aicf LSN-084: a prose
     cite at four sites was invisible to a hand filter over structured traces).
+    An ADDED item is marked by a reference or a cite alone (the changelog and
+    deferred marks need a body to outdate), and the recovered-revision count
+    line below is never marked.
 
     ``recorded_capability`` is the ``capability`` the stamp being compared
     against was written with (``None`` for an old stamp with no such field -
@@ -3723,7 +3735,7 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
     121 as added). An exact stamp's 0 is a real 0, so there the ids stay.
 
     Returns ``(lines, relevant)``: ``relevant`` is False when nothing this
-    artifact references or cites was removed or changed, so the upstream's
+    artifact references or cites was added, removed or changed, so the upstream's
     move owes a re-stamp, not a review. When BOTH ``old_items`` and the
     current items are empty (an unindexed upstream, e.g. a UX shard's
     cli_args/run.log content - ledger IMP-185, LSN-090), a real edit and no
@@ -3750,7 +3762,7 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
     referenced = {r for _fam, r in my_refs}
     changelog_hit = bool(target_name) and _changelog_names_target(changelog_lines or [], target_name)
 
-    def mark(key: str) -> "tuple[str, bool]":
+    def mark(key: str, added: bool = False) -> "tuple[str, bool]":
         bare = key.rsplit("/", 1)[-1]
         tokens = [key, bare] if bare != key else [key]
         if "->" in key and _item_family(key, index) == "edge":
@@ -3770,6 +3782,11 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
         if art_lines is None or not is_id:
             structured = structured or int(key in referenced or bare in referenced)
         bits = (["referenced here"] if structured else []) + ([f"cited in prose x{prose}"] if prose else [])
+        if added:
+            # An ADDED item had no body for a changelog entry or a standing
+            # deferral to outdate: only a reference or a cite in this file
+            # can make it relevant.
+            return (f"{key} [{', '.join(bits)}]" if bits else key), bool(bits)
         if not bits and changelog_hit:
             # The upstream's OWN changelog already names this target - a
             # conventions.* body edit (or anything else no structured field
@@ -3809,14 +3826,23 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
         bits = []
         buckets = by_fam[family]
         marked_here = 0
+        judged = False
         if buckets.get("added"):
             ks = buckets["added"]
             if recovered and old_totals.get(family, 0) == 0 and len(ks) == cur_totals.get(family, 0):
+                # Deliberately unmarked: "none in the recovered revision" is
+                # ambiguous, and marking every referenced member of a family
+                # the recovered side could not itemize is the phantom review
+                # this line exists to avoid.
                 bits.append(f"{len(ks)} defined now, none in the recovered revision - a family "
                             f"added whole, or one written in a shape the index cannot itemize; "
                             f"re-stamping records it either way")
             else:
-                bits.append(f"{len(ks)} added upstream since this file was written ({join_ids(ks, len(ks))})")
+                marked = [mark(k, added=True) for k in ks]
+                marked_here += sum(1 for _t, hit in marked if hit)
+                judged = True
+                bits.append(f"{len(marked)} added upstream since this file was written "
+                            f"({', '.join(t for t, _h in marked)})")
         if buckets.get("removed"):
             marked = [mark(k) for k in buckets["removed"]]
             marked_here += sum(1 for _t, hit in marked if hit)
@@ -3825,7 +3851,7 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
             marked = [mark(k) for k in buckets["modified"]]
             marked_here += sum(1 for _t, hit in marked if hit)
             bits.append(f"{len(marked)} changed in body ({', '.join(t for t, _h in marked)})")
-        if buckets.get("removed") or buckets.get("modified"):
+        if judged or buckets.get("removed") or buckets.get("modified"):
             bits.append(f"{marked_here} of them referenced or cited here" if marked_here
                         else "none referenced or cited here")
             relevant = relevant or marked_here > 0
@@ -3889,7 +3915,7 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
     return out, relevant
 
 
-_RESTAMP_ONLY = ("nothing this file references or cites was removed or changed - re-stamp only "
+_RESTAMP_ONLY = ("nothing this file references or cites was added, removed or changed - re-stamp only "
                  "(the delta review needs no question; the owning skill still runs every "
                  "update-run step its own SKILL.md owes - its checks before the review, and "
                  "Phases 7-8)")

@@ -7,6 +7,12 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.27 (2026-09-29) — Additive mode orders its halves (author and stamp the mint's task, then `--tst` the TSTs the walk edited; `nothing to re-slice` is not a refresh); the fix-wave brief makes git read-only for a worker
+
+- `references/forward-propagation.md` Additive step 3 + SKILL.md Phase 4 mixed-case paragraph (ledger IMP-237): after the mint's realizing task is authored and stamped, re-slice the edited TSTs with `reslice_embeds.py --tst`; `--tst` on the mint is a check and its "nothing to re-slice" is not a provenance refresh; step 4's `--all --check` is the proof. Pinned positionally by `_smoke/additive_stamp_selftest.py`.
+- `references/orchestration.md` fix-wave brief (ledger IMP-234): git is read-only for a worker (status/diff/show/log); stash/checkout/restore/reset and every other tree-writing command are the session's. Pinned by `_smoke/orchestration_selftest.py`.
+- `references/forward-propagation.md` step 3 (ledger IMP-232): a skipped stamp leaves an added TST the shard already cites marked `[referenced here]`, not `re-stamp only`.
+
 ## 1.26 (2026-09-28) — The localize wave's width is chosen and remembered (`--parallel N`, a dispatch question before wave 1, `run_defaults.parallel`, default 6); the fix wave runs one aggregate at a time
 
 - `code`'s concurrency mechanic, ported to the one wave where independence is known in advance: localizers are read-only against a corpus nothing writes before the plan gate. `--parallel N` (1-8, clamped with a note) answers a new dispatch question and becomes the sticky `run_defaults.parallel` (+ `parallel_set_at`) in the state file, which Phase 1 carries into every new, restarted or discarded state file. Resolution order **flag > gate answer > remembered value > 6**: the never-chosen default is 6, not code's 1 (the maintainer's call; localizers are read-only). The question is skipped with the flag, with at most one finding to localize, and without the Agent tool; only a decided N writes the memory. It carries the provisional plan table as its `preview`.

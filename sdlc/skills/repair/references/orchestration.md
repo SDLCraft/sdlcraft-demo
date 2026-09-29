@@ -260,7 +260,11 @@ WRITE BOUNDARY: docs/ARCH__demo-api.yaml, docs/TEST-STRATEGY__demo-api.yaml, doc
 BREADCRUMB:     <abs path>/inflight/<FND>.json - create before your first write, update after every phase.
 REPORT:         <abs path>/reports/<FND>.report.yaml per finding (shape in orchestration.md) + the capped block.
 DO NOT: write the queue or the state file; run docs_index.py bare; run another skill;
-        print a --reconcile chain (record owed commands in the report instead).
+        print a --reconcile chain (record owed commands in the report instead);
+        run a git command that writes the tree or index (stash, checkout, switch, restore,
+        reset, clean, rm, add, commit, apply, pull, worktree) - git is read-only for you
+        (status, diff, show, log); the tree holds the user's uncommitted docs, the queue
+        and the state file, and those commands belong to the session.
 REPORT in exactly this block per finding, nothing else:
   FND: <id>  MODE: <mode>  TOUCHED: <n> file(s)  HOPS: <verified>/<total>  STATUS: ok | blocked | relocated
 ```

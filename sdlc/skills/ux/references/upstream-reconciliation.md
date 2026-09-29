@@ -477,6 +477,10 @@ The steps, in order:
    is wrong):
    - *added* → the skill's discovery step first (table below); position 1
      names the candidate it yields, or the handoff proposal when one exists.
+     An added item the report marks `[referenced here]` / `[cited in prose
+     xN]` is already used by this file (it cited the id before upstream
+     defined it): check that use against the new definition before you
+     discover anything.
    - *removed* → the §4 stale-ref case: re-trace, remove with approval, or
      defer; never a silent delete.
    - *changed in body* → only the items the report marks `[referenced here]`

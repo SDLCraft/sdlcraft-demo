@@ -296,8 +296,18 @@ exercises, so the strategy is missing one TST:
    upstream still takes `--hold-upstream`, a pair the Phase 2 snapshot already
    listed is still held and named on the close card, and the `re-stamped …`
    printout is read exactly as that step 5 says. Skip it and the shard you just
-   authored into is left behind its own upstream, reported as `re-stamp only`
-   and routed to the `/sdlc:task <cid> --reconcile` this mode exists to avoid.
+   authored into is left behind its own upstream and routed to the
+   `/sdlc:task <cid> --reconcile` this mode exists to avoid: the TST you wrote
+   the task for is an added upstream item the shard already references, so
+   the helper marks it `[referenced here]` and never `re-stamp only`.
+
+   When the same walk also EDITED existing TSTs, re-slice each of them after
+   this stamp, never before (surgical step 6, still last): `reslice_embeds.py
+   --docs-dir docs --tst TST-NNN`. Before the mint's task exists that call
+   holds the shard's provenance and prints a `/sdlc:task <cid> --reconcile`
+   this mode never owes. `--tst` on the mint itself only checks it, and its
+   "nothing to re-slice" is not a provenance refresh: the stamp above is, and
+   step 4's `--all --check` is the proof.
 4. Refresh the index; verify (below): `reslice_embeds.py --docs-dir docs
    --container <cid> --all --check`, both validators, `doctor.py --quick` —
    bare, exit codes captured. `topo_order.py --scope <cid>` now lists the

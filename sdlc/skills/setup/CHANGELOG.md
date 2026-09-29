@@ -7,6 +7,10 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.27 (2026-09-29) — `docs_index.py` capability 12: `--drift`/`--stale` mark an item ADDED upstream that the file already references or cites, so such a move is never `re-stamp only`
+
+- `docs_index.py` (ledger IMP-232): plain-added ids run through `mark(added=True)` - structured references and prose cites only; the changelog and deferred marks stay off for added items, so an upstream changelog naming the file no longer marks every addition. A hit sets `relevant`; the per-family "N of them referenced or cited here" tail covers the added bucket; the recovered-revision count line stays unmarked. `CAPABILITY_VERSION` 11 -> 12 (`wire_selftest.py`, `index_selftest.py`, `references/helper-resolution.md` row 12). Pinned by `_smoke/index_selftest.py` arm 13c.
+
 ## 1.26 (2026-09-26) — `docs_index.py` capability 11: an item a stamp never itemized is recovered from git before `re-stamp only` is printed, and a referenced miss says a change cannot be ruled out
 
 - `docs_index.py` `_item_delta_lines` (ledger IMP-229, aicf LSN-117: a stamp holding `items: 0` for ARCH.yaml drew "re-stamp only" while four NFRs this file covers had been added to its container): an index-new item - its family predates the stamp's capability, or the `items` map is empty - is first recovered from git at the recorded hash; unchanged stays `re-stamp only`, changed is a delta item, and a miss on an item this file references or cites prints "no earlier body recorded or recoverable - a change cannot be ruled out" instead. `--drift` and `--stale` both read it, so repair's drain no longer stamps such a row unreviewed. `CAPABILITY_VERSION` 10 -> 11, so an older installed copy counts as absent (`references/helper-resolution.md`). Plain added items are not reference-checked yet (ledger IMP-232). Pinned by `_smoke/index_selftest.py` (git-hit and no-git branches) and `_smoke/wire_selftest.py`.

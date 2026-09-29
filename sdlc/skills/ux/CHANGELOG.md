@@ -7,6 +7,10 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.27 (2026-09-29) — `references/upstream-reconciliation.md`: an added item marked referenced/cited is checked against its new definition before discovery
+
+- One clause (ledger IMP-232), matching `docs_index.py` capability 12.
+
 ## 1.26 (2026-09-26) — A measured handoff is read as a proposal within the `--drift` delta, never as its extent: its window is its finding's change, which can be narrower than the file's stamp window
 
 - `references/upstream-reconciliation.md` step 3 (ledger IMP-226, aicf LSN-112 / FND-125): the canonical reconcile step says a measured handoff's window is the finding's own change, so the delta is always taken from `--drift` and an "expect re-stamp only" note is a prediction to check against the stamp. Every other handoff site carries the same caveat (test's `references/reconcile-container.md`, task's restatement, repair's writer side). Pinned by the new `_smoke/handoff_scope_selftest.py`, which finds the sites by meaning (a paragraph naming a handoff with `basis` and `measured`), not by a fixed list.

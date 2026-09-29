@@ -509,18 +509,18 @@ close. Without the Agent tool, run the sequences yourself in plan order.
   `downstream` hop per authored item, and `downstream_rerun: []` — nothing is
   owed downstream; if something is, the mode was `re-invoke`.
 
-  A finding that splits into a **mechanical half and a modelling half** is
-  fixed in one run when the modelling half passes 1–4: `surgical` on the
-  first, `additive` on the second, one resolution block naming both. When the
-  modelling half fails 2 only for want of a decision this run CAN obtain (a
-  choice inside the located artifact — which of two contradictory values is
-  right, which component owns a unit, what it is called), it does not leave
-  this run: the gate asked it (Phase 3), or the worker reports it `blocked`
-  and the session asks it at the drain. A defect the worker surfaces BESIDE
-  the one being fixed is minted (`findings.py add … --related FND-NNN
-  --raised-by sdlc-repair`, by the session, from the report's `lesson`-like
-  line) so the audit trail has it, and it joins THIS run's queue — Phase 1
-  re-reads the queue after each finding closes and after each drain, and
+  A finding that splits into a **mechanical half and a modelling half** is fixed
+  in one run when the modelling half passes 1–4: `surgical` on the first,
+  `additive` on the second (its task exists before surgical's re-slice), one
+  resolution block naming both. When the modelling half fails 2 only for want of
+  a decision this run CAN obtain (a choice inside the located artifact — which of
+  two contradictory values is right, which component owns a unit, what it is
+  called), it does not leave this run: the gate asked it (Phase 3), or the worker
+  reports it `blocked` and the session asks it at the drain. A defect the worker
+  surfaces BESIDE the one being fixed is minted (`findings.py add … --related
+  FND-NNN --raised-by sdlc-repair`, by the session, from the report's
+  `lesson`-like line) so the audit trail has it, and it joins THIS run's queue —
+  Phase 1 re-reads the queue after each finding closes and after each drain, and
   works it through the same gate, *decide it now* at position 1. Only a half
   whose decision is not this run's to take (`references/back-propagation.md`,
   "ask — do not decide alone": a `missing_requirement`, a product-behaviour
@@ -821,4 +821,4 @@ on top (`references/orchestration.md`, "Why two waves", "Choosing N").
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.26"
+skill_version: "1.27"
