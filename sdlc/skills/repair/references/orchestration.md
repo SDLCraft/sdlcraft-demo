@@ -213,8 +213,12 @@ arch → test → task`), and an aggregate whose located artifact is downstream 
 another aggregate's write set runs in a later wave even when the two are
 disjoint — a downstream stamp or re-slice must see the final upstream bytes.
 Inside a wave, aggregates run one after another in id order ("Choosing N");
-`related`, `recurrence_of` and same-symbol findings sit in one aggregate. The close-first findings close
-before wave 1.
+`related`, `recurrence_of` and same-symbol findings sit in one aggregate. A
+mutual wait — two aggregates whose located lists each reach below the other's
+write set — runs upstream-first. When the later aggregate moves something
+under the earlier one's downstream artifact, that artifact is re-stamped if
+`--stale` marks it re-stamp-only, and otherwise joins the handoff chain; the
+plan stays silent about it. The close-first findings close before wave 1.
 
 **One `AskUserQuestion`**, with the whole table inside it (AUTHORING's
 channel rule: content a decision depends on rides inside the call, in the

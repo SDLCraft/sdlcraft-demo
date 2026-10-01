@@ -821,4 +821,4 @@ on top (`references/orchestration.md`, "Why two waves", "Choosing N").
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.27"
+skill_version: "1.28"

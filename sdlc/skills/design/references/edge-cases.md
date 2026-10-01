@@ -56,9 +56,45 @@ Read whenever the agent hits a situation off the happy path.
 - **Brand colour fails the contrast target as text** → keep it for accent/
   non-text use, choose an accessible nearby ramp step for text, record both in
   `contrast_notes`. Don't silently alter a locked brand colour.
-- **Accessibility target unmet by the drafted palette** → adjust ramp steps
-  before approving; if the user insists on the failing palette, set `draft` +
-  `WRN-NNN` naming the failing pairs.
+- **Accessibility target unmet by the drafted palette** — `design_lint.py`
+  reports the failing `contrast_pairs` in the pre-write review → adjust ramp
+  steps before approving; if the user insists on the failing palette, set
+  `draft` + `WRN-NNN` naming the failing pairs.
+- **The user wants a house-style default** (cream + serif, a hero gradient,
+  Inter everywhere) → it is their call. Keep it, write their reason into
+  `chosen_direction_rationale`, and drop it from the `anti_patterns` draft. The
+  guard exists to catch a look nobody chose, not to veto a look somebody did.
+- **The user rejects every direction in three rounds** → stop generating.
+  Ask for one product, site or artwork they like and one they dislike, and
+  draft the next round as variations on the liked reference. That is now the
+  anchor, as in brand mode.
+
+## User changes their mind about the look
+
+Intent changes. A plain `/sdlc:design` re-run on a `complete` DESIGN.yaml is
+the way to revise the direction; `--reconcile` is not, because a direction move
+is structural there. The REFINE scope prompt (Phase 1) offers **"Change the
+visual direction"** as its own option. On it:
+
+1. **Reopen theme 2 in brand mode**, with the recorded direction as the brand.
+   - Position 1 is "keep the current direction" (with its
+     `chosen_direction_rationale`).
+   - The `rejected_directions` are re-offered alongside new variations.
+   - A wholesale change ("make it brutalist") is a greenfield round.
+2. **Move the old direction into `rejected_directions`** with the user's reason
+   for leaving it, and re-draft `anti_patterns`. An item that guarded against
+   the new look the user now wants is removed after confirming once.
+3. **Re-draft the tokens group by group** against the new direction (palette,
+   type, radius, elevation, motion, `state`). Re-run `design_lint.py`. Prepend
+   a `metadata.changelog` line naming the direction change.
+4. **Flag every asset brief whose `style_anchors` came from the old
+   direction.** Re-confirm those anchors per asset. A brief that no longer
+   fits is rewritten or deferred, never left silently stale.
+5. **Do not touch downstream files.** Later stages copied the direction (a
+   design task's `design_spec`, the screen workers' packets). Their own drift
+   checks detect the change on their next run. The close card's `Next:` is
+   computed as always (`reporting-to-the-user.md`), so it routes the user
+   there.
 
 ## ID-family edge cases
 

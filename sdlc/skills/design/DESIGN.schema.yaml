@@ -98,13 +98,16 @@
 # metadata — always at top level, present in both single- and multi-product mode
 # -----------------------------------------------------------------------------
 metadata:
-  design_version: "2.0"                     # schema version this file conforms to -
+  design_version: "2.1"                     # schema version this file conforms to -
                                             #   the prose-only deferral fallback (a bare
                                             #   design_warnings mention, reported as
                                             #   `[deferral hygiene]`, ledger IMP-019)
-                                            #   retires at this floor (validate_schema.py's
-                                            #   _prose_deferrals_allowed, _floor=2); a NEW
-                                            #   write stamps 2.0, an older stamp only warns
+                                            #   retires at 2.0 (validate_schema.py's
+                                            #   _prose_deferrals_allowed, _floor=2); the
+                                            #   bold_dimensions warning starts at 2.1
+                                            #   (DIRECTION_GATE_VERSION). A NEW write
+                                            #   stamps 2.1; an older stamp only loses
+                                            #   warnings
   last_updated: "2026-06-22T12:00:00Z"      # ISO-8601 UTC timestamp of last write
   generated_by: sdlc-design                 # always literal string "sdlc-design"
   session_id: "00000000-0000-0000-0000-000000000000"  # UUID of the interview session
@@ -257,6 +260,34 @@ aesthetic_direction:
                                 # manifest EVEN on a pure token_based_ui (bespoke
                                 # illustration/icon/texture assets). The bridge
                                 # that makes "token UI + artistic style" buildable.
+  # --- commit-on-every-axis (added 2.1; all OPTIONAL) -------------------------
+  # A direction is only buildable when every visual axis has a concrete value -
+  # "modern and clean" is not a direction. Drafted from the chosen direction
+  # (references/aesthetic-direction.md). Downstream, the design task copies the
+  # whole aesthetic_direction block verbatim as design_spec.direction, and every
+  # screen worker receives a compact slice of it as its packet's design_context.
+  density: null                 # compact | comfortable | spacious (enum|null) - the
+                                # global default; surface_overrides.<SCR>.density
+                                # uses the same vocabulary per surface
+  radius_character: null        # sharp | soft | pill (enum|null) - sharp reads
+                                # utilitarian/editorial, pill reads friendly
+  elevation_character: null     # flat | single_system (enum|null) - one shadow
+                                # system, never a mix
+  component_style: null         # filled | outlined | ghost | elevated (enum|null) -
+                                # the default control treatment; the others serve
+                                # secondary hierarchy
+  bold_dimensions: null         # list, subset of: color | typography | layout |
+                                # motion | imagery | interaction - the ONE or TWO
+                                # axes the design is loud on; everything else stays
+                                # quiet. More than two warns at design_version >= 2.1.
+  anti_patterns: null           # list[string] - visual don'ts a coding agent must
+                                # honour (e.g. "purple-to-blue hero gradients",
+                                # "emoji as icons", "pure #000 on #fff"). Seeded
+                                # from rejected directions + the house-style guard.
+  chosen_direction_rationale: null  # string - why this direction won, tied to the
+                                # PRD persona and intent (what attracted the user)
+  rejected_directions: null     # list[{summary, reason}] - directions offered and
+                                # turned down; a later re-run re-offers them
 
 # -----------------------------------------------------------------------------
 # sub_artifacts — names the sub-files that exist for this product. The validator

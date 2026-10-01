@@ -30,6 +30,12 @@ Validates:
        metadata.upstream_provenance sha256 is compared to the upstream's
        current content hash (docs/INDEX.yaml generated_from, else computed
        as sha256 over the UTF-8 text - identical to docs_index.py --hash).
+    8. Designer-quality WARNINGS (never block, version-gated so an older
+       artifact gains none on upgrade): more than two
+       aesthetic_direction.bold_dimensions (design_version >= 2.1); a tokens
+       file with no `state` group, no `contrast_pairs`, or a pair below its
+       WCAG minimum in any theme mode (design_tokens_version >= 1.1; the
+       ratio is computed by the sibling design_lint.py).
 
 Exit codes:
     0 — schema valid; either status='complete' (all required fields filled,
@@ -228,6 +234,19 @@ class _Block(BaseModel):
     model_config = _BASE_CONFIG
 
 
+Density = Literal["compact", "comfortable", "spacious"]
+BoldDimension = Literal["color", "typography", "layout", "motion", "imagery", "interaction"]
+
+
+class RejectedDirection(_Block):
+    """A direction the user was offered and turned down — kept so a later
+    re-run can re-offer it, and so its distinguishing traits can seed
+    anti_patterns (references/aesthetic-direction.md)."""
+
+    summary: Optional[str] = None
+    reason: Optional[str] = None
+
+
 class AestheticDirection(_Block):
     style_family: Optional[str] = None  # OPEN vocabulary — free-form string
     style_family_confidence: Optional[Confidence] = None
@@ -238,6 +257,16 @@ class AestheticDirection(_Block):
     motion_character: Optional[MotionCharacter] = None
     texture_and_finish: Optional[str] = None
     requires_custom_assets: Optional[bool] = None
+    # Commit-on-every-axis fields (design 2.1). All optional: an older
+    # artifact has none of them and stays valid.
+    density: Optional[Density] = None
+    radius_character: Optional[Literal["sharp", "soft", "pill"]] = None
+    elevation_character: Optional[Literal["flat", "single_system"]] = None
+    component_style: Optional[Literal["filled", "outlined", "ghost", "elevated"]] = None
+    bold_dimensions: Optional[List[BoldDimension]] = None
+    anti_patterns: Optional[List[str]] = None
+    chosen_direction_rationale: Optional[str] = None
+    rejected_directions: Optional[List[RejectedDirection]] = None
 
 
 class SubArtifacts(_Block):
@@ -257,7 +286,7 @@ class SurfaceOverride(_Block):
     SCR-NNN in surface_overrides. Presence of an entry = concrete per-surface
     design work `task` derives (in addition to the global theme/token task)."""
 
-    density: Optional[Literal["compact", "comfortable", "spacious"]] = None
+    density: Optional[Density] = None
     token_overrides: Optional[Dict[str, Any]] = None
     component_variants: Optional[Dict[str, Any]] = None
     notes: Optional[str] = None
@@ -398,7 +427,26 @@ class DesignTokens(BaseModel):
     radius: Optional[Dict[str, Any]] = None
     elevation: Optional[Dict[str, Any]] = None
     motion: Optional[Dict[str, Any]] = None
+    state: Optional[Dict[str, Any]] = None  # interaction states (tokens 1.1)
     contrast_notes: Optional[str] = None
+    contrast_pairs: Optional[List["ContrastPair"]] = None  # tokens 1.1
+
+
+class ContrastPair(BaseModel):
+    """One foreground/background pair the palette relies on. design_lint.py
+    computes its WCAG ratio per theme mode; `min` may raise the bar (7.0 for
+    AAA text) but never lower it below the use's AA minimum."""
+
+    model_config = ConfigDict(extra="allow")
+
+    fg: str
+    bg: str
+    use: Literal["text", "large_text", "ui", "focus"] = "text"
+    min: Optional[float] = None
+    mode: Optional[str] = None
+
+
+DesignTokens.model_rebuild()
 
 
 # =============================================================================
@@ -808,6 +856,80 @@ def check_asset_type_taxonomy(assets: DesignAssets, label: str) -> List[str]:
 
 
 # =============================================================================
+# Designer quality floors (warn-only, version-gated per CLAUDE.md 10)
+# =============================================================================
+
+# An artifact stamped by an older skill version never gained these fields, so
+# the warnings below fire only from the version that introduced them. None of
+# them can change an exit code.
+DIRECTION_GATE_VERSION = (2, 1)       # design_version: bold_dimensions discipline
+TOKENS_QUALITY_GATE_VERSION = (1, 1)  # design_tokens_version: state group + contrast pairs
+
+
+def check_direction_quality(design: Design) -> List[str]:
+    """`bold_dimensions` holds the one or two axes the design is loud on; a
+    list longer than two means nothing is quiet, which reads as generic noise
+    rather than conviction (references/designer-stance.md)."""
+    if _version_tuple(design.metadata.design_version) < DIRECTION_GATE_VERSION:
+        return []
+    out: List[str] = []
+    for label, scope, _slug in scopes_of(design):
+        ad = getattr(scope, "aesthetic_direction", None)
+        bold = getattr(ad, "bold_dimensions", None) or []
+        if len(bold) > 2:
+            out.append(
+                f"{label}aesthetic_direction.bold_dimensions names {len(bold)} "
+                f"dimensions ({', '.join(bold)}) - a design that is bold everywhere "
+                f"is bold nowhere; keep one or two and let the rest stay quiet"
+            )
+    return out
+
+
+def _load_design_lint():
+    """design_lint.py ships next to this file; a copy of the validator moved
+    elsewhere degrades to 'no contrast measurement' rather than failing."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import design_lint  # type: ignore
+        return design_lint
+    except Exception:
+        return None
+    finally:
+        if sys.path and sys.path[0] == str(Path(__file__).resolve().parent):
+            sys.path.pop(0)
+
+
+def check_tokens_quality(tokens: DesignTokens, raw: Dict[str, Any], label: str) -> List[str]:
+    """Interaction-state tokens and measured contrast pairs, from tokens 1.1."""
+    if _version_tuple(tokens.metadata.design_tokens_version) < TOKENS_QUALITY_GATE_VERSION:
+        return []
+    out: List[str] = []
+    if not tokens.state:
+        out.append(
+            f"{label}: no `state` token group - hover, active, focus ring, disabled "
+            f"and transition values are left for every screen to invent"
+        )
+    if not tokens.contrast_pairs:
+        out.append(
+            f"{label}: no `contrast_pairs` - nothing measures whether the palette "
+            f"meets its contrast target, so contrast_notes is an unverified claim"
+        )
+        return out
+    dl = _load_design_lint()
+    if dl is None:
+        return out
+    findings, _measured = dl.check_contrast(dl.TokenSet(raw))
+    failed = [f"{f['where']}: {f['message']}" for f in findings if f["severity"] == "blocker"]
+    if failed:
+        out.append((
+            f"{label}: {len(failed)} contrast pair(s) fall short of their minimum "
+            f"(run design_lint.py for the full report)",
+            failed,
+        ))
+    return out
+
+
+# =============================================================================
 # Sub-file discovery + composition + coverage
 # =============================================================================
 
@@ -1187,6 +1309,7 @@ def validate_all(design_path: Path) -> int:
     # 2) sub-files
     sub_files = discover_sub_files(design_path)
     tokens_by_slug: Dict[Optional[str], DesignTokens] = {}
+    tokens_raw_by_slug: Dict[Optional[str], Dict[str, Any]] = {}
     assets_by_slug: Dict[Optional[str], DesignAssets] = {}
     for (kind, slug), p in sub_files.items():
         s_raw, s_err = _load_yaml(p)
@@ -1196,6 +1319,7 @@ def validate_all(design_path: Path) -> int:
         try:
             if kind == "tokens":
                 tokens_by_slug[slug] = DesignTokens.model_validate(s_raw)
+                tokens_raw_by_slug[slug] = s_raw if isinstance(s_raw, dict) else {}
             else:
                 assets_by_slug[slug] = DesignAssets.model_validate(s_raw)
         except ValidationError as e:
@@ -1221,6 +1345,12 @@ def validate_all(design_path: Path) -> int:
         lbl = "DESIGN__assets.yaml" if slug is None else f"DESIGN__{slug}__assets.yaml"
         id_errors.extend(check_assets_id_prefixes(a, lbl))
         soft_warnings.extend(check_asset_type_taxonomy(a, lbl))
+
+    # 4b) designer quality floors (warn-only, version-gated)
+    quality_warnings: List[Any] = check_direction_quality(design)
+    for slug, t in tokens_by_slug.items():
+        lbl = "DESIGN__tokens.yaml" if slug is None else f"DESIGN__{slug}__tokens.yaml"
+        quality_warnings.extend(check_tokens_quality(t, tokens_raw_by_slug.get(slug, {}), lbl))
 
     # 5) composition consistency
     comp_errors = check_composition(design, sub_files)
@@ -1316,6 +1446,7 @@ def validate_all(design_path: Path) -> int:
                 f"list, so downstream tooling may not know how to build them: "
                 f"{join_ids(soft_warnings)}"
             )
+        out.extend(quality_warnings)
         out.extend(prov_warnings)
         out.extend(dfr_shape)
         if prose_only:

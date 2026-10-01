@@ -254,7 +254,8 @@ def _read(path: Path) -> str:
 
 
 def _paths_from_ledger(text: str) -> "list[str]":
-    """Every `files_written[].path` in code's ledger: the parsed shape when
+    """Every `files_written[].path` and `derived_files[].path` (a scaffold's
+    package-manager lockfile) in code's ledger: the parsed shape when
     PyYAML is importable, else the `path:` keys by regex (over-inclusion is
     harmless - git status keeps only what changed)."""
     try:
@@ -262,10 +263,11 @@ def _paths_from_ledger(text: str) -> "list[str]":
         doc = yaml.safe_load(text)
         found: "list[str]" = []
         for task in (doc.get("tasks") or {}).values() if isinstance(doc, dict) else []:
-            for entry in (task.get("files_written") or []) if isinstance(task, dict) else []:
-                p = entry.get("path") if isinstance(entry, dict) else None
-                if isinstance(p, str) and p.strip():
-                    found.append(p.strip())
+            for key in ("files_written", "derived_files"):
+                for entry in (task.get(key) or []) if isinstance(task, dict) else []:
+                    p = entry.get("path") if isinstance(entry, dict) else None
+                    if isinstance(p, str) and p.strip():
+                        found.append(p.strip())
         return found
     except Exception:
         return [m.strip() for m in re.findall(r'(?:^|[\s{,])path:\s*"?([^"\s,}]+)', text)]

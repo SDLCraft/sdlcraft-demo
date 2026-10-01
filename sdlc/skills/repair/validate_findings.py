@@ -347,6 +347,7 @@ class Finding(BaseModel):
     related: Optional[List[str]] = None
     recurrence_of: Optional[str] = None
     recurrence: Optional[int] = None
+    resembles: Optional[str] = None
     status: Status
     duplicate_of: Optional[str] = None
     resolution: Optional[Resolution] = None
@@ -561,6 +562,8 @@ def cross_checks(doc: FindingsFile, version: int) -> Tuple[List[str], List[str]]
                     f"{fid}: recurrence_of {f.recurrence_of} is not in this file - "
                     f"name the earlier finding this one repeats, or drop the key{gate_note}"
                 )
+        if f.resembles and (f.resembles == fid or f.resembles not in known):
+            warnings.append(f"{fid}: resembles {f.resembles} is not another finding in this file")
         for rel in f.related or []:
             if rel not in known:
                 warnings.append(f"{fid}: related {rel} is not in this file")

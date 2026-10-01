@@ -50,6 +50,10 @@ themes:
       Required for any visual structure; optional (opt-in light terminal/voice
       persona) for pure headless. The `requires_custom_assets` answer here is
       the bridge that can flip an asset manifest on even for a token UI.
+      ORDER EXCEPTION: `direction_options` runs FIRST (before the med batch) -
+      the chosen direction's spec card pre-answers style_family, mood, palette,
+      type and the committed axes, so the med questions after it only confirm
+      what the card left open (references/aesthetic-direction.md).
 
   - id: design_tokens
     title: "Design Tokens (DTCG)"
@@ -125,6 +129,29 @@ questions:
   # ---------------------------------------------------------------------------
   # aesthetic_direction (Axis B) — the creative core
   # ---------------------------------------------------------------------------
+  - theme: aesthetic_direction
+    id: direction_options
+    schema_path: aesthetic_direction.chosen_direction_rationale
+    question: "Which visual direction should this product take?"
+    hint: >
+      The designer's opening move: 3-4 concrete directions, each a spec card
+      in the option preview (bg/surface/accent hex, display + body typeface,
+      density, radius, elevation, component style, motion, bold dimension,
+      one-line why), with the agent's pick at position 1 and the reason tied
+      to the PRD persona/intent. Brand or existing tokens present -> position 1
+      is a STRONG "stay on <brand>" and the rest are close variations inside
+      it; greenfield -> distinct directions ordered by-the-book -> refined ->
+      novel, no shared palette family. The pick fills style_family,
+      mood_keywords, palette_intent, typographic_voice and the axis fields;
+      the others land in rejected_directions. Options are generated per
+      project, never from a fixed list.
+    suggested_answers: []
+    free_text_allowed: true
+    required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
   - theme: aesthetic_direction
     id: style_family
     schema_path: aesthetic_direction.style_family
@@ -256,6 +283,107 @@ questions:
       - "false"
     free_text_allowed: false
     required: true
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  # Commit-on-every-axis (design 2.1). Normally pre-answered by the chosen
+  # direction's spec card and confirmed in the theme summary - asked only
+  # when the card left one open. A downstream coding agent breaks every tie
+  # the spec leaves vague, and vagueness resolves to the most generic output.
+  - theme: aesthetic_direction
+    id: density
+    schema_path: aesthetic_direction.density
+    question: "How dense should the UI be by default?"
+    hint: "Global default; a surface_overrides entry can deviate per SCR. Expert, data-heavy personas -> compact; editorial / premium / first-time users -> spacious."
+    suggested_answers:
+      - "comfortable"
+      - "compact"
+      - "spacious"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: aesthetic_direction
+    id: radius_character
+    schema_path: aesthetic_direction.radius_character
+    question: "What corner character should the UI have?"
+    hint: "Sharp (0-2px) reads utilitarian / editorial / brutalist; soft (4-8px) is the modern-product default; pill reads playful and consumer. Drives the radius tokens."
+    suggested_answers:
+      - "soft"
+      - "sharp"
+      - "pill"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: aesthetic_direction
+    id: elevation_character
+    schema_path: aesthetic_direction.elevation_character
+    question: "Flat surfaces, or one elevation (shadow) system?"
+    hint: "One system or none - mixed shadow styles look accidental. Drives the elevation tokens."
+    suggested_answers:
+      - "flat"
+      - "single_system"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: aesthetic_direction
+    id: component_style
+    schema_path: aesthetic_direction.component_style
+    question: "Default treatment for controls (buttons, inputs, cards)?"
+    hint: "The default; the other treatments serve secondary hierarchy (e.g. filled primary + ghost secondary). Becomes the theme default the screen workers inherit."
+    suggested_answers:
+      - "filled"
+      - "outlined"
+      - "ghost"
+      - "elevated"
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: aesthetic_direction
+    id: bold_dimensions
+    schema_path: aesthetic_direction.bold_dimensions
+    question: "Which one or two dimensions should the design be bold on? (Everything else stays quiet.)"
+    hint: >
+      Safe-everywhere is generic; loud-everywhere is noise. Pick 1-2 and make
+      the tokens deliver them (bold typography needs a real jump at the top of
+      the scale). More than two warns at design_version >= 2.1.
+    suggested_answers:
+      - "typography"
+      - "color"
+      - "layout"
+      - "Also: motion, imagery, interaction."
+    free_text_allowed: false
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: aesthetic_direction
+    id: anti_patterns
+    schema_path: aesthetic_direction.anti_patterns
+    question: "Confirm the visual don'ts every screen must honour."
+    hint: >
+      Drafted, never asked blank: seeded from what the rejected directions
+      stood for (only when the user said why) plus every house-style guard item
+      the user did not choose (two-hue hero gradients, cream + serif + terracotta
+      by default, one generic sans for everything, emoji as icons, pure black on
+      pure white, left-border cards). Each entry is concrete and checkable.
+      Screen workers receive this list as hard constraints.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
     capture_rationale: false
     confidence_field: false
     importance: high
@@ -405,10 +533,39 @@ questions:
     importance: med
 
   - theme: design_tokens
+    id: state
+    schema_path: tokens.state
+    question: "Confirm the interaction-state tokens (hover, active, focus ring, disabled, transition)."
+    hint: >
+      Drafted from the direction with designer defaults (hover 8-12% darker,
+      never an opacity drop; focus ring 2px + 2px offset at >= 3:1; disabled
+      0.6 opacity; 200ms ease-out), aliased into color/motion. Without this
+      group every screen invents its own states. Warned on when absent at
+      design_tokens_version >= 1.1.
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: high
+
+  - theme: design_tokens
+    id: contrast_pairs
+    schema_path: tokens.contrast_pairs
+    question: "Confirm the colour pairs the UI relies on (measured by design_lint.py)."
+    hint: "Drafted: text + muted text on each surface, each semantic on-colour on its fill, accent/link on surface, focus ring (use: focus), input border (use: ui). The script computes each ratio per theme mode; a failing pair is a blocker in the pre-write review."
+    suggested_answers: []
+    free_text_allowed: true
+    required: false
+    capture_rationale: false
+    confidence_field: false
+    importance: med
+
+  - theme: design_tokens
     id: contrast_notes
     schema_path: tokens.contrast_notes
     question: "How does the palette satisfy the accessibility / contrast target?"
-    hint: "Ties the colour tokens to UX.accessibility.wcag_target / a PRD NFR. e.g. 'all text/bg pairs ≥ 4.5:1 (AA)'."
+    hint: "Ties the colour tokens to UX.accessibility.wcag_target / a PRD NFR. Written from design_lint.py's measured output, never from memory - e.g. 'all 9 pairs meet AA in light and dark (lowest 4.8:1)'."
     suggested_answers:
       - "All text/bg pairs meet WCAG AA (4.5:1)"
       - "Meets WCAG AAA (7:1)"

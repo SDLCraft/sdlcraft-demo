@@ -163,15 +163,26 @@ findings:                                  # REQUIRED — list[Finding]; may be 
                                            #   to (same symbol, same episode); warns
                                            #   when an id is not in this file
     recurrence_of: FND-001                 # OPTIONAL — stamped by findings.py when a
-                                           #   resolved|wontfix finding already named
-                                           #   the same surfaced_at.qualified_task or
-                                           #   .symbol with the same kind. v2: must
+                                           #   resolved|wontfix finding named the same
+                                           #   surfaced_at.qualified_task or .symbol
+                                           #   with the same kind AND says much the
+                                           #   same thing (summary / evidence overlap
+                                           #   at or above RECURRENCE_FLOOR; two
+                                           #   different field_paths veto). A name
+                                           #   match alone never stamps. v2: must
                                            #   name a finding in this file.
     recurrence: 1                          # OPTIONAL — how many times it came back
                                            #   (the earlier finding's count + 1).
                                            #   "repaired before as FND-NNN" makes
                                            #   re-invoke the safer mode — it never
                                            #   refuses surgical.
+    resembles: FND-001                     # OPTIONAL — written by findings.py when a
+                                           #   resolved|wontfix finding matched on
+                                           #   symbol/task and kind but its content fell
+                                           #   below the floor. A pointer to read
+                                           #   ("check whether it repeats"), never a
+                                           #   stamp: it does not rank re-invoke first.
+                                           #   Warns when the id is not in this file.
 
     status: open                           # REQUIRED — open | triaged | resolved
                                            #   | wontfix | deferred | duplicate

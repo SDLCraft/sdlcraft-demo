@@ -54,7 +54,10 @@ Usage:
 `add` mints the next id (max(last_ids.FND, highest present) + 1), refuses to
 record a second copy of a still-open defect (same detected_by + summary) unless
 --allow-duplicate, and stamps recurrence_of / recurrence when a resolved or
-wontfix finding already named the same symbol or task with the same kind.
+wontfix finding already named the same symbol or task with the same kind AND
+says much the same thing (summary / evidence overlap, RECURRENCE_FLOOR). A
+finding that matches only on symbol and kind is not stamped; it carries
+`resembles: FND-NNN`, a pointer to read, never a reason to lead with re-invoke.
 
 Exit codes:
     0 — recorded (or deliberately not recorded: a duplicate), listed, valid,
@@ -455,28 +458,107 @@ def _anchor(entry: Dict[str, Any]) -> Optional[str]:
     return sa.get("qualified_task") or sa.get("symbol") or None
 
 
-def find_recurrence(data: Dict[str, Any], entry: Dict[str, Any]) -> Optional[Tuple[str, int]]:
-    """(earlier id, recurrence count) when a resolved/wontfix finding already
-    named the same task-or-symbol with the same kind. The count is how many
-    times the defect has come back: the earlier finding's count + 1."""
+# A recurrence is a claim that a closed finding's defect came back, and repair's
+# gate acts on it (re-invoke leads). Where a defect surfaced and a coarse `kind`
+# are not evidence of WHAT is wrong - a busy symbol collects unrelated findings
+# - so the stamp also needs the two texts to agree. The score is the larger of
+# the summary overlap and the summary+evidence overlap (Jaccard over atoms, the
+# anchor's own atoms removed: a repeat may carry wholly new-run evidence, a
+# different defect on the same symbol shares nothing but the symbol).
+# Calibration, on one real queue: the same-symbol-and-kind pairs that were NOT
+# the same defect scored at most 0.23 (a related-but-distinct pair, 0.30 on the
+# summary alone); the selftest's near-copy repeat scores 0.75. No real repeat
+# was available, so the floor sits above the false pairs and well below a copy.
+RECURRENCE_FLOOR = 0.35
+
+# The atom tokenizer is a local copy of the lesson skill's lessons.py (tokenize /
+# _atoms): this script is installed alone in a consumer project and cannot import
+# a sibling skill's module. The selftest pins the behaviour; keep the two alike.
+_TOKEN_STOPWORDS = frozenset("""
+the a an and or of to in on is are it its for with that this so not but be as
+by from at every any no all one two own only still while which what when where
+who how than then there their they them has have had was were will would can
+could should may might must does did done none non per via out into over under
+before after same other another each both few more most some such too very just
+now the sdlc claude
+""".split())
+_TOKEN_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_./\\-]*|\d{3,5}")
+_TOKEN_SPLIT_RE = re.compile(r"[._/\\-]+")
+_TOKEN_HUMP_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z][a-z]+|[a-z]+|\d+")
+
+
+def _atoms(text: Any) -> set:
+    """Free text -> identifier atoms: `run_stage` and `RunStage` -> {run, stage}."""
+    out: set = set()
+    for word in _TOKEN_WORD_RE.findall(str(text or "")):
+        for piece in _TOKEN_SPLIT_RE.split(word):
+            for atom in _TOKEN_HUMP_RE.findall(piece):
+                low = atom.lower()
+                if len(low) > 2 and low not in _TOKEN_STOPWORDS:
+                    out.add(low)
+    return out
+
+
+def _jaccard(a: set, b: set) -> float:
+    return len(a & b) / len(a | b) if (a or b) else 0.0
+
+
+def _overlap_score(a: Dict[str, Any], b: Dict[str, Any], skip: set) -> float:
+    """max(summary overlap, summary+evidence overlap) of two findings, with the
+    shared anchor's atoms (`skip`) removed."""
+    def both(f: Dict[str, Any]) -> Tuple[set, set]:
+        summary = _atoms(f.get("summary")) - skip
+        evidence = _atoms(" ".join(str(e) for e in (f.get("evidence") or []))) - skip
+        return summary, summary | evidence
+    (a_s, a_se), (b_s, b_se) = both(a), both(b)
+    return max(_jaccard(a_s, b_s), _jaccard(a_se, b_se))
+
+
+def _field_path(entry: Dict[str, Any]) -> Optional[str]:
+    sa = entry.get("surfaced_at")
+    return (sa.get("field_path") or None) if isinstance(sa, dict) else None
+
+
+def find_recurrence(data: Dict[str, Any], entry: Dict[str, Any]
+                    ) -> Tuple[Optional[Tuple[str, int]], Optional[str]]:
+    """(stamp, near): `stamp` is (earlier id, recurrence count) when a
+    resolved/wontfix finding named the same task-or-symbol with the same kind
+    AND its content overlaps this one's at RECURRENCE_FLOOR or more; the count
+    is the earlier finding's count + 1. Of several, the best-overlapping prior
+    wins and a tie goes to the later entry. Two different `field_path`s veto.
+    `near` is the best same-anchor-and-kind closed finding that fell below the
+    floor (only when `stamp` is None): a pointer to read, never a stamp."""
     anchor = _anchor(entry)
     if not anchor:
-        return None
+        return None, None
     kind = entry.get("kind")
-    best: Optional[Tuple[str, int]] = None
+    fresh_path = _field_path(entry)
+    skip = _atoms(anchor)
+    best: Optional[Tuple[float, str, int]] = None
+    near: Optional[Tuple[float, str]] = None
     for f in data.get("findings") or []:
         if not isinstance(f, dict) or f.get("status") not in CLOSED_STATUSES:
             continue
         if f.get("kind") != kind:
             continue
         sa = f.get("surfaced_at") or {}
-        if not isinstance(sa, dict):
+        if not isinstance(sa, dict) or anchor not in (sa.get("qualified_task"), sa.get("symbol")):
             continue
-        if anchor in (sa.get("qualified_task"), sa.get("symbol")):
+        prior_path = _field_path(f)
+        if fresh_path and prior_path and fresh_path != prior_path:
+            continue
+        score = _overlap_score(entry, f, skip)
+        fid = str(f.get("fnd_id"))
+        if score >= RECURRENCE_FLOOR:
             prior = f.get("recurrence")
             prior_n = int(prior) if isinstance(prior, int) else 0
-            best = (str(f.get("fnd_id")), prior_n + 1)   # later entries win
-    return best
+            if best is None or score >= best[0]:     # a tie goes to the later entry
+                best = (score, fid, prior_n + 1)
+        elif near is None or score >= near[0]:
+            near = (score, fid)
+    if best:
+        return (best[1], best[2]), None
+    return None, (near[1] if near else None)
 
 
 # =============================================================================
@@ -548,9 +630,11 @@ def append_findings(path: Path, entries: List[Dict[str, Any]], *,
         entry.setdefault("status", "open")
         entry.setdefault("resolution", None)
         if stamp_recurrence and not entry.get("recurrence_of"):
-            rec = find_recurrence(data, entry)
+            rec, near = find_recurrence(data, entry)
             if rec:
                 entry["recurrence_of"], entry["recurrence"] = rec
+            elif near and not entry.get("resembles"):
+                entry["resembles"] = near
         # Field-level check on the entry alone first: the message then names
         # the entry's own field, not "findings -> 37 -> evidence".
         try:
@@ -774,6 +858,9 @@ def cmd_add(args) -> int:
         line += (f"  [repaired before as {written['recurrence_of']}; came back "
                  f"{written['recurrence']}x - re-invoke is the safer mode]")
     print(line)
+    if written.get("resembles") and not written.get("recurrence_of"):
+        print(f"  note: possible recurrence of {written['resembles']} (same symbol and kind, "
+              f"different content) - not stamped; read its resolution before choosing a mode.")
     # Redraw the board of the project that owns this queue, not the cwd's: a
     # --path into another project would otherwise redraw the wrong board.
     qp = Path(path).resolve()
@@ -1157,8 +1244,7 @@ def aggregates_from_reports(reports: Dict[str, Dict[str, Any]], closable: List[s
         for index, part in enumerate(parts):
             located = sorted({p for m in part for p in _located_paths(reports[m])})
             ws = sorted({p[0] for m in part for p in sets[m]})
-            rank = min((stage_rank(reports[m].get("located_stage") or (located[0] if located else None))
-                        for m in part), default=len(PIPELINE) + 1)
+            rank = min((_report_rank(reports[m]) for m in part), default=len(PIPELINE) + 1)
             decisions = [{"fnd": m, **{k: v for k, v in (reports[m].get("missing_decision") or {}).items()
                                        if k in ("question", "proposal", "basis")}}
                          for m in part if isinstance(reports[m].get("missing_decision"), dict)
@@ -1174,12 +1260,23 @@ def aggregates_from_reports(reports: Dict[str, Dict[str, Any]], closable: List[s
     return aggregates, duplicates
 
 
+def _report_rank(report: Dict[str, Any]) -> int:
+    """One report's pipeline rank: its located_stage, else the most upstream of
+    ITS OWN located artifacts, else last. The aggregate rank and the split into
+    stage parts both use it - two ranks for one report put a chain's order and
+    the rank order in contradiction."""
+    if report.get("located_stage"):
+        return stage_rank(report["located_stage"])
+    own = [stage_rank(p) for p in _located_paths(report)]
+    return min(own) if own else len(PIPELINE) + 1
+
+
 def _split(members: List[str], reports: Dict[str, Dict[str, Any]]) -> List[List[str]]:
     if len(members) <= PLAN_CAP:
         return [members]
     by_stage: Dict[int, List[str]] = {}
     for m in members:
-        by_stage.setdefault(stage_rank(reports[m].get("located_stage")), []).append(m)
+        by_stage.setdefault(_report_rank(reports[m]), []).append(m)
     parts: List[List[str]] = []
     for rank in sorted(by_stage):
         chunk = by_stage[rank]
@@ -1192,29 +1289,64 @@ def order_waves(aggregates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Waves of equal effective rank, upstream first. An aggregate whose located
     artifact is downstream of another aggregate's write set waits for it even
     when the two are disjoint - a downstream stamp must see final upstream
-    bytes. Stable tie-break: the lowest finding id."""
+    bytes. Stable tie-break: the lowest finding id.
+
+    A located list that spans several stages can put two aggregates each
+    downstream of the other's write set (a mutual wait). Inside such a cycle
+    the aggregate that sorts first on (rank, chain position, lowest id) goes
+    first: the edges that point the other way are dropped, only inside the
+    cycle, so every input without a mutual wait orders exactly as before. A
+    chain edge (the parts of one split group) is never dropped - it already
+    agrees with that sort."""
     aggs = sorted(aggregates, key=lambda a: (a["rank"], _fnd_num(a["findings"][0])))
-    effective = {id(a): a["rank"] for a in aggs}
-    changed = True
-    while changed:
+    size = len(aggs)
+    max_loc = [max((stage_rank(p) for p in a["located"]), default=-1) for a in aggs]
+    min_ws = [min((stage_rank(p) for p in a["write_set"]), default=len(PIPELINE) + 2) for a in aggs]
+
+    def sort_key(i: int) -> Tuple[int, int, int]:
+        return (aggs[i]["rank"], aggs[i].get("chain_index", 0), _fnd_num(aggs[i]["findings"][0]))
+
+    # waits[i] = {j: is_chain_edge} - aggs[i] runs after aggs[j]
+    waits: List[Dict[int, bool]] = [dict() for _ in range(size)]
+    for i, a in enumerate(aggs):
+        for j, b in enumerate(aggs):
+            if i == j:
+                continue
+            if max_loc[i] > min_ws[j]:
+                waits[i][j] = False
+            if a.get("chain") and a.get("chain") == b.get("chain") \
+                    and a.get("chain_index", 0) > b.get("chain_index", 0):
+                waits[i][j] = True
+    reach: List[set] = []
+    for i in range(size):
+        seen: set = set()
+        todo = list(waits[i])
+        while todo:
+            j = todo.pop()
+            if j not in seen:
+                seen.add(j)
+                todo.extend(waits[j])
+        reach.append(seen)
+    for i in range(size):
+        for j in list(waits[i]):
+            mutual = j in reach[i] and i in reach[j]
+            if mutual and not waits[i][j] and not sort_key(j) < sort_key(i):
+                del waits[i][j]
+    effective = [a["rank"] for a in aggs]
+    for _ in range(size + 1):    # the edges are acyclic now, so size passes settle it
         changed = False
-        for a in aggs:
-            for b in aggs:
-                if a is b:
-                    continue
-                if any(stage_rank(la) > stage_rank(wb) for la in a["located"] for wb in b["write_set"]) \
-                        and effective[id(a)] <= effective[id(b)]:
-                    effective[id(a)] = effective[id(b)] + 1
+        for i in range(size):
+            for j in waits[i]:
+                if effective[i] <= effective[j]:
+                    effective[i] = effective[j] + 1
                     changed = True
-                # the parts of one split group share artifacts: part k+1 waits for part k
-                if a.get("chain") and a.get("chain") == b.get("chain") \
-                        and a.get("chain_index", 0) > b.get("chain_index", 0) \
-                        and effective[id(a)] <= effective[id(b)]:
-                    effective[id(a)] = effective[id(b)] + 1
-                    changed = True
+        if not changed:
+            break
+    else:
+        raise RuntimeError("order_waves: the wave order did not settle after removing mutual waits")
     waves: Dict[int, List[Dict[str, Any]]] = {}
-    for a in aggs:
-        waves.setdefault(effective[id(a)], []).append(a)
+    for i, a in enumerate(aggs):
+        waves.setdefault(effective[i], []).append(a)
     out = []
     for n, rank in enumerate(sorted(waves), start=1):
         members = sorted(waves[rank], key=lambda a: (a["rank"], _fnd_num(a["findings"][0])))

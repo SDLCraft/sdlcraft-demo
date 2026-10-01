@@ -345,7 +345,11 @@ whose owner can simply fill the field.
 ## Step 5 — Recurrence: "repaired before as FND-NNN"
 
 `findings.py` stamps `recurrence_of` / `recurrence` when a resolved or wontfix
-finding already named the same task-or-symbol with the same kind. A recurrence
+finding already named the same task-or-symbol with the same kind **and** its
+summary / evidence overlaps this one's; a name match alone never stamps. A
+finding that matched only by name carries `resembles: FND-NNN` instead: read
+that finding's resolution and check whether it repeats. `resembles` never ranks
+`re-invoke` first; `recurrence_of` alone does. A recurrence
 means the earlier repair's propagation stopped short, or the earlier
 localization was wrong. Read the earlier finding's resolution before walking:
 its `located_stage`, `artifacts_touched` and `propagation` hops say which hop

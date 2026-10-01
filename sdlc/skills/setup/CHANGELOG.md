@@ -7,6 +7,16 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.28 (2026-10-01) — `--drift` no longer reads a qualified id (`TASKS/TSK-027`) as a changelog naming the file, and finds a path-qualified mention it used to miss; autocommit stages a scaffold's recorded lockfile
+
+- `docs_index.py` (ledger IMP-246, aicf LSN-135; a defect inside IMP-186's remedy): `_changelog_names_target`'s stem lookahead let `/` through, so `TASKS/TSK-NNN` marked every TASKS shard `[changelog names this file]`. The family tail then counted that mark as "referenced or cited here".
+  - The lookahead is now `(?![\w-]|/[A-Z][A-Z-]*-\d)`. Qualified ids, multi-segment ones included (`TEST-STRATEGY/TST-SYS-025`), no longer match. A slash list like `DESIGN/UX` still does.
+  - The lookbehind accepts `docs/`, so a path-qualified mention (`docs/TASKS__x.json`) now matches. That false negative could print "re-stamp only" over real drift.
+  - The tail keeps its literals and appends "; K flagged by the upstream changelog or deferred here" only when K > 0.
+  - Known gap: the git-recovered and sha-only `_item_delta_lines` calls pass no changelog, so this arm never fires there.
+  - Regression: new arms in `_smoke/index_selftest.py`.
+- `autocommit.py` (ledger IMP-248, code 0.32): the close-step commit also stages every ledger entry's `derived_files` paths (a scaffold's lockfile), so an auto-committed code run no longer leaves it dirty. Regression: an `_smoke/autocommit_selftest.py` arm.
+
 ## 1.27 (2026-09-29) — `docs_index.py` capability 12: `--drift`/`--stale` mark an item ADDED upstream that the file already references or cites, so such a move is never `re-stamp only`
 
 - `docs_index.py` (ledger IMP-232): plain-added ids run through `mark(added=True)` - structured references and prose cites only; the changelog and deferred marks stay off for added items, so an upstream changelog naming the file no longer marks every addition. A hit sets `relevant`; the per-family "N of them referenced or cited here" tail covers the added bucket; the recovered-revision count line stays unmarked. `CAPABILITY_VERSION` 11 -> 12 (`wire_selftest.py`, `index_selftest.py`, `references/helper-resolution.md` row 12). Pinned by `_smoke/index_selftest.py` arm 13c.

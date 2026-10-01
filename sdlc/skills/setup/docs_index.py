@@ -3357,7 +3357,11 @@ def _changelog_names_target(newer: "list[str]", target_name: str) -> bool:
     target's own exact shard stem when it is one (``UX__cmd-init``); and the
     invocation token ``/sdlc:<skill>``. A short stem can over-match prose
     that names something merely adjacent - accepted (costs one extra review
-    question, never a silent re-stamp)."""
+    question, never a silent re-stamp). Two boundaries are NOT over-match:
+    a qualified id ``<STEM>/<PREFIX>-<digit>`` (``TASKS/TSK-027``,
+    ``TEST-STRATEGY/TST-SYS-025``) is an id qualifier, never a mention of the
+    file; and a ``docs/``-qualified path (``docs/TASKS__x.json``) IS a
+    mention of the file even though a bare ``/`` before a name is not."""
     stem = target_name.split("__", 1)[0].rsplit(".", 1)[0]
     skill = _STAGE_OF.get(stem)
     tokens = [stem]
@@ -3368,9 +3372,29 @@ def _changelog_names_target(newer: "list[str]", target_name: str) -> bool:
         if invocation and invocation in line:
             return True
         for token in tokens:
-            if re.search(r"(?<![\w/-])" + re.escape(token) + r"(?![\w-])", line):
+            if re.search(r"(?:(?<![\w/-])|(?<=\bdocs/))" + re.escape(token)
+                         + r"(?![\w-]|/[A-Z][A-Z-]*-\d)", line):
                 return True
     return False
+
+
+_FLAGGED_MARKS = ("[changelog names this file]", "[deferred here]")
+
+
+def _mark_tail(marked: "list[tuple[str, bool]]") -> str:
+    """The family tail over ``mark()`` results: how many marks are a REFERENCE
+    or a cite in this file, plus - only when there are any - how many are
+    flagged by the upstream's changelog or by a standing deferral, which
+    nobody referenced (ledger IMP-246: counting them as "referenced or cited"
+    was false). The two old literals stay verbatim for the cases they were
+    true of."""
+    hits = [label for label, hit in marked if hit]
+    flagged = sum(1 for label in hits if label.endswith(_FLAGGED_MARKS))
+    refs = len(hits) - flagged
+    tail = f"{refs} of them referenced or cited here" if refs else "none referenced or cited here"
+    if flagged:
+        tail += f"; {flagged} flagged by the upstream changelog or deferred here"
+    return tail
 
 
 def _why_lines(docs_dir: Path, up_name: str, entry: dict) -> "list[str]":
@@ -3826,6 +3850,7 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
         bits = []
         buckets = by_fam[family]
         marked_here = 0
+        fam_marked: "list[tuple[str, bool]]" = []
         judged = False
         if buckets.get("added"):
             ks = buckets["added"]
@@ -3839,21 +3864,23 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
                             f"re-stamping records it either way")
             else:
                 marked = [mark(k, added=True) for k in ks]
+                fam_marked += marked
                 marked_here += sum(1 for _t, hit in marked if hit)
                 judged = True
                 bits.append(f"{len(marked)} added upstream since this file was written "
                             f"({', '.join(t for t, _h in marked)})")
         if buckets.get("removed"):
             marked = [mark(k) for k in buckets["removed"]]
+            fam_marked += marked
             marked_here += sum(1 for _t, hit in marked if hit)
             bits.append(f"{len(marked)} removed upstream ({', '.join(t for t, _h in marked)})")
         if buckets.get("modified"):
             marked = [mark(k) for k in buckets["modified"]]
+            fam_marked += marked
             marked_here += sum(1 for _t, hit in marked if hit)
             bits.append(f"{len(marked)} changed in body ({', '.join(t for t, _h in marked)})")
         if judged or buckets.get("removed") or buckets.get("modified"):
-            bits.append(f"{marked_here} of them referenced or cited here" if marked_here
-                        else "none referenced or cited here")
+            bits.append(_mark_tail(fam_marked))
             relevant = relevant or marked_here > 0
         out.append(f"{family}: " + "; ".join(bits))
     if index_new_keys:
@@ -3889,8 +3916,7 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
         if confirmed_changed:
             marked = [mark(k) for k in confirmed_changed]
             marked_here = sum(1 for _t, hit in marked if hit)
-            tail = f"{marked_here} of them referenced or cited here" if marked_here \
-                else "none referenced or cited here"
+            tail = _mark_tail(marked)
             out.append(
                 f"{len(confirmed_changed)} item(s) new to the index changed in body since "
                 f"revision {str(rev)[:8]} of {up_name}, recovered from git "

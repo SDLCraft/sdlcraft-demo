@@ -3,6 +3,48 @@
 Detailed rules for Phase 7 (write & validate) and Phase 8 (pointer + close).
 Read on entering Phase 7.
 
+## Pre-write design review (Phase 7, first step)
+
+A designer reviews their own work before handing it over. Run this on the
+drafted state, before writing anything, so a defect is fixed in the
+conversation instead of becoming a warning nobody reads.
+
+1. **Measure.** Write the drafted token set to a scratch file (or to
+   `docs/DESIGN__tokens.yaml` as `status: draft`) and run
+   `python "${CLAUDE_SKILL_DIR}/design_lint.py" --path <that file> --json`.
+   It reports blocker, quality and polish findings: contrast per pair and mode,
+   hue families, pure black or white, font-family count, off-grid spacing,
+   radius count, a missing `state` group or `contrast_pairs`.
+2. **Judge.** Then work through what a script cannot see:
+   - Do the `bold_dimensions` actually read as bold in the tokens? (Bold type
+     needs a scale with a real jump at the top.) Does everything else stay
+     quiet?
+   - Would a stranger reading the palette and type tokens guess the
+     `mood_keywords`?
+   - Does every colour or size a surface override names exist as a token?
+   - Did any house-style default arrive unchosen
+     (`aesthetic-direction.md` → "House-style guard")?
+   - Do `motion_character`, the `motion` group and the `state` transitions
+     agree?
+3. **Sort and act.** Ask ONE `AskUserQuestion` for the whole review:
+   - **Blockers** (a contrast failure, an unresolvable pair, an unchosen
+     house-style default): each is one question, with your fix at position 1
+     ("darken `color.muted` one step: 3.9 → 4.8:1 in dark mode"). A contrast
+     failure the user insists on keeping follows `edge-cases.md` → "Token
+     edge cases" (`draft` + `WRN-NNN`).
+   - **Quality findings the user should see:** batch them into one question,
+     with "apply all my fixes" at position 1. Whatever the user declines
+     becomes a typed `WRN-NNN` (`kind: decision`, `impact: local`) carrying
+     their reason.
+   - **The assumptions you made on their behalf** (`_confidence:
+     assumption`, `designer-stance.md` → "Question discipline"): list them
+     in that question's preview so they can overturn any in one place.
+   - **Polish findings:** fix them silently when the fix is mechanical.
+     Otherwise drop them.
+4. Re-run `design_lint.py` after the fixes. Write `contrast_notes` from its
+   output, never from memory. Then write the files and run the validator
+   (below).
+
 ## What Phase 7 writes
 
 Always `docs/DESIGN.yaml`. Plus, conditionally:
@@ -67,13 +109,20 @@ in it.
 
 ## Version stamp (new writes)
 
-`metadata.design_version` (DESIGN.yaml): a NEW write stamps `"2.0"` or
-higher — the prose-only deferral fallback (a bare `design_warnings` mention,
-reported as `[deferral hygiene]`) retires at/after 2.0, and
-an older stamp silently keeps the fallback live instead of retiring it
-(CLAUDE.md §10). The update flow on an existing artifact bumps the version's
-minor number and never crosses a floor by itself — moving 1.x → 2.0 needs an
-explicit reason, not an automatic edit.
+- `metadata.design_version` (DESIGN.yaml): a NEW write stamps `"2.1"` or
+  higher. The prose-only deferral fallback (a bare `design_warnings` mention,
+  reported as `[deferral hygiene]`) retires at/after 2.0, and the
+  `bold_dimensions` warning starts at 2.1. An older stamp silently keeps the
+  fallback live and the warning off (CLAUDE.md §10).
+- `metadata.design_tokens_version` (DESIGN__tokens.yaml): a NEW write stamps
+  `"1.1"`. From 1.1 the validator warns on a missing `state` group, missing
+  `contrast_pairs`, and any pair below its minimum.
+
+The update flow on an existing artifact bumps the version's minor number and
+never crosses a floor by itself — moving 1.x → 2.0 needs an explicit reason,
+not an automatic edit. Crossing 2.0 → 2.1 (or tokens 1.0 → 1.1) is expected
+the first time a re-run fills the new direction fields or the `state` group
+and `contrast_pairs`; stamp it in the same write.
 
 ## Running the validator
 
@@ -84,8 +133,11 @@ python "${CLAUDE_SKILL_DIR}/validate_schema.py" --path docs/DESIGN.yaml
 One pass does six things: schema-validate `DESIGN.yaml`; discover + schema-
 validate `DESIGN__*.yaml` siblings; required-field checks; ID-prefix formats
 (AST/WRN/FR-or-NFR/SCR/ENT); **composition consistency**; **asset-brief
-coverage** (trace-or-defer). It also prints advisory notes (e.g. an
-`asset_type` not in `asset_taxonomy`) that never block `complete`.
+coverage** (trace-or-defer). It also prints warnings that never block
+`complete`: an `asset_type` not in `asset_taxonomy`, and, from design 2.1 /
+tokens 1.1, the designer-quality floors (more than two `bold_dimensions`, a
+missing `state` group or `contrast_pairs`, a contrast pair below its
+minimum).
 
 | Code | Meaning | Agent action |
 |---|---|---|

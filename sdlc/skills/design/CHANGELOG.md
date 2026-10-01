@@ -7,6 +7,65 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.17 (2026-10-01) — The agent works as a designer: at least three directions with a stated pick, every visual axis committed, measured contrast, and a pre-write self-review
+
+Adapted (ideas, not text) from the Claude Design system prompt
+(github.com/Trystan-SA/claude-design-system-prompt, MIT): the designer role,
+context before taste, question discipline, commit-on-every-axis, divergent
+directions, quality floors, a house-style guard, and self-critique before
+claiming success. The HTML/prototype machinery does not transfer to a spec writer.
+
+- New `references/designer-stance.md`, read at Phase 3. The user is the
+  manager and the agent is the designer: it recommends with a pick, pushes back
+  once, follows existing vocabulary before extending it, asks only questions
+  whose answers change the design (minor choices become `_confidence:
+  assumption`), is bold on one or two dimensions, and never claims a contrast
+  ratio it hasn't measured. SKILL.md's "Style of conversation" now points to it.
+- `references/aesthetic-direction.md`: theme 2 opens with the new
+  `direction_options` question, 3-4 concrete spec cards in the
+  `AskUserQuestion` previews (AUTHORING §18) with the agent's pick first.
+  - Brand / existing-token mode: a strong "stay on brand" plus close
+    variations.
+  - Greenfield mode: distinct directions, by-the-book -> novel, grounded in
+    the PRD persona and intent.
+  - A house-style guard keeps unchosen generated-UI defaults out of the
+    proposals.
+- `aesthetic_direction` gains optional `density`, `radius_character`,
+  `elevation_character`, `component_style`, `bold_dimensions`,
+  `anti_patterns`, `chosen_direction_rationale` and `rejected_directions`
+  (DESIGN.schema.yaml, validator, design-questions.yaml).
+- `references/design-tokens.md` gains:
+  - quality floors (palette size, toned neutrals, at most two families, a
+    fixed scale, 4px grid, one elevation system, motion timings, hit targets);
+  - Step 5, contrast measured through the new `contrast_pairs` list;
+  - Step 6, a `state` token group (hover / active / focus ring / disabled /
+    transition);
+  - the per-mode convention, `$extensions.modes`.
+- New bundled `design_lint.py` (stdlib + pyyaml). It resolves aliases,
+  measures each contrast pair per theme mode, and checks hue families,
+  pure black/white, font-family count, off-grid spacing, radius count and a
+  missing `state` group.
+- Phase 7 opens with a pre-write design review (`references/merge-validate.md`):
+  measure, judge, then settle blockers, quality findings and the agent's own
+  assumptions in one `AskUserQuestion`.
+- The Phase 1 REFINE prompt offers "Change the visual direction"
+  (`references/edge-cases.md` -> "User changes their mind about the look"):
+  - it reopens Axis B with the old direction as the anchor;
+  - it re-drafts tokens and flags the asset `style_anchors`;
+  - downstream drift checks pick up the change.
+- Version floors (warn-only, AUTHORING §10). New writes stamp
+  `design_version` 2.1 and `design_tokens_version` 1.1.
+  - From 2.1, more than two `bold_dimensions` warns.
+  - From tokens 1.1, a missing `state` group, missing `contrast_pairs`, or a
+    pair below its minimum warns.
+  - Pinned by fixtures 15-18 (18 is the pre-floor twin, silent) and
+    `_smoke/direction_floor_selftest.py`. `_smoke/design_lint_selftest.py`
+    pins the WCAG maths, colour syntaxes, aliases and per-mode measurement.
+- Downstream (same release): task 1.36 copies `aesthetic_direction` into a
+  design task's `design_spec.direction`, and code 0.30 joins a
+  `design_context` slice into every screen worker's packet.
+- SKILL.md: 663 -> 656 lines; ceiling lowered in `lint_context_budget.py`.
+
 ## 1.16 (2026-09-24) — The helper-resolution clause covers every `.claude/sdlc/<helper>.py` the file runs, not `docs_index.py` alone
 
 - `SKILL.md` (ledger IMP-218): the Phase-2 clause reads "every `python .claude/sdlc/<helper>.py …` in this file (`docs_index.py` and the close-phase helpers alike) runs the copy `helper-resolution.md` picks once per run", so a lagging install runs the plugin's `statusboard.py`, `lessons.py` and `autocommit.py` at the close too - a run on a 0.9.16 install had drawn the old statusboard and would have stamped no verdicts. Pinned by `setup/_smoke/helper_resolution_selftest.py` arm 4.

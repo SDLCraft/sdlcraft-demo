@@ -38,7 +38,12 @@
 # metadata — always at top level
 # -----------------------------------------------------------------------------
 metadata:
-  design_tokens_version: "1.0"              # schema version this file conforms to
+  design_tokens_version: "1.1"              # schema version this file conforms to.
+                                            #   From 1.1 the validator warns when the
+                                            #   `state` group or `contrast_pairs` is
+                                            #   missing, or a pair fails its minimum
+                                            #   (TOKENS_QUALITY_GATE_VERSION). A NEW
+                                            #   write stamps 1.1.
   last_updated: "2026-06-22T12:00:00Z"      # ISO-8601 UTC timestamp of last write
   generated_by: sdlc-design
   session_id: "00000000-0000-0000-0000-000000000000"
@@ -89,6 +94,16 @@ radius: null                    # DTCG group: border-radius scale (any|null)
 elevation: null                 # DTCG group: shadow / elevation tokens (any|null)
 motion: null                    # DTCG group: durations + easings (any|null).
                                 # Should agree with aesthetic_direction.motion_character.
+state: null                     # DTCG group (added 1.1): interaction states, so
+                                # no screen invents its own hover/focus/disabled
+                                # treatment. Recommended leaves:
+                                #   hover.*           a darken/lighten step or alias
+                                #   active.*          a further step, or a scale
+                                #   disabled.opacity  e.g. 0.6
+                                #   focus.ring_width / ring_offset / ring_color
+                                #                     (>= 2px; ring colour >= 3:1)
+                                #   transition.duration / easing (150-300ms)
+                                # Warned on when absent at design_tokens_version >= 1.1.
 
 # -----------------------------------------------------------------------------
 # contrast_notes — how the palette satisfies the accessibility target inherited
@@ -97,3 +112,22 @@ motion: null                    # DTCG group: durations + easings (any|null).
 # -----------------------------------------------------------------------------
 contrast_notes: null            # string|null, e.g. "text/bg pairs meet WCAG AA
                                 # 4.5:1; danger-on-surface verified at 4.8:1"
+
+# -----------------------------------------------------------------------------
+# contrast_pairs (added 1.1) - the MEASURED half of contrast_notes. Each entry
+# names a foreground/background token pair the UI relies on; design_lint.py
+# resolves aliases, computes the WCAG ratio per theme mode (a token's per-mode
+# value lives in `$extensions.modes.<mode>`), and the validator WARNS on any
+# pair below its minimum. Not a token group: theme compilers ignore it.
+# -----------------------------------------------------------------------------
+contrast_pairs: null            # list of:
+                                #   - fg: "{color.text.primary}"   # token ref or path
+                                #     bg: "{color.surface}"
+                                #     use: text                    # text (4.5) |
+                                #                                  # large_text (3.0) |
+                                #                                  # ui (3.0) | focus (3.0)
+                                #     min: null                    # optional; may only
+                                #                                  # RAISE the bar (7.0 = AAA)
+                                #     mode: null                   # optional; default =
+                                #                                  # every theme mode the
+                                #                                  # pair's tokens define

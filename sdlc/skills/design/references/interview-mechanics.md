@@ -61,9 +61,13 @@ draft-approve loop, scope-completeness sweep, EXIT-mid-flow) lives in
 - **`med`** — batched 2–4 per call. Most token sub-fields, brand fields, motion,
   taxonomy. `⚠ inferred` at position 1.
 - **`high`** — own mini-section, agent drafts → user approves/iterates (cap 3).
-  `aesthetic_direction.style_family` / `mood_keywords` / `requires_custom_assets`;
-  the token `color` / `typography` groups; `assets.style_guide`; the brief
-  `prompt` (critical, see below) / `style_anchors` / `acceptance_criteria`.
+  `aesthetic_direction.direction_options` (the 3–4 spec-card choice that opens
+  theme 2 and fills `style_family` / `mood_keywords` and the committed axes —
+  `aesthetic-direction.md`), `anti_patterns`, `requires_custom_assets`;
+  the token `color` / `typography` / `state` groups; `assets.style_guide`; the
+  brief `prompt` (critical, see below) / `style_anchors` / `acceptance_criteria`.
+  A `med` question the chosen direction's card already answered is confirmed
+  in the theme's summary, not asked again.
   The draft rides inside the approve/iterate `AskUserQuestion` call — the
   recommended option's `preview`, or the question text when `preview` is
   unavailable — never only as chat markdown printed the same turn (the
@@ -74,7 +78,9 @@ draft-approve loop, scope-completeness sweep, EXIT-mid-flow) lives in
   per asset). See `references/asset-pipeline.md` for both state machines.
 
 Within a theme, run all `med` questions first (in 2–4-question batches), then
-each `high`/`critical` question as its own mini-section in file order. Write
+each `high`/`critical` question as its own mini-section in file order. The one
+exception is `direction_options`. It opens theme 2 because its chosen card
+pre-answers most of that theme's `med` questions. Write
 state after each mini-section, exactly like after a batch.
 
 ## Conditional promotions (`required_if`)

@@ -1243,7 +1243,7 @@ def find_recurrence(queue: dict, lesson: dict, threshold: float = SIM_STRONG,
     not one fuzzy bar serving both: an OPEN lesson absorbs a fresh one on the
     score alone, unchanged - a wrong bump there just merges two reports a
     human can still pull apart. A CLOSED lesson (resolved / wontfix /
-    dismissed) is a REOPEN claim and needs the harder, findings.py-style bar
+    dismissed) is a REOPEN claim and needs the harder bar
     too: the score AND an EXACT normalized `where.anchor` match, because a
     wrong fold there corrupts a closed record silently (ledger IMP-221).
     `plugin_root` (ledger IMP-179) lets a same-project resend filed under a

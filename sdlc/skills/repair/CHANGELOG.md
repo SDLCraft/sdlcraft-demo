@@ -7,6 +7,20 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.28 (2026-10-01) — `findings.py plan` no longer hangs when located lists span several stages, and `findings.py add` stamps `recurrence_of` only on content overlap, not a symbol-name match
+
+- `plan` (ledger IMP-242, aicf LSN-131, blocker): `order_waves` made an aggregate wait for another when any of its located paths ranked above any path the other writes. Two aggregates whose located lists spanned several stages therefore each waited for the other, and the unbounded fixpoint never terminated. That covered two disjoint unsplit aggregates as well as the reported split group.
+  - A mutual wait is now ordered upstream-first INSIDE the cycle only, so every acyclic plan orders exactly as before.
+  - The aggregate rank and `_split` share one per-report rank (`located_stage`, else the report's most-upstream located path).
+  - The fixpoint is bounded.
+  - `references/orchestration.md` Order says what a mutual wait costs: a re-stamp when `--stale` marks it re-stamp-only, otherwise a handoff row.
+  - Regression: `_smoke/findings_selftest.py` plan arms, every CLI call under a 30 s timeout. They time out on the pre-fix tree and pin chain order and the acyclic order.
+- `add` (ledger IMP-245, aicf LSN-134): `recurrence_of` was stamped on anchor (symbol or task) + kind alone. 0 of the 6 stamps in aicf's queue repeated the earlier defect.
+  - A stamp now also needs content overlap: max(Jaccard of summary atoms, of summary+evidence atoms) with the anchor's own atoms removed, at least 0.35. Different field_paths veto it, and the best-overlapping prior wins.
+  - A name-only match persists a non-stamping `resembles: FND-NNN` pointer and prints one note. `back-propagation.md` Step 5 reads it as "check whether it repeats", never as a reason to rank re-invoke first. `FINDINGS.schema.yaml` and `validate_findings.py` declare it.
+  - Existing false stamps in consumer queues are left as they are (no unstamp verb).
+  - Regression: `_smoke/findings_selftest.py` recurrence arms (a false pair, a near-copy true pair, a new-run-evidence true pair, the field_path veto, `resembles`).
+
 ## 1.27 (2026-09-29) — Additive mode orders its halves (author and stamp the mint's task, then `--tst` the TSTs the walk edited; `nothing to re-slice` is not a refresh); the fix-wave brief makes git read-only for a worker
 
 - `references/forward-propagation.md` Additive step 3 + SKILL.md Phase 4 mixed-case paragraph (ledger IMP-237): after the mint's realizing task is authored and stamped, re-slice the edited TSTs with `reslice_embeds.py --tst`; `--tst` on the mint is a check and its "nothing to re-slice" is not a provenance refresh; step 4's `--all --check` is the proof. Pinned positionally by `_smoke/additive_stamp_selftest.py`.
