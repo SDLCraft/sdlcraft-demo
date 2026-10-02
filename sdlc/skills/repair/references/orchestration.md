@@ -103,10 +103,13 @@ effective}` records what this run used.
 ```
 
 The session deletes an `inflight/` file the moment it writes that finding's
-resolution; `localize/` and `reports/` stay for the run as its audit trail and
-are pruned by the next run's Phase 1. Workers write only their own file under
-these folders and the artifacts inside their write boundary — never the queue,
-never the state file, never `docs/INDEX.yaml` bare.
+resolution; `localize/` and `reports/` stay for the run as its audit trail,
+are committed with it, and are pruned by the next run's Phase 1. Workers write
+only their own file under these folders and the artifacts inside their write
+boundary — never the queue, never the state file, never `docs/INDEX.yaml` bare.
+A helper script or probe (the session's or a worker's) goes in the system temp
+dir: every file a run leaves inside the project is committed with the run
+(`setup/references/auto-commit.md`).
 
 ## Wave 1 — localize
 
@@ -261,6 +264,7 @@ SNAPSHOT:       <abs path>/.claude/skills-state/sdlc-repair.doctor.json
                 (pairs listed there are held, never stamped, unless answers.yaml marks one re-stamped)
 WRITE BOUNDARY: docs/ARCH__demo-api.yaml, docs/TEST-STRATEGY__demo-api.yaml, docs/TASKS__demo-api.json.
                 Nothing else. Ever. A walk that locates outside it -> STATUS: relocated, edit nothing.
+                A helper script goes in the system temp dir - anything left in the project is committed.
 BREADCRUMB:     <abs path>/inflight/<FND>.json - create before your first write, update after every phase.
 REPORT:         <abs path>/reports/<FND>.report.yaml per finding (shape in orchestration.md) + the capped block.
 DO NOT: write the queue or the state file; run docs_index.py bare; run another skill;

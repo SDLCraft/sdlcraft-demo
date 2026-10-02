@@ -101,7 +101,8 @@ Classify `$ARGUMENTS`:
 
 ### Phase 1 — Resume check
 
-Before doing anything else, check for `.claude/skills-state/sdlc-prd.state.yaml`:
+First run `python .claude/sdlc/autocommit.py begin --skill prd` (absent or older → skip).
+Then check for `.claude/skills-state/sdlc-prd.state.yaml`:
 
 - If it exists with `status: in_progress`, ask: "I found an unfinished
   session from `<last_updated>`. Would you like to **resume**, **restart**
@@ -115,11 +116,10 @@ Before doing anything else, check for `.claude/skills-state/sdlc-prd.state.yaml`
   discard — never resume (the artifact is authoritative for answers, the
   state file for progress).
 - If no state file, continue to Phase 2.
-- If the state file's `skill_version` is older than this file's footer: run
-  the recipe below (`references/edge-cases.md` → "Resume with stale state" —
-  migrate additively, reconcile the theme lists and `last_ids`, then offer
-  resume at position 1) — a version bump never costs the user a completed
-  interview.
+- If the state file's `skill_version` is older than this file's footer: run the
+  recipe below (`references/edge-cases.md` → "Resume with stale state" — migrate
+  additively, reconcile the theme lists and `last_ids`, then offer resume at
+  position 1) — a version bump never costs the user a completed interview.
 
 ### Phase 2 — Scan
 
@@ -706,4 +706,4 @@ The interview is potentially long. Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.23"
+skill_version: "1.24"

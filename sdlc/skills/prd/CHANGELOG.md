@@ -7,6 +7,10 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.24 (2026-10-02) — Phase 1 records the run baseline (`autocommit.py begin`) so the close commit takes every file the run touched
+
+- Phase 1's opening line runs `python .claude/sdlc/autocommit.py begin --skill prd` before the run's first write (helper absent or older → skip). The close commit (setup 1.31) then stages the run delta — every file under the project root changed since — beside the owned set, so a file the run writes outside the helper's table (a script, a worker report) is no longer left uncommitted. Folded into the existing Phase 1 lines; SKILL.md line count unchanged.
+
 ## 1.23 (2026-09-24) — The helper-resolution clause covers every `.claude/sdlc/<helper>.py` the file runs, not `docs_index.py` alone
 
 - `SKILL.md` (ledger IMP-218): the Phase-2 clause reads "every `python .claude/sdlc/<helper>.py …` in this file (`docs_index.py` and the close-phase helpers alike) runs the copy `helper-resolution.md` picks once per run", so a lagging install runs the plugin's `statusboard.py`, `lessons.py` and `autocommit.py` at the close too - a run on a 0.9.16 install had drawn the old statusboard and would have stamped no verdicts. Pinned by `setup/_smoke/helper_resolution_selftest.py` arm 4.

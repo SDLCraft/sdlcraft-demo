@@ -3,21 +3,24 @@
 
 /sdlc:setup asks once whether every skill run should commit its own files at
 close and stores the answer in .claude/sdlc/sdlc-plugin.json under
-`auto_commit` (seeded `off`; a re-run never resets it). Every skill's close
-phase then runs this helper as its last action before the close card:
+`auto_commit` (seeded `off`; a re-run never resets it). Every skill's Phase 1
+runs `begin` before its first write, and its close phase runs `commit` as its
+last action before the close card:
 
+    python .claude/sdlc/autocommit.py begin --skill data
+    ...
     python .claude/sdlc/autocommit.py commit --skill data \\
         --invocation "/sdlc:data --reconcile" \\
         --summary "DATA-MODEL 2.3 reconciled against PRD 1.4"
 
-which, when the mode is `on`, stages ONLY the files that skill owns (its
-artifact and shards, docs/INDEX.yaml, its state file, the findings/lessons
-queues, the statusboard files, the marker; `code` adds the source files its
-ledger and manifest say it wrote, plus the file pins of the units it recorded
-failed and the files an interrupted unit's breadcrumb recorded; every skill
-but `lesson` and `setup` also
-adds the marker's `auto_commit.also` pathspecs, a project-declared standing
-list) and commits them as
+`begin` snapshots `git status` under the project root (the run baseline,
+stored in the git dir, never in the tree). `commit`, when the mode is `on`,
+stages the files that skill owns (its artifact and shards, docs/INDEX.yaml, its
+state file, the findings/lessons queues, the statusboard files, the marker;
+`code` adds the source files its ledger and manifest say it wrote, plus the
+file pins of the units it recorded failed and the files an interrupted unit's
+breadcrumb recorded) PLUS the run delta - every file under the project root
+that changed after `begin`, wherever the run wrote it - and commits them as
 
     <invocation> → <summary>
 
@@ -26,18 +29,21 @@ own colon, and no human types an arrow into a subject, so
 `git log --grep='→'` lists exactly the commits this helper made.
 
 What it never does: `git add -A`, push, amend, rebase, `--no-verify`, an empty
-commit, or any commit while the mode is off. Anything the user had staged
-outside the owned set stays staged and uncommitted (the commit names its
-paths). Hooks run and may refuse. A failure here is never a run failure:
-every reason not to commit is one printed line, and the exit code is 0.
+commit, or any commit while the mode is off. A file that was already changed
+when the run began and that the run did not touch stays where it is; anything
+the user had staged outside the set stays staged and uncommitted (the commit
+names its paths). Hooks run and may refuse. A failure here is never a run
+failure: every reason not to commit is one printed line, and the exit code is 0.
 
 Subcommands:
-    mode [--set on|off] [--also PATH ...]
-                               read or set the stored answer, or replace the
-                               project's standing `also` pathspec list (setup
-                               owns the marker; this never creates one)
+    mode [--set on|off]        read or set the stored answer (setup owns the
+                               marker; this never creates one)
+    begin --skill S            record the run baseline; silent, keeps an
+                               existing one (a resumed run keeps its origin)
     commit --skill S --invocation "..." --summary "..."
-           [--paths P ...] [--trailer "Key: value" ...] [--dry-run]
+           [--checkpoint] [--paths P ...] [--trailer "Key: value" ...] [--dry-run]
+                               --checkpoint keeps the baseline (code's
+                               container boundaries); otherwise it is consumed
 
 Environment: SDLC_AUTO_COMMIT=on|off overrides the stored mode for one
 session or a CI job.
@@ -46,8 +52,7 @@ Exit codes:
     0 — committed, nothing to commit, mode off, or not committed for an
         environmental reason (not a repository, git missing or too old,
         identity unset, a hook refused) — the printed line says which.
-    1 — `mode --set` or `mode --also` refused (unknown value, an unsafe
-        `--also` entry, or no marker: run /sdlc:setup).
+    1 — `mode --set` refused (unknown value, or no marker: run /sdlc:setup).
     2 — usage error.
 """
 
@@ -68,11 +73,13 @@ try:
 except Exception:
     pass
 
-HELPER_VERSION = "3"
+HELPER_VERSION = "4"
 MARKER_REL = Path(".claude/sdlc/sdlc-plugin.json")
 ENV_OVERRIDE = "SDLC_AUTO_COMMIT"
 MODES = ("off", "on")
-DEFAULTS = {"mode": "off", "decided_on": None, "also": []}
+# `also` (IMP-209) is retired: the run baseline commits every file a run
+# writes. A stored list is left in the marker untouched and never read.
+DEFAULTS = {"mode": "off", "decided_on": None}
 SEPARATOR = " → "
 MIN_GIT = (2, 25)  # --pathspec-from-file on `git add` and `git commit`
 MODE_CMD = "python .claude/sdlc/autocommit.py mode"
@@ -105,11 +112,18 @@ OWN = {
     "code": ("docs/CODE-MANIFEST.json", STATE + "/sdlc-code/inflight",
              STATE + "/sdlc-code/stuck"),
     # repair edits whichever artifact holds the defect and re-slices the task
-    # shards, so its set is every artifact; never code's ledger.
-    "repair": ("docs", STATE + "/sdlc-repair.doctor.json"),
+    # shards, so without a baseline its set is every artifact (BROAD); never
+    # code's ledger. Its run tree holds the workers' reports and breadcrumbs.
+    "repair": ("docs", STATE + "/sdlc-repair.doctor.json", STATE + "/sdlc-repair"),
 }
+# Owned entries that stand in for a baseline the run did not record: with one,
+# the run delta names exactly the artifacts the run edited, so the broad sweep
+# (which would also take a hand edit to an artifact the run never touched) is
+# dropped.
+BROAD = {"repair": ("docs",)}
 # The run's own regenerable caches under code's state dir: ignored, not staged.
 CACHE_DIRS = ("packets", "stack")
+_GLOB_CHARS = "*?["
 CODE_DIR = STATE + "/sdlc-code"
 # Skills whose set is EXACTLY this - no COMMON, no `sdlc-<skill>.state.yaml`.
 # `lesson` is model-invocable in an ambient session, so it must never sweep a
@@ -185,11 +199,11 @@ def write_auto_commit(root: Path, updates: dict) -> bool:
 # git plumbing - every call tolerant, every exit code read explicitly
 # ---------------------------------------------------------------------------
 
-def _git(cwd, *args: str):
+def _git(cwd, *args: str, stdin: "str | None" = None):
     """A CompletedProcess, or None when git itself cannot be started."""
     try:
         return subprocess.run(
-            ["git", *args], cwd=str(cwd) if cwd else None,
+            ["git", *args], cwd=str(cwd) if cwd else None, input=stdin,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
     except OSError:
@@ -340,7 +354,7 @@ def _failed_unit_files(root: Path, ledger_text: str) -> "list[str]":
                 if not isinstance(pin, str) or not pin.strip():
                     continue
                 pin = _strip_dot_slash(pin.strip().replace("\\", "/"))
-                if (pin.endswith("/") or any(c in pin for c in _ALSO_GLOB_CHARS)
+                if (pin.endswith("/") or any(c in pin for c in _GLOB_CHARS)
                         or (root / pin).is_dir()):
                     continue
                 out.append(pin)
@@ -385,11 +399,13 @@ def code_generated_files(root: Path) -> "list[str]":
     return clean
 
 
-def owned_pathspecs(skill: str, root: Path, extra: "list[str]") -> "list[str]":
+def owned_pathspecs(skill: str, root: Path, extra: "list[str]", has_baseline: bool = False) -> "list[str]":
     if skill in EXACT:
         specs = list(EXACT[skill])
     else:
-        specs = list(COMMON) + [STATE + f"/sdlc-{skill}.state.yaml"] + list(OWN.get(skill, ()))
+        drop = BROAD.get(skill, ()) if has_baseline else ()
+        specs = (list(COMMON) + [STATE + f"/sdlc-{skill}.state.yaml"]
+                 + [s for s in OWN.get(skill, ()) if s not in drop])
         if skill == "code":
             specs += code_generated_files(root)
     specs += [Path(p).as_posix() for p in extra]
@@ -401,65 +417,107 @@ def owned_pathspecs(skill: str, root: Path, extra: "list[str]") -> "list[str]":
 
 
 # ---------------------------------------------------------------------------
-# auto_commit.also - a project-declared standing pathspec list (IMP-209)
+# the run baseline - every file the run touched, wherever it wrote it
 # ---------------------------------------------------------------------------
 
-_ALSO_GLOB_CHARS = "*?["
+# Hashing is one `git hash-object --stdin-paths` call; past the cap a dirty
+# path is recorded unhashed and read as "untouched" (left out) - a project
+# with that many dirty files has a tree no run should sweep.
+BASELINE_CAP = 20000
 
 
-def _also_refuse_reason(entry: str) -> "str | None":
-    """Why `entry` cannot be a project-declared `auto_commit.also` pathspec,
-    or None when it is a plain repo-relative literal path.
-
-    ONE predicate, applied both at write time (`mode --also` refuses and
-    writes nothing, naming the entry) and at read time (`_also_pathspecs`
-    drops the entry and counts it, so a hand-edited marker never fails a
-    whole commit over one bad entry). The `also` list is additive to the
-    fixed COMMON/OWN/EXACT tables, never a replacement for them, so it may
-    not reach into a tree those tables already own.
-    """
-    if not isinstance(entry, str) or not entry.strip():
-        return "is empty"
-    if entry == ".":
-        return "is '.'"
-    if entry.startswith(":"):
-        return "starts with ':' (a git pathspec magic prefix)"
-    if any(c in entry for c in _ALSO_GLOB_CHARS):
-        return f"contains a glob character (one of {_ALSO_GLOB_CHARS})"
-    if entry.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:[\\/]", entry) or Path(entry).is_absolute():
-        return "is an absolute path"
-    if ".." in Path(entry).as_posix().split("/"):
-        return "contains a '..' segment"
-    posix = Path(entry).as_posix()
-    if posix == "docs" or posix.startswith("docs/"):
-        return "is under docs/ (the pipeline's own tables already own that tree)"
-    if posix == STATE or posix.startswith(STATE + "/"):
-        return f"is under {STATE}/ (the pipeline's own tables already own that tree)"
-    return None
+def _root_spec(prefix: str) -> str:
+    """The project root as ONE literal pathspec - a `[` in a directory name is
+    never read as a glob class matching sibling directories."""
+    return f":(literal){prefix.rstrip('/')}" if prefix else "."
 
 
-def _also_pathspecs(skill: str, cfg: dict) -> "tuple[list[str], int]":
-    """The project's `auto_commit.also` list, filtered to safe entries -
-    `(valid, dropped_count)`. Anything not a list is treated as empty.
+def baseline_path(toplevel: Path, skill: str) -> "Path | None":
+    """Inside the git dir (`.git/sdlc/baseline-<skill>.json`): never tracked,
+    never in `git status`, per worktree, no .gitignore needed."""
+    p = _git(toplevel, "rev-parse", "--git-path", f"sdlc/baseline-{skill}.json")
+    if p is None or p.returncode != 0 or not p.stdout.strip():
+        return None
+    rel = Path(p.stdout.strip())
+    return rel if rel.is_absolute() else toplevel / rel
 
-    Never applied to `lesson` or `setup` (EXACT): `lesson` is model-invocable
-    in an ambient session and must never sweep a hand edit outside its own
-    queue; `setup`'s EXACT-ness is about install ownership, not a project's
-    own convention files.
-    """
-    if skill in EXACT:
-        return [], 0
-    also = cfg.get("also")
-    if not isinstance(also, list):
-        return [], 0
-    valid: "list[str]" = []
-    dropped = 0
-    for entry in also:
-        if isinstance(entry, str) and _also_refuse_reason(entry) is None:
-            valid.append(entry)
+
+def _hashes(toplevel: Path, paths: "list[str]") -> "dict[str, str | None]":
+    """path -> blob hash, "deleted" when absent, None when not hashed."""
+    out: "dict[str, str | None]" = {}
+    present: "list[str]" = []
+    for p in paths:
+        f = toplevel / p
+        if not f.exists():
+            out[p] = "deleted"
+        elif f.is_file() and len(present) < BASELINE_CAP:
+            present.append(p)
         else:
-            dropped += 1
-    return valid, dropped
+            out[p] = None
+    if present:
+        r = _git(toplevel, "hash-object", "--no-filters", "--stdin-paths", stdin="\n".join(present) + "\n")
+        got = r.stdout.split() if r is not None and r.returncode == 0 else []
+        for p, h in zip(present, got if len(got) == len(present) else [None] * len(present)):
+            out[p] = h
+    return out
+
+
+def _is_cache(path: str, prefix: str) -> bool:
+    return any(path.startswith(f"{prefix}{CODE_DIR}/{d}/") for d in CACHE_DIRS)
+
+
+def record_baseline(root: Path, skill: str) -> None:
+    """`begin`: snapshot every changed or untracked file under the project root.
+    An existing baseline is kept - one only survives a run that died before its
+    close commit, so a resumed run keeps the snapshot it started from."""
+    if auto_commit_config(root)["mode"] != "on":
+        return
+    ver = git_version()
+    if ver is None or ver < MIN_GIT:
+        return
+    toplevel = git_toplevel(root)
+    if toplevel is None:
+        return
+    bp = baseline_path(toplevel, skill)
+    if bp is None or bp.exists():
+        return
+    prefix = _prefix(root, toplevel)
+    entries = _status_entries(toplevel, [_root_spec(prefix)])
+    if entries is None:
+        return
+    paths = [path for _code, path in entries]
+    snap = {"skill": skill, "helper_version": HELPER_VERSION, "prefix": prefix,
+            "paths": _hashes(toplevel, paths)}
+    try:
+        bp.parent.mkdir(parents=True, exist_ok=True)
+        bp.write_text(json.dumps(snap, indent=1) + "\n", encoding="utf-8", newline="\n")
+    except OSError:
+        pass
+
+
+def read_baseline(bp: "Path | None") -> "dict[str, str | None] | None":
+    if bp is None:
+        return None
+    try:
+        data = json.loads(bp.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    paths = data.get("paths") if isinstance(data, dict) else None
+    return paths if isinstance(paths, dict) else None
+
+
+def run_delta(toplevel: Path, prefix: str, baseline: "dict[str, str | None]") -> "list[str] | None":
+    """Every file under the project root the run touched: changed now and
+    clean when the run began, or changed when it began and changed again since
+    (its content differs from the snapshot). Gitignored files never appear;
+    code's regenerable caches are skipped even without their .gitignore."""
+    entries = _status_entries(toplevel, [_root_spec(prefix)])
+    if entries is None:
+        return None
+    fresh = [p for _c, p in entries if not _is_cache(p, prefix)]
+    again = [p for p in fresh if p in baseline and baseline[p] is not None]
+    now = _hashes(toplevel, again)
+    return [p for p in fresh if p not in baseline or (p in now and now[p] is not None and now[p] != baseline[p])]
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +530,7 @@ def _pathspec_file(paths: "list[str]") -> str:
     `:(literal)`-prefixed - otherwise `git add`/`git commit
     --pathspec-from-file` would re-parse a filename that itself contains a
     pathspec-magic character (`*`, `?`, `[`; possible via a bracketed
-    subdirectory, or an `also` entry whose OWN name is clean but whose
+    subdirectory, or a delta file whose OWN name is clean but whose
     project-root prefix is not) as a glob, matching sibling files it must
     not touch."""
     f = tempfile.NamedTemporaryFile("wb", suffix=".pathspec", delete=False)
@@ -560,8 +618,29 @@ def _cache_remedy(tracked: "list[str]") -> str:
             f"untrack once: git rm -r --cached {cmd}")
 
 
+def cmd_begin(args) -> int:
+    record_baseline(Path(args.project_root).resolve(), args.skill)
+    return 0
+
+
 def cmd_commit(args) -> int:
+    """Commit, then consume the run baseline - the run closed, whatever the
+    outcome - unless this is a mid-run `--checkpoint` or a `--dry-run`."""
     root = Path(args.project_root).resolve()
+    try:
+        return _commit(args, root)
+    finally:
+        if not (args.checkpoint or args.dry_run):
+            top = git_toplevel(root) if git_version() is not None else None
+            bp = baseline_path(top, args.skill) if top is not None else None
+            if bp is not None:
+                try:
+                    bp.unlink()
+                except OSError:
+                    pass
+
+
+def _commit(args, root: Path) -> int:
     invocation = " ".join(args.invocation.split())
     summary = " ".join(args.summary.split())
 
@@ -593,20 +672,19 @@ def cmd_commit(args) -> int:
         return 0
 
     prefix = _prefix(root, toplevel)
-    also_paths, dropped_also = _also_pathspecs(args.skill, cfg)
-    if dropped_also:
-        note += (f" · ignored {dropped_also} auto_commit.also "
-                 f"entr{'y' if dropped_also == 1 else 'ies'} outside the project")
-    specs = [prefix + s for s in owned_pathspecs(args.skill, root, args.paths or [])]
-    # `:(literal)` goes at the very start of the pathspec token, BEFORE the
-    # subdirectory prefix is joined into the path part - git's magic prefix
-    # is only recognised there, so `prefix + ":(literal)" + entry` would not
-    # disable glob interpretation at all.
-    specs += [f":(literal){prefix}{entry}" for entry in also_paths]
+    baseline = read_baseline(baseline_path(toplevel, args.skill))
+    specs = [prefix + s for s in owned_pathspecs(args.skill, root, args.paths or [],
+                                                  has_baseline=baseline is not None)]
     files = _status_paths(toplevel, specs)
-    if files is None:
+    delta = run_delta(toplevel, prefix, baseline) if baseline is not None else []
+    if files is None or delta is None:
         print("[DRAFT] not committed - git status failed. Nothing is lost: the files are on disk.")
         return 0
+    pipeline_dirs = (prefix + "docs/", prefix + ".claude/")
+    elsewhere = [p for p in delta if p not in files and not p.startswith(pipeline_dirs)]
+    files += [p for p in delta if p not in files]
+    if elsewhere:
+        note = f" · {len(elsewhere)} file(s) outside docs/ and .claude/" + note
     if not files:
         print(f"[OK] nothing to commit - {invocation} changed no file the pipeline owns{note}")
         return 0
@@ -663,52 +741,32 @@ def cmd_mode(args) -> int:
     root = Path(args.project_root).resolve()
     cfg = auto_commit_config(root)
 
-    # Neither --set nor --also given: read-only, print mode + the also list.
-    if args.set is None and args.also is None:
+    if args.also is not None:
+        print("[OK] auto_commit.also is retired - every file a run writes is now committed by "
+              "the run baseline. Nothing written.")
+        if args.set is None:
+            return 0
+
+    # No --set: read-only, print the mode.
+    if args.set is None:
         decided = f" (decided {cfg['decided_on']})" if cfg.get("decided_on") else ""
         print(f"[OK] auto-commit is {cfg['mode']!r} for this project{decided}.")
         env = os.environ.get(ENV_OVERRIDE)
         if env in MODES:
             print(f"      {ENV_OVERRIDE}={env} in this environment is overriding whatever the marker says.")
         print(f"      {repo_status_line(root)}")
-        also = cfg.get("also") if isinstance(cfg.get("also"), list) else []
-        print(f"      also: {', '.join(also) if also else '(none)'}")
         print(f"\nNEXT: change it with: {MODE_CMD} --set on|off")
         return 0
 
-    # --also given (even with no values, which clears the list) validates and
-    # replaces the stored list; --set given validates and replaces the mode.
-    # Both may be given in one call; either refusal writes NOTHING at all.
-    updates: dict = {}
-    if args.also is not None:
-        for entry in args.also:
-            reason = _also_refuse_reason(entry)
-            if reason:
-                print(f"[FAIL] --also {entry!r} {reason} - nothing written.")
-                return 1
-        updates["also"] = list(args.also)
-
-    if args.set is not None:
-        if args.set not in MODES:
-            print(f"[FAIL] {args.set!r} is not one of {'|'.join(MODES)}.")
-            return 1
-        updates["mode"] = args.set
-        updates["decided_on"] = _iso_today()
-
-    if not write_auto_commit(root, updates):
+    if args.set not in MODES:
+        print(f"[FAIL] {args.set!r} is not one of {'|'.join(MODES)}.")
+        return 1
+    if not write_auto_commit(root, {"mode": args.set, "decided_on": _iso_today()}):
         print(f"[FAIL] no .claude/sdlc/sdlc-plugin.json in {root} - run /sdlc:setup first; "
               f"it owns that file.")
         return 1
-
-    lines: "list[str]" = []
-    if "mode" in updates:
-        lines.append("auto-commit is on. Every /sdlc:* run now commits its own files when it closes."
-                     if args.set == "on" else "auto-commit is off. Nothing is committed on its own.")
-    if "also" in updates:
-        lines.append(f"also: {', '.join(updates['also'])} will be committed alongside every skill's "
-                     "own files (never lesson's or setup's)."
-                     if updates["also"] else "also: cleared - no extra files.")
-    print("[OK] " + " ".join(lines))
+    print("[OK] " + ("auto-commit is on. Every /sdlc:* run now commits its own files when it closes."
+                     if args.set == "on" else "auto-commit is off. Nothing is committed on its own."))
     print("\nNEXT: nothing to run - this takes effect at the next skill close.")
     return 0
 
@@ -727,11 +785,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("mode", help="Read or set auto-commit (on|off).")
     p.add_argument("--set", default=None, metavar="MODE", help="on (commit at every skill close) or off.")
     p.add_argument("--also", nargs="*", action="extend", default=None, metavar="PATH",
-                   help="Replace the project's standing pathspec list - extra files committed "
-                        "alongside every skill's own set (never lesson's or setup's). No values "
-                        "clears it. Each PATH is a repo-relative literal file, no globs.")
+                   help=argparse.SUPPRESS)  # retired; answered with one line
     p.add_argument("--project-root", default=".", help="Project root (default: cwd).")
     p.set_defaults(func=cmd_mode)
+
+    p = sub.add_parser("begin", help="Record the run baseline (Phase 1, before the run's first write).")
+    p.add_argument("--skill", required=True, help="The running skill: prd, ux, ..., code, repair, lesson, setup.")
+    p.add_argument("--project-root", default=".", help="Project root (default: cwd).")
+    p.set_defaults(func=cmd_begin)
 
     p = sub.add_parser("commit", help="Commit this run's own files, if the project opted in.")
     p.add_argument("--skill", required=True, help="The running skill: prd, ux, ..., code, repair, lesson, setup.")
@@ -741,6 +802,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Extra files or directories this run wrote outside the skill's own set.")
     p.add_argument("--trailer", action="append", default=[], metavar="'Key: value'",
                    help="A trailer line for the message (repeatable), e.g. an attribution line.")
+    p.add_argument("--checkpoint", action="store_true",
+                   help="A mid-run commit (code's container boundary): keep the run baseline.")
     p.add_argument("--dry-run", action="store_true", help="Print what would be committed; write nothing.")
     p.add_argument("--project-root", default=".", help="Project root (default: cwd).")
     p.set_defaults(func=cmd_commit)

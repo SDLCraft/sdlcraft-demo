@@ -1,7 +1,7 @@
 # Committing the run: the auto-commit close step
 
-Canonical for CLAUDE.md 20. Every skill's close phase runs the step below and
-points here; nothing restates it.
+Canonical for CLAUDE.md 20. Every skill's Phase 1 records the run baseline and
+its close phase runs the commit below, pointing here; nothing restates it.
 
 ## The setting
 
@@ -12,28 +12,28 @@ the user answered). A re-run of `setup` carries the block forward verbatim. No
 other skill ever asks the question: a skill reads the answer through the helper
 and does what it says.
 
-- `python .claude/sdlc/autocommit.py mode` prints the current mode, the
-  project's `also` list, and whether the project is a git repository;
-  `mode --set on|off` changes the mode.
-- `mode --also <path> [<path> ...]` replaces (never merges into) the
-  project's standing pathspec list — extra files committed alongside every
-  skill's own set (never `lesson`'s or `setup`'s; see "What is staged"
-  below). Bare `mode --also` with no values clears it. Each `<path>` must be
-  a repo-relative **literal** file: no glob characters (`*`, `?`, `[`), no
-  leading `:`, no absolute path, no `..` segment, and nothing under `docs/`
-  or `.claude/skills-state/` (the pipeline's own tables already own those
-  trees) — a call naming a refused path writes nothing and names the entry.
-  A marker hand-edited to carry a refused entry anyway is not fatal: the
-  entry is silently dropped and counted (` · ignored N auto_commit.also
-  entr(ies) outside the project`) rather than failing the whole commit. Each
-  surviving entry is staged as a literal git pathspec
-  (`:(literal)<entry>`), never interpreted as a glob.
+- `python .claude/sdlc/autocommit.py mode` prints the current mode and
+  whether the project is a git repository; `mode --set on|off` changes it.
+  (The former `mode --also` standing list is retired — the run baseline
+  commits every file a run writes. The command answers with one line, and a
+  stored list is left in the marker, unread.)
 - `SDLC_AUTO_COMMIT=on|off` in the environment overrides the stored mode for
   one session or a CI job.
 - Helper absent (the project never ran `/sdlc:setup`, or ran an older one):
   skip the step silently. There is nothing to read and nothing to commit.
 
 ## When
+
+**Phase 1, before the run's first write:**
+`python .claude/sdlc/autocommit.py begin --skill <skill>` records the run
+baseline — a snapshot of every changed or untracked file under the project
+root, kept in the git dir (`.git/sdlc/baseline-<skill>.json`), so it is never
+tracked and never shows in `git status`. It prints nothing, does nothing while
+the mode is off, and keeps an existing baseline: one only survives a run that
+died before its close commit, so a resumed run keeps the snapshot it started
+from. Helper absent, or an older one that refuses `begin` → skip. `setup`
+calls its own copy (`"${CLAUDE_SKILL_DIR}/autocommit.py"`), since the
+installed one may not exist yet.
 
 The commit is the **last action** of the close phase, on **every exit path**:
 after the state file is set `complete` or `aborted`, after the findings drain
@@ -44,8 +44,10 @@ and the summary says it is a draft.
 
 `code` runs it once more at every **container boundary** a bare run continues
 past — after that container's ring, doctor check and ledger write, before the
-continue/stop gate — so a run that builds three containers leaves three
-reviewable commits and a close that usually has nothing left to commit.
+continue/stop gate — with `--checkpoint`, which keeps the baseline for the
+rest of the run, so a run that builds three containers leaves three
+reviewable commits and a close that usually has nothing left to commit. Every
+other commit consumes the baseline: the run is over, whatever the outcome.
 
 ```bash
 python .claude/sdlc/autocommit.py commit --skill <skill> \
@@ -110,28 +112,40 @@ welcome when the reader can act on them. Examples, one per form:
 
 ## What is staged
 
-Only the files the running skill owns — never a blanket sweep of `docs/`, and
-never `git add -A`. The helper carries the table; `--paths` adds a file a run
-wrote outside it; the marker's `auto_commit.also` list (`mode --also`, above)
-adds a project-declared standing file, honoured by every skill in the table
-below **except `lesson` and `setup`** — a narrow, project-opt-in exception to
-"never a sweep", not a reversal of it: the list is explicit, per-file, and the
-project itself wrote it, unlike a sweep of whatever `git status` happens to
-show.
+Two sets, never `git add -A`:
+
+1. **The run delta** — every file under the project root that changed after
+   `begin`: one the run created or edited anywhere (an artifact, a worker
+   report, a script under a scratch folder), including a file that was already
+   changed when the run began and that the run changed again. A file that was
+   already changed and that the run did not touch stays where it is — a hand
+   edit made before the run never rides in its commit. Code's regenerable
+   caches (below) are never part of it. This is what makes "every file the run
+   touched" hold without a list anyone has to maintain.
+2. **The skill's own files** — the table below, committed even without a
+   baseline (a run that started under an older helper, or whose `begin` was
+   skipped): its artifact and its state, plus what an interrupted earlier
+   session of the same run wrote. `repair`'s broad `docs/` entry applies only
+   without a baseline; with one, the delta names exactly the artifacts it
+   edited.
+
+**Scratch goes in the system temp dir.** Everything a run leaves inside the
+project is committed with it, so a probe, a scratch copy or a one-off script
+that should not enter the history never lands in the tree.
 
 | Skill | Its own files, plus the common set |
 |---|---|
-| every artifact skill | its artifact and shards (`docs/API.yaml` + `docs/API__*.yaml`, …), `docs/INDEX.yaml`, `.claude/skills-state/sdlc-<skill>.state.yaml`, the findings and lessons queues, `.claude/rules/sdlc-statusboard.md`, `.claude/sdlc/STATUS.md`, the marker, the `auto_commit.also` list |
+| every artifact skill | its artifact and shards (`docs/API.yaml` + `docs/API__*.yaml`, …), `docs/INDEX.yaml`, `.claude/skills-state/sdlc-<skill>.state.yaml`, the findings and lessons queues, `.claude/rules/sdlc-statusboard.md`, `.claude/sdlc/STATUS.md`, the marker |
 | `arch` | also `.claude/skills-state/sdlc-arch.derivation-report-*.yaml` |
-| `code` | `docs/CODE-MANIFEST.json`, the ledger, `sdlc-code/inflight/` and `stuck/`, every generated file the ledger's `files_written` and the manifest name, the file pins (`target_files`) of the units the ledger records `failed` — joined from the TASKS shard, a directory pin skipped — and the `files_written` an interrupted unit's breadcrumb recorded; never `packets/` or `stack/` (regenerable caches, ignored by the `sdlc-code/.gitignore` that `topo_order.py --emit` ensures, and never counted as someone else's edit; a project that had committed them gets one printed `git rm -r --cached` line, which the helper never runs); the `auto_commit.also` list |
-| `repair` | every artifact under `docs/` (it edits whichever holds the defect and re-slices task shards), its state file and doctor report — never `code`'s ledger; the `auto_commit.also` list |
-| `lesson` | only the lessons queue and the marker — it is model-invocable in ambient sessions and must never sweep a hand edit; **never** the `auto_commit.also` list, for the same reason |
-| `setup` | `.claude/sdlc/`, `.claude/rules/sdlc-*.md`, `docs/INDEX.yaml`, the lessons queue, `CLAUDE.md`, `.claude/settings.json` — **never** the `auto_commit.also` list: `setup`'s EXACT-ness is about install ownership, not project convention files |
+| `code` | `docs/CODE-MANIFEST.json`, the ledger, `sdlc-code/inflight/` and `stuck/`, every generated file the ledger's `files_written` and the manifest name, the file pins (`target_files`) of the units the ledger records `failed` — joined from the TASKS shard, a directory pin skipped — and the `files_written` an interrupted unit's breadcrumb recorded; never `packets/` or `stack/` (regenerable caches, ignored by the `sdlc-code/.gitignore` that `topo_order.py --emit` ensures, and never counted as someone else's edit; a project that had committed them gets one printed `git rm -r --cached` line, which the helper never runs) |
+| `repair` | its state file, doctor report and run tree `.claude/skills-state/sdlc-repair/` (the workers' localize and fix reports — a report the next run's Phase 1 prunes is committed as a deletion); without a baseline, every artifact under `docs/` — never `code`'s ledger |
+| `lesson` | only the lessons queue and the marker — it is model-invocable in ambient sessions, and its baseline is taken at its own start, so an edit the session made before it never rides along |
+| `setup` | `.claude/sdlc/`, `.claude/rules/sdlc-*.md`, `docs/INDEX.yaml`, the lessons queue, `CLAUDE.md`, `.claude/settings.json` |
 
 A gitignored path is never added (the helper asks `git status`, which never
-lists ignored files). A file the user had staged outside the set stays staged
-and uncommitted. A hand edit to another artifact is left where it is and
-counted on the printed line.
+lists ignored files). A file the user had staged outside both sets stays
+staged and uncommitted. A hand edit to an artifact the run did not touch is
+left where it is and counted on the printed line.
 
 ## Outcomes → the `Commit:` row
 
@@ -144,6 +158,7 @@ The helper prints exactly one line. Put it, in the user's words, on the card:
 | `[OK] auto-commit is off …` | no row (the project chose not to) |
 | `[DRAFT] not committed - <reason>. Nothing is lost: …` | `Commit:    not committed - <reason>; N files staged, commit by hand` and one `Attention:` clause |
 | helper absent | no row |
+| ` · N file(s) outside docs/ and .claude/` suffix | add it to the row: the run wrote files beyond the pipeline's own trees (a script, a note) and they are in the commit |
 | ` · N other pipeline file(s) … left uncommitted` suffix | add it to the row: the user should know a hand edit is sitting there |
 
 A `[DRAFT]` here is a fact about the environment (no identity configured, a

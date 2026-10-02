@@ -128,7 +128,8 @@ Classify `$ARGUMENTS`:
 
 ### Phase 1 — Resume check
 
-Before anything else, check `.claude/skills-state/sdlc-design.state.yaml`:
+First run `python .claude/sdlc/autocommit.py begin --skill design` (absent or older → skip).
+Then check `.claude/skills-state/sdlc-design.state.yaml`:
 
 - `status: in_progress` → ask: *"I found an unfinished design session from
   `<last_updated>`. Resume, restart (discard previous answers), or discard
@@ -144,11 +145,10 @@ Before anything else, check `.claude/skills-state/sdlc-design.state.yaml`:
   `partial_answers` survives: offer restart-from-partial_answers or
   discard — never resume.
 - No state file → continue to Phase 2.
-- If the state file's `skill_version` is older than this file's footer: run
-  the canonical recipe
-  (`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` → "Resume with
-  stale state" — migrate additively, reconcile the theme lists and
-  `last_ids`, then offer resume at position 1).
+- If the state file's `skill_version` is older than this file's footer: run the
+  canonical recipe (`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` →
+  "Resume with stale state" — migrate additively, reconcile the theme lists
+  and `last_ids`, then offer resume at position 1).
 
 ### Phase 2 — Scan inputs
 
@@ -653,4 +653,4 @@ wasn't measured. The full stance and how it sounds: `references/designer-stance.
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.17"
+skill_version: "1.18"

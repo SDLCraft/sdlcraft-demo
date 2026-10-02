@@ -7,6 +7,10 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.18 (2026-10-02) — Phase 1 records the run baseline (`autocommit.py begin`) so the close commit takes every file the run touched
+
+- Phase 1's opening line runs `python .claude/sdlc/autocommit.py begin --skill design` before the run's first write (helper absent or older → skip). The close commit (setup 1.31) then stages the run delta — every file under the project root changed since — beside the owned set, so a file the run writes outside the helper's table (a script, a worker report) is no longer left uncommitted. Folded into the existing Phase 1 lines; SKILL.md line count unchanged.
+
 ## 1.17 (2026-10-01) — The agent works as a designer: at least three directions with a stated pick, every visual axis committed, measured contrast, and a pre-write self-review
 
 Adapted (ideas, not text) from the Claude Design system prompt

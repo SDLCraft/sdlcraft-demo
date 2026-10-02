@@ -305,7 +305,8 @@ relevant phase under **System themes** / **Container themes**.
 
 ### Phase 1 — Resume check
 
-Check for `.claude/skills-state/sdlc-arch.state.yaml`:
+First run `python .claude/sdlc/autocommit.py begin --skill arch` (absent or older → skip).
+Then check for `.claude/skills-state/sdlc-arch.state.yaml`:
 
 - If it exists with `status: in_progress` and the same **mode** as the
   current invocation (and, for container mode, the same `container_id`),
@@ -332,11 +333,10 @@ Check for `.claude/skills-state/sdlc-arch.state.yaml`:
   only `partial_answers` survives: offer restart-from-partial_answers or
   discard — never resume.
 - If no state file, continue to Phase 2.
-- If the state file's `skill_version` is older than this file's footer: run
-  the canonical recipe
-  (`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` → "Resume with
-  stale state" — migrate additively, reconcile the theme lists and
-  `last_ids`, then offer resume at position 1).
+- If the state file's `skill_version` is older than this file's footer: run the
+  canonical recipe (`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` →
+  "Resume with stale state" — migrate additively, reconcile the theme lists
+  and `last_ids`, then offer resume at position 1).
 
 ### Phase 2 — Scan inputs
 
@@ -1216,4 +1216,4 @@ The architecture interview can be long. Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.25"
+skill_version: "1.26"

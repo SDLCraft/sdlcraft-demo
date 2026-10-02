@@ -59,6 +59,8 @@ honoured — record, then hand straight back to the interrupted run.
 
 ### 1 — Find the episode
 
+First run `python .claude/sdlc/autocommit.py begin --skill lesson` (absent or older → skip).
+
 The lesson is almost always about what just happened. Gather, without asking
 the user anything yet:
 
@@ -185,4 +187,4 @@ defect is an `LSN-NNN`, and all of them surface, generated, in
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.19"
+skill_version: "1.20"

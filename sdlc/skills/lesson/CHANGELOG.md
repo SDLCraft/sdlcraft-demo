@@ -7,6 +7,10 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.20 (2026-10-02) — Phase 1 records the run baseline (`autocommit.py begin`) so the close commit takes every file the run touched
+
+- Phase 1's opening line runs `python .claude/sdlc/autocommit.py begin --skill lesson` before the run's first write (helper absent or older → skip). The close commit (setup 1.31) then stages the run delta — every file under the project root changed since — beside the owned set, so a file the run writes outside the helper's table (a script, a worker report) is no longer left uncommitted. Folded into the existing Phase 1 lines; SKILL.md line count unchanged.
+
 ## 1.19 (2026-09-26) — A closed lesson absorbs a new report only on an exact anchor with related content; a near miss is recorded new with a typed `resembles` pointer; every recurrence records the version it happened at
 
 - `lessons.py` `find_recurrence` (ledger IMP-221, aicf LSN-120: a new observation merged into the fixed LSN-053 on a 50% anchor match): an OPEN lesson still absorbs a repeat on the fuzzy score alone; a CLOSED one (resolved / wontfix / dismissed) only on an exact normalized `where.anchor` AND content (detail + summary, anchor excluded) reaching the propose bar - an exact coarse anchor alone already clears the strong bar. A merge into a closed lesson prints "this reopens LSN-NNN - fixed in X by IMP-NNN"; a near miss is recorded as a new lesson carrying `resembles: {lsn_id, imp_id, fixed_in}` and a printed note, and the collector lists it among the REOPEN candidates. Pinned by `_smoke/lessons_selftest.py` (recurrence-merge arms, including the coarse-anchor case).

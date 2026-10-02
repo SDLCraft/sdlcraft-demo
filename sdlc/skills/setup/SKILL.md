@@ -87,6 +87,8 @@ have the sdlc plugin installed, and the toolchain upgrades only when
 ## Workflow
 
 ### 1 — Confirm this is the right moment
+First run `python "${CLAUDE_SKILL_DIR}/autocommit.py" begin --skill setup` (the
+plugin's own copy: the installed one may not exist yet).
 `sdlc:setup` is a project bootstrap step. Briefly confirm the project root is
 the current working directory (where `docs/` will live). If a `docs/INDEX.yaml`
 and the hook already exist, tell the user it's already wired and a re-run will
@@ -357,4 +359,4 @@ versions, and refreshes the index. Use `--dry-run` to preview.
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.30"
+skill_version: "1.31"

@@ -127,7 +127,8 @@ Classify `$ARGUMENTS`:
 
 ### Phase 1 — Resume check
 
-Before doing anything else, check for `.claude/skills-state/sdlc-data.state.yaml`:
+First run `python .claude/sdlc/autocommit.py begin --skill data` (absent or older → skip).
+Then check for `.claude/skills-state/sdlc-data.state.yaml`:
 
 - If it exists with `status: in_progress`, ask:
   > "I found an unfinished `sdlc:data` session from `<last_updated>`. Would
@@ -142,11 +143,10 @@ Before doing anything else, check for `.claude/skills-state/sdlc-data.state.yaml
   only `partial_answers` survives: offer restart-from-partial_answers or
   discard — never resume.
 - If no state file, continue to Phase 2.
-- If the state file's `skill_version` is older than this file's footer: run
-  the canonical recipe
-  (`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` → "Resume with
-  stale state" — migrate additively, reconcile the theme lists and
-  `last_ids`, then offer resume at position 1).
+- If the state file's `skill_version` is older than this file's footer: run the
+  canonical recipe (`${CLAUDE_SKILL_DIR}/../prd/references/edge-cases.md` →
+  "Resume with stale state" — migrate additively, reconcile the theme lists
+  and `last_ids`, then offer resume at position 1).
 
 ### Phase 2 — Scan inputs
 
@@ -931,4 +931,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.22"
+skill_version: "1.23"

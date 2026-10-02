@@ -108,8 +108,8 @@ Classify `$ARGUMENTS`:
 
 ### Phase 1 — Resume check
 
-Before doing anything else, check for
-`.claude/skills-state/sdlc-ux.state.yaml`:
+First run `python .claude/sdlc/autocommit.py begin --skill ux` (absent or older → skip).
+Then check for `.claude/skills-state/sdlc-ux.state.yaml`:
 
 - If it exists with `status: in_progress`, ask:
   > "I found an unfinished UX session from `<last_updated>`. Would you
@@ -789,4 +789,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.27"
+skill_version: "1.28"

@@ -56,7 +56,7 @@ the real defect stays in ARCH or PRD, invisible, waiting.
   Written only through `findings.py` and the Phase-6 resolution write.
 - `.claude/skills-state/sdlc-repair.state.yaml` — session state, for resume;
   `.claude/skills-state/sdlc-repair/{localize,gate,inflight,reports}/` — the
-  workers' reports and breadcrumbs (`references/orchestration.md`).
+  workers' reports and breadcrumbs, committed with the run (`references/orchestration.md`).
 - A close report naming the stale tasks `/sdlc:code` will offer to rebuild.
 
 It owns no `docs/` artifact of its own.
@@ -147,11 +147,11 @@ absent, it means "ask me". Order: **flag > gate answer > remembered value > 6**.
 
 ### Phase 1 — Session & queue
 
-Read `.claude/skills-state/sdlc-repair.state.yaml` if present. `in_progress`
-→ offer resume / restart / discard. Load and validate the findings queue.
-Prune `.claude/skills-state/sdlc-repair/localize/` and `reports/` left by an
-earlier run that is `complete` or `aborted` (they are that run's audit trail,
-not this one's input). Restart, discard and a new run keep `run_defaults`.
+First run `python .claude/sdlc/autocommit.py begin --skill repair` (absent or older → skip).
+Then read `.claude/skills-state/sdlc-repair.state.yaml` if present; `in_progress`
+→ offer resume / restart / discard. Load and validate the findings queue. Prune
+`sdlc-repair/localize/` and `reports/` left by a `complete` or `aborted` run (its
+committed audit trail, not this run's input); restart, discard and a new run keep `run_defaults`.
 
 The state file's schema (written at the plan gate, updated after every
 finding worked and every drain, kept as audit trail):
@@ -821,4 +821,4 @@ on top (`references/orchestration.md`, "Why two waves", "Choosing N").
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.28"
+skill_version: "1.29"

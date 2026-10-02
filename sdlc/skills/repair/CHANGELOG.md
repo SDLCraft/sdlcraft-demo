@@ -7,6 +7,11 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.29 (2026-10-02) — Phase 1 records the run baseline; the `sdlc-repair/` reports and any script the run writes are committed with it
+
+- Reported by the user: the localize/fix reports (`sdlc-repair/localize/FND-xxx.yaml`) and the fix scripts a run wrote under `claude-scratchpad/` were left uncommitted. Phase 1 now runs `autocommit.py begin --skill repair` first (setup 1.31: the close commit stages every file changed since, and the helper owns the `sdlc-repair/` tree), and Phase 1's prune of the previous run's reports is committed as a deletion.
+- `references/orchestration.md`: the layout paragraph and the fix brief send helper scripts to the system temp dir. SKILL.md line count unchanged.
+
 ## 1.28 (2026-10-01) — `findings.py plan` no longer hangs when located lists span several stages, and `findings.py add` stamps `recurrence_of` only on content overlap, not a symbol-name match
 
 - `plan` (ledger IMP-242, aicf LSN-131, blocker): `order_waves` made an aggregate wait for another when any of its located paths ranked above any path the other writes. Two aggregates whose located lists spanned several stages therefore each waited for the other, and the unbounded fixpoint never terminated. That covered two disjoint unsplit aggregates as well as the reported split group.

@@ -7,6 +7,13 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.31 (2026-10-02) — autocommit.py records a run baseline (`begin`) and commits every file a run touched; `auto_commit.also` retired
+
+- `autocommit.py` (HELPER_VERSION 4): new `begin --skill S` snapshots every changed or untracked file under the project root into the git dir (`.git/sdlc/baseline-<skill>.json` - never tracked, never in `git status`), silently, and keeps an existing snapshot so a resumed run keeps its origin. `commit` stages the owned set PLUS the run delta (changed since `begin`, or changed before it and changed again; code's caches never; gitignored files never), prints ` · N file(s) outside docs/ and .claude/` when the delta reached beyond the pipeline's trees, and consumes the baseline unless `--checkpoint` (code's container boundaries) or `--dry-run`. No baseline → the owned set alone, as before.
+- Reported by the user: a `/sdlc:repair` run left its `sdlc-repair/localize/FND-xxx.yaml` reports and the `claude-scratchpad/` fix scripts it wrote uncommitted - the owned set was a fixed allowlist. `OWN["repair"]` now also names its run tree `.claude/skills-state/sdlc-repair/`, and with a baseline repair's broad `docs/` entry is dropped (the delta names exactly the artifacts it edited, so a hand edit to another artifact no longer rides).
+- Retired, since the baseline subsumes it: the marker's `auto_commit.also` list (IMP-209) and its `mode --also` validation - the command answers with one line and writes nothing; a stored list stays in the marker, unread.
+- `references/auto-commit.md`: the `begin` step, the run delta, `--checkpoint`, the scratch rule (throwaway files go in the system temp dir), the new printed suffix; SKILL.md step 1 calls the plugin's own copy. `_smoke/autocommit_selftest.py` replaces its `also` section with the baseline arms; `autocommit_lockstep_selftest.py` pins `begin` in all 12 SKILL.md files and `--checkpoint` on code's boundary.
+
 ## 1.30 (2026-10-02) — the installed glossary's `ring_recheck` row names the rebuilt-provider cause (a dependency changed its contract or was rebuilt)
 
 - `assets/sdlc-output-glossary.md` (ledger IMP-254): the row said only "changed its contract", which code 0.34's regenerated-provider cause made incomplete; shortened elsewhere to stay inside the installed-rules byte budget. A `/sdlc:setup` re-run upgrades the installed copy.
