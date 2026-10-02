@@ -13,7 +13,9 @@ phase then runs this helper as its last action before the close card:
 which, when the mode is `on`, stages ONLY the files that skill owns (its
 artifact and shards, docs/INDEX.yaml, its state file, the findings/lessons
 queues, the statusboard files, the marker; `code` adds the source files its
-ledger and manifest say it wrote; every skill but `lesson` and `setup` also
+ledger and manifest say it wrote, plus the file pins of the units it recorded
+failed and the files an interrupted unit's breadcrumb recorded; every skill
+but `lesson` and `setup` also
 adds the marker's `auto_commit.also` pathspecs, a project-declared standing
 list) and commits them as
 
@@ -66,7 +68,7 @@ try:
 except Exception:
     pass
 
-HELPER_VERSION = "2"
+HELPER_VERSION = "3"
 MARKER_REL = Path(".claude/sdlc/sdlc-plugin.json")
 ENV_OVERRIDE = "SDLC_AUTO_COMMIT"
 MODES = ("off", "on")
@@ -98,13 +100,17 @@ OWN = {
              STATE + "/sdlc-arch.derivation-report-*.yaml"),
     "test": ("docs/TEST-STRATEGY.yaml", "docs/TEST-STRATEGY__*.yaml"),
     "task": ("docs/TASKS.json", "docs/TASKS__*.json"),
-    # `packets/` and `stack/` are regenerable caches - never committed.
+    # `packets/` and `stack/` are regenerable caches - never committed, and
+    # never counted as someone else's edit (CACHE_DIRS).
     "code": ("docs/CODE-MANIFEST.json", STATE + "/sdlc-code/inflight",
              STATE + "/sdlc-code/stuck"),
     # repair edits whichever artifact holds the defect and re-slices the task
     # shards, so its set is every artifact; never code's ledger.
     "repair": ("docs", STATE + "/sdlc-repair.doctor.json"),
 }
+# The run's own regenerable caches under code's state dir: ignored, not staged.
+CACHE_DIRS = ("packets", "stack")
+CODE_DIR = STATE + "/sdlc-code"
 # Skills whose set is EXACTLY this - no COMMON, no `sdlc-<skill>.state.yaml`.
 # `lesson` is model-invocable in an ambient session, so it must never sweep a
 # hand edit to docs/; `setup` installs, it does not write an artifact.
@@ -222,8 +228,9 @@ def _prefix(root: Path, toplevel: Path) -> str:
     return "" if str(rel) == "." else rel.as_posix() + "/"
 
 
-def _status_paths(toplevel: Path, pathspecs: "list[str]") -> "list[str] | None":
-    """Changed or untracked files under the pathspecs, toplevel-relative.
+def _status_entries(toplevel: Path, pathspecs: "list[str]") -> "list[tuple[str, str]] | None":
+    """(two-letter status, path) for every changed or untracked file under the
+    pathspecs, toplevel-relative.
 
     Ignored files never appear here, so a gitignored state directory is never
     force-added. Renames are disabled so every entry is one path.
@@ -234,12 +241,18 @@ def _status_paths(toplevel: Path, pathspecs: "list[str]") -> "list[str] | None":
              "--no-renames", "--", *pathspecs)
     if p is None or p.returncode != 0:
         return None
-    out: "list[str]" = []
+    out: "list[tuple[str, str]]" = []
     for entry in p.stdout.split("\0"):
         if len(entry) < 4 or entry[:2] == "!!":
             continue
-        out.append(entry[3:])
+        out.append((entry[:2], entry[3:]))
     return out
+
+
+def _status_paths(toplevel: Path, pathspecs: "list[str]") -> "list[str] | None":
+    """The paths of _status_entries."""
+    entries = _status_entries(toplevel, pathspecs)
+    return None if entries is None else [path for _code, path in entries]
 
 
 # ---------------------------------------------------------------------------
@@ -273,8 +286,86 @@ def _paths_from_ledger(text: str) -> "list[str]":
         return [m.strip() for m in re.findall(r'(?:^|[\s{,])path:\s*"?([^"\s,}]+)', text)]
 
 
+def _strip_dot_slash(p: str) -> str:
+    """Drop leading `./` segments only - never the dot of `.github/`."""
+    p = Path(p).as_posix()
+    while p.startswith("./"):
+        p = p[2:]
+    return p
+
+
+def _failed_task_ids(text: str) -> "list[str]":
+    """Qualified ids (`<cid>/TSK-NNN`) of every ledger entry whose status is
+    `failed`: a failed unit records no files_written, so its pins come from the
+    TASKS shard instead. `skipped` and `blocked` units never ran and wrote
+    nothing, so they stay out."""
+    try:
+        import yaml  # type: ignore
+        doc = yaml.safe_load(text)
+        tasks = (doc.get("tasks") or {}) if isinstance(doc, dict) else {}
+        return [str(q) for q, e in tasks.items()
+                if isinstance(e, dict) and e.get("status") == "failed"]
+    except Exception:
+        out: "list[str]" = []
+        current = None
+        for line in text.splitlines():
+            m = re.match(r'^  "?([^"\s:]+/TSK-\d+)"?:\s*$', line)
+            if m:
+                current = m.group(1)
+            elif current and re.match(r'^    status:\s*"?failed"?\s*$', line):
+                out.append(current)
+        return out
+
+
+def _failed_unit_files(root: Path, ledger_text: str) -> "list[str]":
+    """File-valued `target_files` of the units the ledger records `failed`,
+    joined from docs/TASKS__<cid>.json (docs/TASKS.json for `TASKS/...`). A
+    directory pin or a glob is skipped: staging a tree is the sweep this helper
+    never makes. A missing or unreadable shard contributes nothing."""
+    out: "list[str]" = []
+    shards: "dict[str, object]" = {}
+    for q in _failed_task_ids(ledger_text):
+        cid, _, tid = q.partition("/")
+        if cid not in shards:
+            shard = root / "docs" / ("TASKS.json" if cid == "TASKS" else f"TASKS__{cid}.json")
+            try:
+                shards[cid] = json.loads(_read(shard) or "null")
+            except ValueError:
+                shards[cid] = None
+        doc = shards[cid]
+        for task in (doc.get("tasks") or []) if isinstance(doc, dict) else []:
+            if not isinstance(task, dict) or task.get("tsk_id") != tid:
+                continue
+            for pin in task.get("target_files") or []:
+                if not isinstance(pin, str) or not pin.strip():
+                    continue
+                pin = _strip_dot_slash(pin.strip().replace("\\", "/"))
+                if (pin.endswith("/") or any(c in pin for c in _ALSO_GLOB_CHARS)
+                        or (root / pin).is_dir()):
+                    continue
+                out.append(pin)
+    return out
+
+
+def _breadcrumb_files(root: Path) -> "list[str]":
+    """`files_written[].path` of every in-flight breadcrumb: the files an
+    interrupted unit already wrote, whose hashes the committed breadcrumb names."""
+    out: "list[str]" = []
+    for crumb in sorted((root / CODE_DIR / "inflight").glob("*.json")):
+        try:
+            doc = json.loads(_read(crumb) or "null")
+        except ValueError:
+            continue
+        for entry in (doc.get("files_written") or []) if isinstance(doc, dict) else []:
+            p = entry.get("path") if isinstance(entry, dict) else None
+            if isinstance(p, str) and p.strip():
+                out.append(p.strip())
+    return out
+
+
 def code_generated_files(root: Path) -> "list[str]":
-    found = _paths_from_ledger(_read(root / STATE / "sdlc-code.state.yaml"))
+    ledger_text = _read(root / STATE / "sdlc-code.state.yaml")
+    found = _paths_from_ledger(ledger_text)
     try:
         manifest = json.loads(_read(root / "docs" / "CODE-MANIFEST.json") or "null")
     except ValueError:
@@ -284,9 +375,11 @@ def code_generated_files(root: Path) -> "list[str]":
             p = entry.get("path") if isinstance(entry, dict) else entry
             if isinstance(p, str) and p.strip():
                 found.append(p.strip())
+    found += _failed_unit_files(root, ledger_text)
+    found += _breadcrumb_files(root)
     clean: "list[str]" = []
     for p in found:
-        p = Path(p).as_posix().lstrip("./")
+        p = _strip_dot_slash(p)
         if p and not p.startswith("..") and not Path(p).is_absolute() and p not in clean:
             clean.append(p)
     return clean
@@ -438,6 +531,35 @@ def _normalize_invocation(invocation: str, skill: str) -> "tuple[str, bool, str 
     return fixed, True, None
 
 
+def _left_entries(toplevel: Path, prefix: str) -> "tuple[list[str], list[str]]":
+    """(files changed by something else, tracked cache files that changed).
+
+    code's own regenerable caches are not someone else's edit: an UNTRACKED
+    file under packets/ or stack/ is not counted at all, and a TRACKED changed
+    one (a project that committed them once) is counted apart so the line can
+    name the one command that ends it. The second list holds the cache dir of
+    each such file."""
+    entries = _status_entries(toplevel, [prefix + "docs", prefix + ".claude"]) or []
+    left: "list[str]" = []
+    tracked: "list[str]" = []
+    for code, path in entries:
+        rel = path[len(prefix):] if prefix and path.startswith(prefix) else path
+        hit = next((d for d in CACHE_DIRS if rel.startswith(f"{CODE_DIR}/{d}/")), None)
+        if hit is None:
+            left.append(path)
+        elif code != "??":
+            tracked.append(hit)
+    return left, tracked
+
+
+def _cache_remedy(tracked: "list[str]") -> str:
+    dirs = [d for d in CACHE_DIRS if d in tracked]
+    label = "{" + ",".join(dirs) + "}" if len(dirs) > 1 else dirs[0]
+    cmd = " ".join(f"{CODE_DIR}/{d}" for d in dirs)
+    return (f"{len(tracked)} tracked cache file(s) under {CODE_DIR}/{label} - "
+            f"untrack once: git rm -r --cached {cmd}")
+
+
 def cmd_commit(args) -> int:
     root = Path(args.project_root).resolve()
     invocation = " ".join(args.invocation.split())
@@ -524,9 +646,11 @@ def cmd_commit(args) -> int:
     sha = _git(toplevel, "rev-parse", "--short", "HEAD")
     short = sha.stdout.strip() if sha is not None and sha.returncode == 0 else "HEAD"
     line = f"[OK] committed {short} - {subject} ({len(files)} file{'s' if len(files) != 1 else ''}){note}"
-    left = _status_paths(toplevel, [prefix + "docs", prefix + ".claude"])
+    left, cached = _left_entries(toplevel, prefix)
     if left:
         line += f" · {len(left)} other pipeline file(s) changed by something else, left uncommitted"
+    if cached:
+        line += " · " + _cache_remedy(cached)
     print(line)
     return 0
 

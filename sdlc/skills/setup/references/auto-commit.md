@@ -102,6 +102,7 @@ welcome when the reader can act on them. Examples, one per form:
 | `/sdlc:code` at a container boundary | `/sdlc:code → container aicf-cli built - 23 units green` |
 | `/sdlc:code --step` | `/sdlc:code --step → aicf-cli/cli/parse_args implemented and green` |
 | `/sdlc:code aicf-cli`, stopped at a gate | `/sdlc:code aicf-cli → stopped at component prompt-registry - 2 units blocked` |
+| `/sdlc:code`, a container with red units | `/sdlc:code → container aicf-cli built - 21 units green, 2 red (TSK-031, TSK-044)` - the red units' files ride in the same commit, so the summary names them |
 | `/sdlc:repair FND-003` | `/sdlc:repair FND-003 → DATA-MODEL 2.4 - ENT-007 status enum fixed; FND-003 resolved` |
 | `/sdlc:repair --check` | `/sdlc:repair --check → 2 findings recorded, nothing edited` |
 | `/sdlc:lesson` | `/sdlc:lesson → LSN-NNN recorded - instruction_gap in sdlc-data` |
@@ -122,7 +123,7 @@ show.
 |---|---|
 | every artifact skill | its artifact and shards (`docs/API.yaml` + `docs/API__*.yaml`, …), `docs/INDEX.yaml`, `.claude/skills-state/sdlc-<skill>.state.yaml`, the findings and lessons queues, `.claude/rules/sdlc-statusboard.md`, `.claude/sdlc/STATUS.md`, the marker, the `auto_commit.also` list |
 | `arch` | also `.claude/skills-state/sdlc-arch.derivation-report-*.yaml` |
-| `code` | `docs/CODE-MANIFEST.json`, the ledger, `sdlc-code/inflight/` and `stuck/`, and every generated file the ledger's `files_written` and the manifest name — never `packets/` or `stack/` (regenerable caches); the `auto_commit.also` list |
+| `code` | `docs/CODE-MANIFEST.json`, the ledger, `sdlc-code/inflight/` and `stuck/`, every generated file the ledger's `files_written` and the manifest name, the file pins (`target_files`) of the units the ledger records `failed` — joined from the TASKS shard, a directory pin skipped — and the `files_written` an interrupted unit's breadcrumb recorded; never `packets/` or `stack/` (regenerable caches, ignored by the `sdlc-code/.gitignore` that `topo_order.py --emit` ensures, and never counted as someone else's edit; a project that had committed them gets one printed `git rm -r --cached` line, which the helper never runs); the `auto_commit.also` list |
 | `repair` | every artifact under `docs/` (it edits whichever holds the defect and re-slices task shards), its state file and doctor report — never `code`'s ledger; the `auto_commit.also` list |
 | `lesson` | only the lessons queue and the marker — it is model-invocable in ambient sessions and must never sweep a hand edit; **never** the `auto_commit.also` list, for the same reason |
 | `setup` | `.claude/sdlc/`, `.claude/rules/sdlc-*.md`, `docs/INDEX.yaml`, the lessons queue, `CLAUDE.md`, `.claude/settings.json` — **never** the `auto_commit.also` list: `setup`'s EXACT-ness is about install ownership, not project convention files |

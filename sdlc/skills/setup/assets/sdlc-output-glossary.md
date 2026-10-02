@@ -49,7 +49,7 @@ word you just saw.
 | **drift** | An embedded copy no longer matches the thing it was copied from. Fix the original and re-run the skill — never edit the copy. |
 | **stale** | A task whose definition changed after it was built — the schedule names why: `build` (the task itself changed), `context` (an upstream fact it consumed changed), `task` (built before fingerprints existed). `/sdlc:code` will offer to rebuild it. |
 | **refreshed** | Built and unchanged in substance — only cosmetic fields moved. Re-fingerprinted silently; nothing to rebuild. |
-| **ring_recheck** | Built and unchanged itself, but a task it depends on changed its contract afterwards. Its tests re-run: green is acknowledged, red means rebuild. |
+| **ring_recheck** | Built and unchanged, but a dependency changed its contract or was rebuilt afterwards. Its tests re-run: green is acknowledged, red means rebuild. |
 | **fingerprint** | A hash of a task's definition; how staleness is detected. |
 | **delta review** | When an upstream file changed since last time, the skill walks you through each change before re-interviewing — or, with `--reconcile`, instead of re-interviewing. |
 | **reconcile** | `/sdlc:<skill> --reconcile`: bring a file up to date with upstream files that changed, reviewing only what moved — no full interview. On `arch`, `test` and `task` a bare `--reconcile` does every stale file of that skill; `<container> --reconcile` or `--system --reconcile` does one. Its close report names the next file to reconcile. |

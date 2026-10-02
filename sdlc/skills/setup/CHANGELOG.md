@@ -7,6 +7,14 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.30 (2026-10-02) — the installed glossary's `ring_recheck` row names the rebuilt-provider cause (a dependency changed its contract or was rebuilt)
+
+- `assets/sdlc-output-glossary.md` (ledger IMP-254): the row said only "changed its contract", which code 0.34's regenerated-provider cause made incomplete; shortened elsewhere to stay inside the installed-rules byte budget. A `/sdlc:setup` re-run upgrades the installed copy.
+
+## 1.29 (2026-10-02) — code's close commit also stages red units' file pins and interrupted units' breadcrumb files, no longer mangles dot-paths, and stops calling the run's own caches someone else's edit
+
+- `autocommit.py` (HELPER_VERSION 3; ledger IMP-253, aicf LSN-141): `code`'s owned set came only from done entries' `files_written` and CODE-MANIFEST, so a failed unit's generated tests were never committed. It now adds the file-valued `target_files` of `failed` ledger entries (joined from the TASKS shard; directory and glob pins skipped — never a sweep) and an interrupted unit's breadcrumb `files_written`. Sibling fixed in the same set: `.lstrip("./")` stripped characters, turning `.github/…` into `github/…`; only a leading `./` is removed now. The left-count no longer counts untracked files under `sdlc-code/packets|stack`, and tracked changed ones produce one untrack remedy line. auto-commit.md's `code` row says so, and the run summary names red units. Regression: `_smoke/autocommit_selftest.py`.
+
 ## 1.28 (2026-10-01) — `--drift` no longer reads a qualified id (`TASKS/TSK-027`) as a changelog naming the file, and finds a path-qualified mention it used to miss; autocommit stages a scaffold's recorded lockfile
 
 - `docs_index.py` (ledger IMP-246, aicf LSN-135; a defect inside IMP-186's remedy): `_changelog_names_target`'s stem lookahead let `/` through, so `TASKS/TSK-NNN` marked every TASKS shard `[changelog names this file]`. The family tail then counted that mark as "referenced or cited here".
