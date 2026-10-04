@@ -292,16 +292,28 @@ run: an installed copy older than the plugin's counts as absent. The bare
 regenerate in Phase 5 is the exception that file names.
 
 **Token sweep.** A fix that REMOVES, RENAMES, or ADDS a named token (an input
-parameter, a CLI flag, a field, an enum member, a literal) has sites `--refs`
-cannot see — an added field's shape is typically restated in prose before any
-reader declares it a structured reference. Sweep the corpus with a plain text
+parameter, a CLI flag, a field, an enum member, a literal), or changes a
+member's SHAPE (its type, arity, optionality), has sites `--refs` cannot see —
+an added field's shape is typically restated in prose before any reader
+declares it a structured reference. Sweep the corpus with a plain text
 search — `grep -rn <token> docs/` (or the Grep tool over `docs/`); the index's
 `--find` matches symbols, not prose, so it cannot do this sweep — and add
 every hit to the checklist (its own `sites_considered` entry), changelog lines
-excepted. The typical miss is a sibling test in the very file about to be
-edited — five artifacts reconciled, one test in the edited strategy file still
-passing the removed parameter. The close card names the token, the hit count
-and each hit's disposition.
+excepted. An ADDED token exists nowhere yet, so its own grep finds only your
+edit; the stale sites are the lists that still enumerate its siblings. Also
+grep ONE existing sibling (another member of the same enum, another field of
+the same parent — the most distinctive one), and the parent type's name too
+when every sibling is generic (`id`, `name`, `status`), whether or not the
+parent is indexed: `--refs` finds structured sites, the grep finds prose. Read
+each hit's enclosing block (the YAML list, mapping or sentence it sits in —
+`grep -C`, or the file; a block list puts one member per line): a block that
+names two or more siblings is an enumeration the new member is missing from,
+and joins the checklist as its own entry. A changed SHAPE is swept on the old
+shape's own words (`triple`, `required`, the old type name). The typical miss
+is a sibling test in the very file about to be edited — five artifacts
+reconciled, one test in the edited strategy file still passing the removed
+parameter. The close card names every token swept (the new one, the sibling,
+the old-shape words), each hit count and each hit's disposition.
 
 Until shards and named symbols are indexed, `--refs` resolves **corpus ids
 only** (`FR-`, `WKF-`, `ENT-`, `SCR-`, `TST-`, `TSK-`, … families defined in

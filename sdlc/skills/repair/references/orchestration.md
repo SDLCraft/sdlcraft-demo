@@ -264,6 +264,8 @@ SNAPSHOT:       <abs path>/.claude/skills-state/sdlc-repair.doctor.json
                 (pairs listed there are held, never stamped, unless answers.yaml marks one re-stamped)
 WRITE BOUNDARY: docs/ARCH__demo-api.yaml, docs/TEST-STRATEGY__demo-api.yaml, docs/TASKS__demo-api.json.
                 Nothing else. Ever. A walk that locates outside it -> STATUS: relocated, edit nothing.
+                A token-sweep hit outside it is never edited, never `unaffected`: report it in
+                out_of_boundary, and list every key you grepped in swept_tokens.
                 A helper script goes in the system temp dir - anything left in the project is committed.
 BREADCRUMB:     <abs path>/inflight/<FND>.json - create before your first write, update after every phase.
 REPORT:         <abs path>/reports/<FND>.report.yaml per finding (shape in orchestration.md) + the capped block.
@@ -315,6 +317,8 @@ validators: {arch: 0, test: 0, task: 0, reslice_check: 0, crosscheck: 0, index_c
 held_pairs: []                  # snapshot pairs this worker held (never stamped)
 handoff_commands: []            # re-invoke only: the owed commands, pipeline order, test before task
 handoff_notes: []               # re-invoke only: {artifact, key, note, basis, retired}
+swept_tokens: []                # every key grepped: the token, its sibling/parent keys, the old-shape words
+out_of_boundary: []             # {artifact, token, hits}: sweep hits outside the write boundary that restate a swept token
 relocated_to: null              # {stage, artifact} when status is relocated
 blocked_on: null                # the question, when status is blocked
 summary: "one line for resolution.summary"
@@ -358,7 +362,15 @@ session, before the next wave is dispatched:
    others of this drain (four per call), and the finding is re-dispatched with
    the answer in `gate/answers.yaml`; a `relocated` report → re-plan the
    finding into a later aggregate (its new write set) when that stage-wave has
-   not run yet, else it goes on the card's `Remaining:` row with the reason.
+   not run yet, else it goes on the card's `Remaining:` row with the reason;
+6. re-grep each report's `swept_tokens` across `docs/` (changelog lines
+   excepted) and compare the hits to THAT worker's own write boundary, not
+   the wave's edited files. Route every hit outside it — listed in the
+   report's `out_of_boundary` or found only by the re-grep — by the rule of
+   step 3: inside a pending aggregate's boundary, an owed-site line appended
+   to that aggregate's brief; outside every boundary, the handoff chain or
+   `Remaining:`. The finding stays `open` with the progress on one evidence
+   line until the hit is closed; never re-dispatch the whole finding.
 
 Only then the next wave. A downstream wave that started before an upstream
 drain would stamp its shard against upstream bytes still moving.

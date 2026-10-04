@@ -597,11 +597,11 @@ A row is pre-existing only when EVERY (artifact, upstream) pair it names is
 already in `provenance_drift` — the Phase 2 pair snapshot, never the
 `--stale` row count — and such rows are stamped right after the gate; a row
 naming even one pair the snapshot lacks is wave-caused and is stamped now;
-re-reads the queue; and asks the user each `blocked` report's question (four per call),
-re-dispatching that finding with the answer, while a `relocated` report is
-re-planned into a later aggregate or listed on the card's `Remaining:` row.
-A downstream wave dispatched before an upstream drain would stamp its shard
-against upstream bytes still moving.
+re-reads the queue; re-greps each report's `swept_tokens` and routes any hit outside
+that worker's own write boundary; and asks the user each `blocked` report's question
+(four per call), re-dispatching that finding with the answer, while a `relocated`
+report is re-planned into a later aggregate or listed on the card's `Remaining:` row.
+A downstream wave dispatched before an upstream drain would stamp its shard against upstream bytes still moving.
 
 Validate **every artifact touched**, not just the source. Compare each exit
 against `baseline_checks`: a check that was already red before this repair, for
@@ -821,4 +821,4 @@ on top (`references/orchestration.md`, "Why two waves", "Choosing N").
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.29"
+skill_version: "1.30"

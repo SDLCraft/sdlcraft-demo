@@ -119,7 +119,8 @@ Nothing in this sequence is a hand edit to a task JSON.
    above). Task embeds are
    not edited here — step 6 moves them. **Token sweep:** when the fix
    REMOVES, RENAMES, or ADDS a named token (an input parameter, a CLI flag, a
-   field, an enum member, a literal), the reference graph cannot see every
+   field, an enum member, a literal), or changes a member's SHAPE (its type,
+   arity, optionality), the reference graph cannot see every
    site that restates or should restate it — a removed/renamed name is
    referenced by nothing (it no longer exists to point at), and an ADDED
    field's shape is typically restated in prose by its siblings and readers
@@ -129,12 +130,25 @@ Nothing in this sequence is a hand edit to a task JSON.
    the field's own name) — so sweep the corpus for it with a plain text
    search - `grep -rn <token>
    docs/` (Grep over `docs/`; the index's `--find` matches symbols, not
-   prose, so it is not this sweep). Every hit joins the checklist — and
+   prose, so it is not this sweep). An ADDED token exists nowhere yet, so
+   its own grep finds only your edit: also grep one existing sibling (the
+   most distinctive), and the parent type's name when every sibling is
+   generic; a hit whose enclosing block (the YAML list, mapping or sentence
+   it sits in — a block list puts one member per line) names two or more
+   siblings is an enumeration the new member is missing from, and a changed
+   SHAPE is swept on the old shape's own words — the rule is back-propagation.md
+   "Token sweep". Every hit joins the checklist — and
    becomes its own `sites_considered` entry — leaving it the same four ways,
    changelog lines excepted; the typical miss is a sibling test or a sibling
    prose restatement in the very file you just edited — one run reconciled
    five artifacts and shipped a test that still passed the removed parameter.
-   The close card names the token, the hit count and each hit's
+   A fix worker edits only inside its write boundary, and records every key it
+   grepped in the report's `swept_tokens`: a hit in an artifact outside the
+   boundary is never edited and never `unaffected` for lying outside it — name
+   it in the report's `out_of_boundary` (`{artifact, token, hits}`). It is an
+   incomplete propagation, so the finding stays `open` with its progress on one
+   evidence line until the session routes the hit.
+   The close card names every token swept, each hit count and each hit's
    disposition.
 5. **Stamp every artifact you reconciled by hand, upstream-first.** A hand
    edit moves an artifact's content but not its `upstream_provenance`, so the
