@@ -453,12 +453,38 @@ def collect_blocked(state):
     stuck_dir = state / "sdlc-code" / "stuck"
     if stuck_dir.is_dir():
         known = {b["id"] for b in out}
-        for report in sorted(stuck_dir.glob("*")):
-            qid = report.stem.replace("-", "/", 1)
-            if qid not in known:
-                out.append({"id": qid, "status": "stuck",
-                            "why": "see %s" % report.as_posix(), "attempts": None})
+        for report in sorted(stuck_dir.glob("*.yaml")):
+            body = load(report) or {}
+            # The id comes from the record that carries it. The file name is
+            # the writer's `qid.replace("/", "__")`, so only that is reversed.
+            qid = body.get("qualified_id")
+            if not isinstance(qid, str) or not qid.strip():
+                qid = report.stem.replace("__", "/", 1)
+            unit = body.get("unit")
+            ids = {qid.strip()}
+            if isinstance(unit, list):
+                ids |= {u.strip() for u in unit if isinstance(u, str)}
+            if ids & known:
+                continue
+            out.append({"id": qid.strip(), "status": "stuck",
+                        "why": _stuck_cause(body, report), "attempts": None})
     return out
+
+
+def _stuck_cause(body, report):
+    """One line: `<stuck_reason> -> <recommended_path>: <rationale>`, the
+    report's own `escalation_summary` when those are absent, else where to look."""
+    def text(key):
+        v = body.get(key)
+        return " ".join(v.split()) if isinstance(v, str) else ""
+    reason, path, why = text("stuck_reason"), text("recommended_path"), text("rationale")
+    line = reason
+    if path:
+        line = "%s -> %s" % (line, path) if line else path
+    if why:
+        line = "%s: %s" % (line, why) if line else why
+    return (line or text("escalation_summary")
+            or "see %s/sdlc-code/stuck/%s" % (STATE_REL, report.name))
 
 
 def collect_questions(docs):

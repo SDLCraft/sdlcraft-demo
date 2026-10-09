@@ -137,7 +137,7 @@ that should not enter the history never lands in the tree.
 |---|---|
 | every artifact skill | its artifact and shards (`docs/API.yaml` + `docs/API__*.yaml`, …), `docs/INDEX.yaml`, `.claude/skills-state/sdlc-<skill>.state.yaml`, the findings and lessons queues, `.claude/rules/sdlc-statusboard.md`, `.claude/sdlc/STATUS.md`, the marker |
 | `arch` | also `.claude/skills-state/sdlc-arch.derivation-report-*.yaml` |
-| `code` | `docs/CODE-MANIFEST.json`, the ledger, `sdlc-code/inflight/` and `stuck/`, every generated file the ledger's `files_written` and the manifest name, the file pins (`target_files`) of the units the ledger records `failed` — joined from the TASKS shard, a directory pin skipped — and the `files_written` an interrupted unit's breadcrumb recorded; never `packets/` or `stack/` (regenerable caches, ignored by the `sdlc-code/.gitignore` that `topo_order.py --emit` ensures, and never counted as someone else's edit; a project that had committed them gets one printed `git rm -r --cached` line, which the helper never runs) |
+| `code` | `docs/CODE-MANIFEST.json`, the ledger, `sdlc-code/inflight/` and `stuck/`, every generated file the ledger's `files_written` and the manifest name, the file pins (`target_files`) of the units the ledger records `failed` — joined from the TASKS shard, a directory pin skipped — and the `files_written` an interrupted unit's breadcrumb recorded; never `packets/` or `stack/` (regenerable caches, ignored by the `sdlc-code/.gitignore` that `topo_order.py --emit` ensures, and never counted as someone else's edit; a project that had committed them gets one printed `untrack-caches` line, and `setup` offers to run it once - see "Tracked code caches") |
 | `repair` | its state file, doctor report and run tree `.claude/skills-state/sdlc-repair/` (the workers' localize and fix reports — a report the next run's Phase 1 prunes is committed as a deletion); without a baseline, every artifact under `docs/` — never `code`'s ledger |
 | `lesson` | only the lessons queue and the marker — it is model-invocable in ambient sessions, and its baseline is taken at its own start, so an edit the session made before it never rides along |
 | `setup` | `.claude/sdlc/`, `.claude/rules/sdlc-*.md`, `docs/INDEX.yaml`, the lessons queue, `CLAUDE.md`, `.claude/settings.json` |
@@ -160,10 +160,54 @@ The helper prints exactly one line. Put it, in the user's words, on the card:
 | helper absent | no row |
 | ` · N file(s) outside docs/ and .claude/` suffix | add it to the row: the run wrote files beyond the pipeline's own trees (a script, a note) and they are in the commit |
 | ` · N other pipeline file(s) … left uncommitted` suffix | add it to the row: the user should know a hand edit is sitting there |
+| ` · N tracked cache file(s) … untrack once: python .claude/sdlc/autocommit.py untrack-caches` suffix (also on a `nothing to commit` line) | one `Attention:` clause naming that command - it is the only way those files stop showing as modified; the close never runs it |
 
 A `[DRAFT]` here is a fact about the environment (no identity configured, a
 hook refused, not a repository) — never a lesson, never a finding, never a
 reason to retry by hand inside the run.
+
+## Tracked code caches
+
+A project that committed code's `packets/` and `stack/` once keeps them dirty
+after every run, because an ignore rule cannot apply to a tracked file and the
+run never stages them. The cure is `python .claude/sdlc/autocommit.py
+untrack-caches`, and only `setup` asks to run it - a close never does, since the
+deletion reaches teammates on their next pull and the per-run opt-in did not
+cover that.
+
+- `mode` prints one `caches:` line (`git ls-files`, so clean tracked caches
+  count): `caches: none tracked`, `caches: N tracked under … - untrack
+  available`, or `… - not ignored here, left alone` (no ignore rule covers
+  them - the project may want them tracked, and `untrack-caches` refuses).
+  A recorded decision appends `- decided <date>`.
+- `setup` step 4 asks when the line reads `untrack available`, carries no
+  `decided`, the auto-commit mode is `on`, and the session is interactive. The
+  question is a standing consent, so use the header, question and options
+  **verbatim**:
+  - **header:** `Code caches`
+  - **question:**
+    > This project committed code generation's regenerable caches
+    > (`.claude/skills-state/sdlc-code/packets` and `stack`) once, so they show
+    > as modified after every run. Untrack them? Setup makes one extra commit
+    > that only deletes them from git - the files stay on disk and `/sdlc:code`
+    > regenerates them - and a teammate who pulls that commit loses their local
+    > copies until their next code run. Nothing else is committed or pushed.
+    > Untrack the caches?
+  - **options** (exactly these two):
+    1. `Yes, untrack them (Recommended)` - "One commit that only removes the
+       cache files from git; they stay on disk."
+    2. `No, leave them tracked` - "Nothing changes; no run mentions them again."
+- Yes → `python .claude/sdlc/autocommit.py untrack-caches --invocation
+  "/sdlc:setup"`. No → `python .claude/sdlc/autocommit.py untrack-caches
+  --decline`, which records `auto_commit.caches_decided_on` in the marker (a
+  re-run carries it forward; setup never asks again, and the close stops
+  printing the hint).
+- The untrack commit is built in a temporary index: it holds deletions only,
+  the working files and anything the user had staged are untouched, and its
+  subject is `<invocation> → untracked N regenerable cache files`. It is the
+  one commit besides the run's own that the helper makes. It acts only when
+  auto-commit is on and `git check-ignore --no-index` says an ignore rule
+  covers the tracked caches.
 
 ## Boundaries
 

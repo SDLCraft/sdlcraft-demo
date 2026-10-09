@@ -227,7 +227,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-CAPABILITY_VERSION = 12
+CAPABILITY_VERSION = 13
 
 
 # =============================================================================
@@ -609,6 +609,10 @@ _NAMED_KEYS_YAML = {
     "entity": "entity",
     "via_unit": "unit", "targets_work_units": "unit", "targets_work_unit": "unit",
     "component_ref": "component",
+    # Capability version 13: a TST's producers, each ``<component>/<unit>`` (see
+    # ``_NamedDefs.resolve``) - the shard's own container supplies the cid, and
+    # the component may be a sibling of the test's own.
+    "reads_outputs_of": "unit",
     # Capability version 9 (ledger IMP-161): a test's risk-target fields, a
     # bare kebab-case id resolved against the shard's OWN container (see
     # ``_NamedDefs.resolve``), never a global namespace.
@@ -2014,6 +2018,10 @@ class _NamedDefs:
         comp = context.get("to") or context.get("component_ref")
         if cid and comp and f"{cid}/{comp}/{value}" in self.units:
             return f"{cid}/{comp}/{value}", []
+        # ``<component>/<unit>`` (exactly one slash): qualified by the citing
+        # shard's own container, whatever component the citing item sits in.
+        if cid and value.count("/") == 1 and f"{cid}/{value}" in self.units:
+            return f"{cid}/{value}", []
         bare = self.units_bare.get(value, [])
         if not bare and "." in value:
             bare = self.units_bare.get(value.rsplit(".", 1)[-1], [])

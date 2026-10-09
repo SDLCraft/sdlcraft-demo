@@ -1143,6 +1143,7 @@ def provisional_plan(data: Dict[str, Any], closable: List[str]) -> Dict[str, Any
         rank = min((stage_rank(s) for s in stages if s), default=len(PIPELINE) + 1)
         aggregates.append({"findings": members, "located": [], "write_set": [],
                            "modes": {m: "?" for m in members}, "decisions": [],
+                           "possible_duplicates": [],
                            "rank": rank, "stage": _stage_name(rank),
                            "merged_because": why.get(root, [])})
     return _assemble("queue", closable, [], owed, aggregates, [])
@@ -1198,14 +1199,18 @@ def _stage_name(rank: int) -> str:
 
 def aggregates_from_reports(reports: Dict[str, Dict[str, Any]], closable: List[str],
                             kinds: Optional[Dict[str, str]] = None) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
-    """(aggregates, duplicates): union-find over write sets; two reports on
-    one located symbol WITH THE SAME KIND fold into one (the later id is the
-    duplicate - the recurrence rule's key, since two kinds on one symbol are
-    two defects); an aggregate over PLAN_CAP is split by located stage, then
-    by id."""
+    """(aggregates, duplicates): union-find over write sets. Only a report's
+    own `duplicate_of` (the localizer's judgment) folds a finding away. Two
+    reports on one located symbol WITH THE SAME KIND are never inferred to be
+    one defect - a coarse kind on a busy symbol names two defects as easily as
+    one, and a false fold silently drops a finding - so the later id stays,
+    flagged in its aggregate's `possible_duplicates` (the fix worker checks it
+    after the earlier fix). An aggregate over PLAN_CAP is split by located
+    stage, then by id; a flagged pair is never split."""
     kinds = kinds or {}
     ids = sorted((i for i in reports if i not in closable), key=_fnd_num)
     duplicates: List[Dict[str, str]] = []
+    possible: List[Dict[str, str]] = []
     by_symbol: Dict[str, str] = {}
     kept: List[str] = []
     for fid in ids:
@@ -1220,10 +1225,9 @@ def aggregates_from_reports(reports: Dict[str, Dict[str, Any]], closable: List[s
                 key = f"{_norm_docs(loc.get('artifact'))[0]}#{loc['symbol']}#{kinds.get(fid) or rep.get('kind') or ''}"
                 break
         if key and key in by_symbol:
-            duplicates.append({"fnd": fid, "of": by_symbol[key],
-                               "why": f"same symbol {key.split('#')[1]}, same kind"})
-            continue
-        if key:
+            possible.append({"fnd": fid, "of": by_symbol[key],
+                             "why": f"same symbol {key.split('#')[1]}, same kind"})
+        elif key:
             by_symbol[key] = fid
         kept.append(fid)
     sets = {fid: write_set(reports[fid]) for fid in kept}
@@ -1240,7 +1244,7 @@ def aggregates_from_reports(reports: Dict[str, Dict[str, Any]], closable: List[s
     aggregates: List[Dict[str, Any]] = []
     for root, members in groups.items():
         members = sorted(members, key=_fnd_num)
-        parts = _split(members, reports)
+        parts = _split(members, reports, [(d["of"], d["fnd"]) for d in possible])
         for index, part in enumerate(parts):
             located = sorted({p for m in part for p in _located_paths(reports[m])})
             ws = sorted({p[0] for m in part for p in sets[m]})
@@ -1252,6 +1256,7 @@ def aggregates_from_reports(reports: Dict[str, Dict[str, Any]], closable: List[s
             aggregates.append({"findings": part, "located": located, "write_set": ws,
                                "modes": {m: str(reports[m].get("proposed_mode") or "?") for m in part},
                                "decisions": decisions, "rank": rank, "stage": _stage_name(rank),
+                               "possible_duplicates": [d for d in possible if d["fnd"] in part],
                                "merged_because": why.get(root, []) if len(parts) == 1 else
                                [w for w in why.get(root, []) if any(m in w for m in part)],
                                # the parts of one split group hold the same artifacts, so
@@ -1271,17 +1276,39 @@ def _report_rank(report: Dict[str, Any]) -> int:
     return min(own) if own else len(PIPELINE) + 1
 
 
-def _split(members: List[str], reports: Dict[str, Dict[str, Any]]) -> List[List[str]]:
+def _split(members: List[str], reports: Dict[str, Dict[str, Any]],
+           linked: Optional[List[Tuple[str, str]]] = None) -> List[List[str]]:
+    """Parts of at most PLAN_CAP, one located stage at a time, in id order. A
+    `linked` pair (a possible duplicate) is one unit: it lands in one part,
+    the earlier id first, even when that part runs past the cap."""
     if len(members) <= PLAN_CAP:
         return [members]
-    by_stage: Dict[int, List[str]] = {}
+    head = {m: m for m in members}
+
+    def find(x: str) -> str:
+        while head[x] != x:
+            x = head[x]
+        return x
+
+    for a, b in linked or []:
+        if a in head and b in head:
+            head[find(b)] = find(a)
+    units: Dict[str, List[str]] = {}
     for m in members:
-        by_stage.setdefault(_report_rank(reports[m]), []).append(m)
+        units.setdefault(find(m), []).append(m)
+    by_stage: Dict[int, List[List[str]]] = {}
+    for unit in units.values():
+        by_stage.setdefault(min(_report_rank(reports[m]) for m in unit), []).append(unit)
     parts: List[List[str]] = []
     for rank in sorted(by_stage):
-        chunk = by_stage[rank]
-        for i in range(0, len(chunk), PLAN_CAP):
-            parts.append(chunk[i:i + PLAN_CAP])
+        cur: List[str] = []
+        for unit in sorted(by_stage[rank], key=lambda u: _fnd_num(u[0])):
+            if cur and len(cur) + len(unit) > PLAN_CAP:
+                parts.append(sorted(cur, key=_fnd_num))
+                cur = []
+            cur = cur + unit
+        if cur:
+            parts.append(sorted(cur, key=_fnd_num))
     return parts
 
 
@@ -1395,6 +1422,9 @@ def render_plan(plan: Dict[str, Any]) -> str:
                 lines.append(f"       * {d['fnd']} needs one decision: {d.get('question')} - proposal: {d.get('proposal')}")
             for why in a["merged_because"]:
                 lines.append(f"       ({why})")
+            for d in a.get("possible_duplicates") or []:
+                lines.append(f"       ({d['fnd']} may be {d['of']} - {d['why']}; kept apart, "
+                             f"checked after {d['of']}'s fix)")
     for d in plan["duplicates"]:
         lines.append(f"DUPLICATE  {d['fnd']} = {d['of']} ({d['why']})")
     if plan["owed"]:

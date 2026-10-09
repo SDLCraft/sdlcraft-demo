@@ -157,6 +157,15 @@ rows:
   - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-144, status: resolved, imp_id: IMP-257, fixed_in: "0.9.25", "on": "2026-10-04"}
   - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-145, status: resolved, imp_id: IMP-258, fixed_in: "0.9.25", "on": "2026-10-04"}
   - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-146, status: resolved, imp_id: IMP-259, fixed_in: "0.9.25", "on": "2026-10-04"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-147, status: resolved, imp_id: IMP-262, fixed_in: "0.9.25", "on": "2026-10-09"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-148, status: resolved, imp_id: IMP-263, fixed_in: "0.9.25", "on": "2026-10-09"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-149, status: resolved, imp_id: IMP-264, fixed_in: "0.9.25", "on": "2026-10-09"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-150, status: resolved, imp_id: IMP-265, fixed_in: "0.9.25", "on": "2026-10-09"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-151, status: resolved, imp_id: IMP-266, fixed_in: "0.9.25", "on": "2026-10-09"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-152, status: resolved, imp_id: IMP-267, fixed_in: "0.9.25", "on": "2026-10-09"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-153, status: resolved, imp_id: IMP-268, fixed_in: "0.9.25", "on": "2026-10-09"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-154, status: resolved, imp_id: IMP-269, fixed_in: "0.9.25", "on": "2026-10-09"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-155, status: resolved, imp_id: IMP-270, fixed_in: "0.9.25", "on": "2026-10-09"}
   - {project: "df3214d59237", lsn_id: LSN-001, status: resolved, imp_id: IMP-035, fixed_in: "0.9.4", "on": "2026-09-22"}
   - {project: "df3214d59237", lsn_id: LSN-002, status: resolved, imp_id: IMP-034, fixed_in: "0.9.13", "on": "2026-09-22"}
   - {project: "df3214d59237", lsn_id: LSN-003, status: resolved, imp_id: IMP-028, fixed_in: "0.9.4", "on": "2026-09-22"}

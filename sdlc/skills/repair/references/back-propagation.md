@@ -323,7 +323,7 @@ by symbol class, and say in the report that the radius came from grep:
 | Symbol class | Grep for the name in | Fields that carry it |
 |---|---|---|
 | DATA-MODEL entity | `docs/ARCH__*.yaml docs/TEST-STRATEGY__*.yaml docs/TASKS__*.json` (+ `docs/API__*.yaml`) | `traces_data_entities`, `touches_entities`, `via_entity`, `entity_slice.entity`, `primary_entity`, `to_entity` |
-| ARCH work_unit | `docs/TEST-STRATEGY__<cid>.yaml docs/TASKS__<cid>.json docs/ARCH__<cid>.yaml` | `target_symbol`, `targets_work_units`, `via_unit` |
+| ARCH work_unit | `docs/TEST-STRATEGY__<cid>.yaml docs/TASKS__<cid>.json docs/ARCH__<cid>.yaml` | `target_symbol`, `targets_work_units`, `reads_outputs_of` (`<component>/<unit>`), `via_unit` |
 | TST-NNN | `docs/TASKS__<cid>.json` | `implements_tests` (+ `test_spec` is its embed) |
 | API operation | `docs/ARCH__*.yaml docs/TASKS__*.json` | `traces_api_operation`, `touches_operations`, `operation_contract` |
 

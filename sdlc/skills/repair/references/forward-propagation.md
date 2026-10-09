@@ -27,8 +27,8 @@ tokens: DATA-MODEL entities (`--refs User`), ARCH work_units
 (`--refs <cid>/<component>/<unit>`, or the bare name when unique), tests
 (`--refs TST-NNN`), API operations and design assets. Named references are
 matched only inside anchored fields (`touches_entities`, `via_entity`,
-`target_symbol`, `targets_work_units`, `via_unit`, `component_ref`,
-`depends_on`, `entity_slice.entity`, …), never as bare prose words, so the
+`target_symbol`, `targets_work_units`, `reads_outputs_of`, `via_unit`,
+`component_ref`, `depends_on`, `entity_slice.entity`, …), never as bare prose words, so the
 `--refs` set is authoritative for ids and named symbols alike. A name the
 index cannot resolve lands in its `dangling_warnings` block — treat one of
 those on the symbol you are editing as an inbound site the graph could not
@@ -96,8 +96,13 @@ Nothing in this sequence is a hand edit to a task JSON.
 2. **Bump its metadata in the same write** — one call:
 
    ```bash
-   python "${CLAUDE_SKILL_DIR}/bump_artifact.py" --file docs/<SOURCE> --summary "<what changed and why>" --by sdlc-repair
+   python "${CLAUDE_SKILL_DIR}/bump_artifact.py" --file docs/<SOURCE> --summary "FND-NNN: <what changed and why>" --by sdlc-repair
    ```
+
+   The summary starts with the finding's id: that changelog line is the
+   durable mark a resumed run reads to tell a landed edit from one that never
+   got its bump (orchestration.md, "Resume"). Every other `bump_artifact.py`
+   call in this sequence does the same.
 
    It bumps `metadata.<name>_version` (minor), prepends the canonical
    changelog line (`"<version> (<YYYY-MM-DD>): <summary>"`, newest first,
@@ -240,6 +245,9 @@ Nothing in this sequence is a hand edit to a task JSON.
    an integration/system-tier test with no declared subject) that `--symbol`
    and `--tst` cannot both cover in one call.
 
+   Pass `--by "sdlc-repair FND-NNN"` to each call, so the shard's changelog
+   line names the finding.
+
    It rewrites only the compared embed fields (`interface_contract`,
    `unit_kind`, `unit_summary`, `test_spec`, `family_contract`,
    `operation_contract`, `entity_slice`, `design_spec`, `cli_contract`,
@@ -295,8 +303,9 @@ exercises, so the strategy is missing one TST:
 2. Author the realizing `kind: test` task in `TASKS__<cid>.json`: next `TSK`
    id, `implements_tests: [TST-NNN]`, `test_spec` copied from the TST
    (tier / targets_work_units / directives / acceptance / covers), `depends_on` the subject's impl
-   task and the container's `test_infrastructure` task when one exists
-   (checks 27/28), `target_files` under the container's test root, one
+   task, the impl task of each `reads_outputs_of` producer the TST names, and
+   the container's `test_infrastructure` task when one exists
+   (checks 27/43/28), `target_files` under the container's test root, one
    acceptance line; then `bump_artifact.py --patch` the shard. A TASKS file
    always takes a patch bump: its minor version gates checks (check 18 from
    1.4), and a minor bump would switch them on for tasks this edit never
@@ -413,7 +422,7 @@ The shape of a sequence, rooted in one artifact:
 - **`/sdlc:test <cid>` before `/sdlc:task <cid>` whenever the fix minted a
   work_unit** (or any new subject): task wires a test task's `depends_on` to
   the impl task of the subject the *test* names (`targets_work_units`, CLAUDE.md
-  §12). Run task first and the new unit gets an impl task with no test task,
+  §12) and of each producer it reads (`reads_outputs_of`). Run task first and the new unit gets an impl task with no test task,
   then test names it, then task has to run again — the double hop.
 - Say what each stage will do: every downstream skill already carries the §7
   **upstream-change reconciliation** contract, so on re-invocation it detects
@@ -502,7 +511,9 @@ by trial (canonical: `FINDINGS.schema.yaml`):
   (generated source the build re-made). Nothing else — an index refresh is
   not a hop.
 - `duplicate_of` is present exactly when `status: duplicate`, and a duplicate
-  carries NO `resolution` block. A `wontfix` never carries `duplicate_of`;
+  carries NO `resolution` block. A fix report with `status: duplicate` (the
+  CHECK FIRST outcome) is written exactly so; a plan-level duplicate is
+  written the same way. A `wontfix` never carries `duplicate_of`;
   say which finding it repeats in `resolution.summary` instead.
 - `resolved`, `wontfix` and `deferred` all carry a `resolution` block
   (`deferred` with a `reason`).

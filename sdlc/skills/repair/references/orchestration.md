@@ -41,8 +41,8 @@ reads as the scheduler working, not the setting being ignored.
 **Why the localize wave may run wide.** A localizer is read-only against a
 corpus nothing writes until the plan gate has been answered, and it writes one
 file of its own. Two localizers cannot disturb each other, whatever they walk;
-two that walk to the same defect are folded afterwards by `findings.py plan`
-(same symbol and kind → duplicate; shared write set → one aggregate). The
+two that walk to the same defect meet afterwards in `findings.py plan` (a
+report's own `duplicate_of` folds; a shared write set → one aggregate). The
 independence is known in advance, by construction, so the default is wide (6).
 What N costs: under a per-window token cap, N opus walks finish no sooner per
 window than one — they spend the budget N times faster — and an interrupted
@@ -151,7 +151,8 @@ located_stage: arch
 located:                        # one or more; quote a field_path - `[0]` is not
   - artifact: docs/ARCH__demo-api.yaml   #   valid YAML inside a flow mapping
     symbol: items-controller/listItems
-    field_path: "components[0].work_units[1]"
+    field_path: "components[0].work_units[1]"   # the defective field INSIDE the symbol,
+                                #   never the symbol's own entry
 walk:                           # <= 6 lines: surfacing site, stages examined, chosen source, why
   - "surfaced in demo-api/TSK-004 (a codegen worker's blocked report)"
   - "TASKS embed matches ARCH byte for byte -> the embed is not the source"
@@ -203,12 +204,16 @@ whose write sets share at least one artifact, joined transitively
 (union-find). Overlap is **directory-aware**: a `docs/` entry contains every
 path beneath it, so a finding whose write set names a directory joins
 everything under it and runs alone. Two workers must never hold the same
-artifact — that, not relatedness, decides a group. Two findings that
-localize to the same symbol with the same kind are one defect: the later id
-closes as `duplicate` of the earlier (`edge-cases.md`, "Two findings localize
-to the same symbol"); two kinds on one symbol are two defects in one
-aggregate, fixed in id order. An aggregate is **capped at five findings**; a larger one is
-split by located stage first, then by id, and the parts run serially.
+artifact — that, not relatedness, decides a group. `plan` never infers a
+duplicate from a name: only a localizer's own `duplicate_of` folds a finding
+away. Two findings on one symbol and kind stay in their aggregate, listed in
+its `possible_duplicates` (`{fnd, of, why}`, kept in the state file's `plan:`
+block), fixed in id order; the later finding's brief carries a `CHECK FIRST`
+line, and its worker reports `duplicate` when the earlier fix removed the
+defect, else fixes it (`edge-cases.md`, "Two findings localize to the same
+symbol"). An aggregate is **capped at five findings**; a larger one is
+split by located stage first, then by id, and the parts run serially — a
+possible-duplicate pair always stays in one part, earlier id first.
 
 **Order.** Stage-waves, upstream first: the rank of an aggregate is the
 pipeline position of its located artifact (`prd → ux → design → data → api →
@@ -256,6 +261,8 @@ Fix one repair aggregate. Non-interactive: never ask the user - a decision the
 gate did not take is STATUS: blocked with the question, not a guess.
 FINDINGS:       FND-002, FND-003, FND-004 - work them SERIALLY in this order; the next
                 starts after the previous one's verification, never interleaved.
+CHECK FIRST:    (only when the plan lists a possible duplicate) FND-003 may be FND-002 - after
+                FND-002's fix, report FND-003 duplicate (duplicate_of FND-002) if its defect is gone.
 LOCALIZE:       <abs path>/localize/FND-002.yaml, FND-003.yaml, FND-004.yaml
 GATE ANSWERS:   <abs path>/gate/answers.yaml   (a decided field is authored from here, never re-decided)
 RULES:          <abs path>/references/forward-propagation.md - read it whole;
@@ -267,7 +274,10 @@ WRITE BOUNDARY: docs/ARCH__demo-api.yaml, docs/TEST-STRATEGY__demo-api.yaml, doc
                 A token-sweep hit outside it is never edited, never `unaffected`: report it in
                 out_of_boundary, and list every key you grepped in swept_tokens.
                 A helper script goes in the system temp dir - anything left in the project is committed.
-BREADCRUMB:     <abs path>/inflight/<FND>.json - create before your first write, update after every phase.
+BREADCRUMB:     <abs path>/inflight/<FND>.json - shape and phases: orchestration.md, "Breadcrumb" (read it).
+                Create it, `baseline` filled, before your first write; update it after every phase.
+RESUME FROM:    <breadcrumb path> (a resumed aggregate only) - keep its `baseline` verbatim and only
+                append; classify each touched file by role (orchestration.md, "Resume").
 REPORT:         <abs path>/reports/<FND>.report.yaml per finding (shape in orchestration.md) + the capped block.
 DO NOT: write the queue or the state file; run docs_index.py bare; run another skill;
         print a --reconcile chain (record owed commands in the report instead);
@@ -276,7 +286,7 @@ DO NOT: write the queue or the state file; run docs_index.py bare; run another s
         (status, diff, show, log); the tree holds the user's uncommitted docs, the queue
         and the state file, and those commands belong to the session.
 REPORT in exactly this block per finding, nothing else:
-  FND: <id>  MODE: <mode>  TOUCHED: <n> file(s)  HOPS: <verified>/<total>  STATUS: ok | blocked | relocated
+  FND: <id>  MODE: <mode>  TOUCHED: <n> file(s)  HOPS: <verified>/<total>  STATUS: ok | blocked | relocated | duplicate
 ```
 
 Inside the aggregate the worker runs each finding's Phase-4 sequence exactly
@@ -292,16 +302,27 @@ after every phase:
 ```json
 {"fnd_id": "FND-002", "aggregate": "A2", "started_at": "<iso>",
  "phase": "located | source_edited | bumped | sites_walked | stamped | resliced | verified | reported",
- "files_written": [{"path": "docs/ARCH__demo-api.yaml", "sha256": "<16 hex>"}],
+ "baseline": [{"path": "docs/ARCH__demo-api.yaml", "hash": "<16 hex>"}],
+ "files_written": [{"path": "docs/ARCH__demo-api.yaml", "hash": "<16 hex>"}],
  "stamps": ["docs/ARCH__demo-api.yaml <- docs/PRD.yaml"], "failure_tail": null}
 ```
+
+`phase` is one of the listed words, nothing else. `baseline` holds every WRITE
+BOUNDARY file that exists, hashed before the finding's first write; it is
+written once, by the first worker on the finding, and a RESUME FROM worker
+keeps it verbatim and only appends. Each file enters `files_written` in the
+same breadcrumb write as the phase that wrote it. Both lists use the hash
+`python .claude/sdlc/docs_index.py --hash <file>` prints (stable across a CRLF
+checkout), never a raw sha256 of the bytes. Findings run serially, so a
+finding's baseline already contains the earlier findings' landed edits.
 
 **The fix report** (`reports/<FND>.report.yaml`) is what the session writes
 the resolution from:
 
 ```yaml
 fnd_id: FND-002
-status: ok | blocked | relocated
+status: ok | blocked | relocated | duplicate
+duplicate_of: null              # FND-X, when status is duplicate
 mode: surgical
 located_stage: arch
 artifacts_touched: [docs/ARCH__demo-api.yaml, docs/TASKS__demo-api.json]   # edit order
@@ -325,9 +346,12 @@ summary: "one line for resolution.summary"
 lesson: null                    # a skill defect met on the way, one line (the session routes it)
 ```
 
-`blocked` and `relocated` reports carry no `propagation` and touch no file:
-the worker stops before its first edit on that finding and continues with
-the next one in its aggregate.
+`blocked`, `relocated` and `duplicate` reports carry no `propagation` and
+touch no file: the worker stops before its first edit on that finding and
+continues with the next one in its aggregate. A `duplicate` is the CHECK FIRST
+outcome only; the queue stays untouched until the session's Phase-6 write sets
+`status: duplicate` and `duplicate_of` from the report ("The resolution write"
+in `forward-propagation.md`) — a worker never writes the queue.
 
 ## Between waves — drain, verify, re-stamp
 
@@ -403,9 +427,21 @@ as the way back.
 The state file's `plan:` block plus the breadcrumbs and reports decide, per
 aggregate, where an interrupted run stands: a report `ok` with the resolution
 written → done; a report `ok` without a resolution → Phase 6 for it; a
-breadcrumb without a report → re-verify every `files_written` hash against
-disk, then re-dispatch the aggregate with `RESUME FROM: <breadcrumb path>`
-in the brief; nothing at all → dispatch fresh. A finding that became `open`
+breadcrumb without a report → find the finding's touched files by hashing
+every `baseline` entry again, then re-dispatch the aggregate with
+`RESUME FROM: <breadcrumb path>` in the brief; nothing at all → dispatch
+fresh. A file whose hash differs from its `baseline` is touched, whatever
+`files_written` says (the worker may have died before recording it) — and
+never ask `git diff`, which also holds the user's uncommitted docs. Classify
+each touched file by its role in the finding's sequence: a **bump target**
+(the source, each site edit) whose newest changelog line names the finding is
+landed, otherwise it was edited and not bumped — bump it, never re-edit; a
+**reslice target** (a TASKS shard) is re-run with `reslice_embeds.py --check`,
+silent = landed, else the same selector again (idempotent); a **stamp target**
+is re-checked with `docs_index.py --drift`. Resume never bumps a reslice or
+stamp target. A breadcrumb with no `baseline` (written under an older brief)
+falls back to re-reading each `files_written` file against the localize
+report's fields. A finding that became `open`
 after `plan.planned_at` gets wave 1 for itself alone. Phase 1's existing rule
 holds throughout: re-verify every artifact a partial record names against
 disk before touching it. A resumed wave 1 keeps the recorded `concurrency`

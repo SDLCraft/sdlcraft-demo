@@ -84,10 +84,15 @@ read for what it is:
   *should* have adjudicated is the source, which is usually `prd`. If PRD is
   genuinely silent, this is a product decision: ask, and record the answer as a
   new FR/NFR rather than as a downstream patch.
-- **Two findings localize to the same symbol** → merge them: resolve one and
-  mark the other `duplicate` with `duplicate_of`. Never fix the same symbol
-  twice in one run; the second edit will be reasoning against a file the first
-  already changed.
+- **Two findings localize to the same symbol** → `plan` keeps both in one
+  aggregate, flagged as a possible duplicate, earlier id first: a shared name
+  is not evidence of one defect, and a wrong fold drops a finding unseen. The
+  earlier is fixed; the later's worker first checks whether that fix removed
+  its defect — if so it reports `duplicate` (`duplicate_of` the earlier) and
+  the session's Phase-6 write marks it, otherwise it is a second defect and
+  gets its own fix. Only a localizer's own `duplicate_of` skips the check.
+  Never fix the same defect twice in one run; the second edit will be
+  reasoning against a file the first already changed.
 - **The finding's `suspected_stage` is right** → say so plainly and move on.
   Confirming the raiser's guess is a normal outcome; do not manufacture a
   more interesting localization to justify the walk.

@@ -318,7 +318,7 @@ python "${CLAUDE_SKILL_DIR}/findings.py" plan --from .claude/skills-state/sdlc-r
 
 It groups the findings into **aggregates** (write sets that share an
 artifact, joined transitively, directory-aware, capped at five; two findings
-on one located symbol become one, the later a `duplicate`) and orders them
+on one symbol and kind stay apart, a possible duplicate) and orders them
 into **stage-waves** by the pipeline stage of the located artifact, upstream
 first (`prd → ux → design → data → api → arch → test → task`): an aggregate
 downstream of another aggregate's write set waits for it even when the two
@@ -407,7 +407,7 @@ close. Without the Agent tool, run the sequences yourself in plan order.
 - **`surgical`** (content) — scripted, in this order, no hand edits to any
   task JSON:
   1. edit the source slice (`Edit`, by `INDEX.yaml` line range);
-  2. `python "${CLAUDE_SKILL_DIR}/bump_artifact.py" --file docs/<SOURCE> --summary "<what changed>" --by sdlc-repair`
+  2. `python "${CLAUDE_SKILL_DIR}/bump_artifact.py" --file docs/<SOURCE> --summary "FND-NNN: <what changed>" --by sdlc-repair`
      (version bump + changelog line in one write; it refuses an out-of-order
      changelog — fix the changelog, do not `--force` blindly). A TASKS source
      takes `--patch`: its minor version gates task checks, and a minor bump
@@ -491,7 +491,7 @@ close. Without the Agent tool, run the sequences yourself in plan order.
      `validate_schema.py`, `reslice_embeds.py --check` and `doctor.py --quick`
      are green, bare, with captured exit codes (Phase 5);
   4. **the obligation chain closes in this run** — a new TST obliges its
-     realizing `kind: test` task, wired per checks 27/28; a new work_unit
+     realizing `kind: test` task, wired per checks 27/43/28; a new work_unit
      obliges its impl task AND a test naming it in `targets_work_units` (or a
      structured deferral); a new entity obliges its traces. Every link must
      itself pass 2 — one undetermined link makes the whole fix `re-invoke`.
@@ -821,4 +821,4 @@ on top (`references/orchestration.md`, "Why two waves", "Choosing N").
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.30"
+skill_version: "1.31"

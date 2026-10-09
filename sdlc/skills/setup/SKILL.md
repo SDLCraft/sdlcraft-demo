@@ -236,6 +236,7 @@ row and name `python .claude/sdlc/autocommit.py mode --set on` for after
 `git init`. `SDLC_AUTO_COMMIT=off` in the environment overrides everything.
 Every skill's close then commits, or not, by reading this answer; none of
 them asks again. Mechanics: `references/auto-commit.md`.
+Third question, only if `mode` printed `caches: … untrack available`: `references/auto-commit.md` → "Tracked code caches".
 
 ### 5 — Report + the one caveat that matters
 Summarize what was installed and the action log. Then flag the timing caveat:
@@ -359,4 +360,4 @@ versions, and refreshes the index. Use `--dry-run` to preview.
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.31"
+skill_version: "1.32"

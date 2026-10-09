@@ -37,7 +37,13 @@ failure: every reason not to commit is one printed line, and the exit code is 0.
 
 Subcommands:
     mode [--set on|off]        read or set the stored answer (setup owns the
-                               marker; this never creates one)
+                               marker; this never creates one); also prints
+                               one `caches:` line (tracked code caches)
+    untrack-caches [--dry-run] [--decline] [--invocation "..."]
+                               stop tracking code's regenerable packets/ and
+                               stack/ caches in ONE commit of deletions only
+                               (files stay on disk); --decline records "leave
+                               them" in the marker and changes nothing
     begin --skill S            record the run baseline; silent, keeps an
                                existing one (a resumed run keeps its origin)
     commit --skill S --invocation "..." --summary "..."
@@ -52,7 +58,8 @@ Exit codes:
     0 — committed, nothing to commit, mode off, or not committed for an
         environmental reason (not a repository, git missing or too old,
         identity unset, a hook refused) — the printed line says which.
-    1 — `mode --set` refused (unknown value, or no marker: run /sdlc:setup).
+    1 — `mode --set` or `untrack-caches --decline` refused (unknown value, or
+        no marker: run /sdlc:setup).
     2 — usage error.
 """
 
@@ -73,7 +80,7 @@ try:
 except Exception:
     pass
 
-HELPER_VERSION = "4"
+HELPER_VERSION = "5"
 MARKER_REL = Path(".claude/sdlc/sdlc-plugin.json")
 ENV_OVERRIDE = "SDLC_AUTO_COMMIT"
 MODES = ("off", "on")
@@ -83,6 +90,7 @@ DEFAULTS = {"mode": "off", "decided_on": None}
 SEPARATOR = " → "
 MIN_GIT = (2, 25)  # --pathspec-from-file on `git add` and `git commit`
 MODE_CMD = "python .claude/sdlc/autocommit.py mode"
+UNTRACK_CMD = "python .claude/sdlc/autocommit.py untrack-caches"
 
 STATE = ".claude/skills-state"
 # Every artifact skill's close touches these (record-run may stamp the marker).
@@ -199,12 +207,13 @@ def write_auto_commit(root: Path, updates: dict) -> bool:
 # git plumbing - every call tolerant, every exit code read explicitly
 # ---------------------------------------------------------------------------
 
-def _git(cwd, *args: str, stdin: "str | None" = None):
+def _git(cwd, *args: str, stdin: "str | None" = None, env: "dict | None" = None):
     """A CompletedProcess, or None when git itself cannot be started."""
     try:
         return subprocess.run(
             ["git", *args], cwd=str(cwd) if cwd else None, input=stdin,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env={**os.environ, **env} if env else None,
         )
     except OSError:
         return None
@@ -610,12 +619,141 @@ def _left_entries(toplevel: Path, prefix: str) -> "tuple[list[str], list[str]]":
     return left, tracked
 
 
+def _cache_label(dirs: "list[str]") -> str:
+    dirs = [d for d in CACHE_DIRS if d in dirs]
+    return "{" + ",".join(dirs) + "}" if len(dirs) > 1 else dirs[0]
+
+
+def _cache_of(path: str, prefix: str) -> "str | None":
+    rel = path[len(prefix):] if prefix and path.startswith(prefix) else path
+    return next((d for d in CACHE_DIRS if rel.startswith(f"{CODE_DIR}/{d}/")), None)
+
+
+def _cache_specs(prefix: str) -> "list[str]":
+    return [f":(literal){prefix}{CODE_DIR}/{d}" for d in CACHE_DIRS]
+
+
+def tracked_cache_files(toplevel: Path, prefix: str) -> "list[str]":
+    """Every cache file the index tracks, changed or not (toplevel-relative)."""
+    p = _git(toplevel, "ls-files", "-z", "--", *_cache_specs(prefix))
+    if p is None or p.returncode != 0:
+        return []
+    return [f for f in p.stdout.split("\0") if f]
+
+
+def caches_ignored(toplevel: Path, prefix: str, files: "list[str]") -> bool:
+    """True when an ignore rule covers the tracked caches. `--no-index`: without
+    it git skips the ignore rules for a path that is already tracked, so the
+    nested sdlc-code/.gitignore would never be seen to apply."""
+    seen: "set[str]" = set()
+    for f in files:
+        d = _cache_of(f, prefix)
+        if d is None or d in seen:
+            continue
+        seen.add(d)
+        p = _git(toplevel, "check-ignore", "-q", "--no-index", "--", f)
+        if p is None or p.returncode != 0:
+            return False
+    return bool(seen)
+
+
+def caches_decided_on(root: Path) -> "str | None":
+    stored = read_marker(root).get("auto_commit")
+    value = stored.get("caches_decided_on") if isinstance(stored, dict) else None
+    return str(value) if value else None
+
+
 def _cache_remedy(tracked: "list[str]") -> str:
-    dirs = [d for d in CACHE_DIRS if d in tracked]
-    label = "{" + ",".join(dirs) + "}" if len(dirs) > 1 else dirs[0]
-    cmd = " ".join(f"{CODE_DIR}/{d}" for d in dirs)
-    return (f"{len(tracked)} tracked cache file(s) under {CODE_DIR}/{label} - "
-            f"untrack once: git rm -r --cached {cmd}")
+    return (f"{len(tracked)} tracked cache file(s) under {CODE_DIR}/{_cache_label(tracked)} - "
+            f"untrack once: {UNTRACK_CMD}")
+
+
+def _cache_hint(root: Path, toplevel: Path, prefix: str, cached: "list[str]") -> str:
+    """The close's cache suffix: only where the subcommand can act (an ignore
+    rule covers the caches) and the user has not said `leave`."""
+    if not cached or caches_decided_on(root):
+        return ""
+    if not caches_ignored(toplevel, prefix, tracked_cache_files(toplevel, prefix)):
+        return ""
+    return " · " + _cache_remedy(cached)
+
+
+def caches_line(root: Path) -> str:
+    """The `caches:` line `mode` prints - what setup reads before asking."""
+    ver = git_version()
+    top = git_toplevel(root) if ver is not None else None
+    if top is None:
+        return ""
+    prefix = _prefix(root, top)
+    files = tracked_cache_files(top, prefix)
+    if not files:
+        return "caches: none tracked"
+    dirs = [d for d in (_cache_of(f, prefix) for f in files) if d]
+    line = f"caches: {len(files)} tracked under {CODE_DIR}/{_cache_label(dirs)}"
+    line += (" - untrack available" if caches_ignored(top, prefix, files)
+             else " - not ignored here, left alone")
+    decided = caches_decided_on(root)
+    return line + (f" - decided {decided}" if decided else "")
+
+
+def untrack_caches(root: Path, dry_run: bool, invocation: str) -> str:
+    """Stop tracking code's regenerable caches: ONE commit of deletions, files
+    left on disk. The commit is built in a TEMPORARY index (`read-tree HEAD`,
+    `rm --cached`, `commit`), so the user's own staged work never rides in it
+    and the working files are never re-added (`commit --only` would re-add
+    them); the real index is then told the caches left HEAD."""
+    if auto_commit_config(root)["mode"] != "on":
+        return f"[OK] auto-commit is off - nothing untracked (turn it on: {MODE_CMD} --set on)"
+    ver = git_version()
+    if ver is None or ver < MIN_GIT:
+        return "[DRAFT] not untracked - git 2.25 or newer is needed. Nothing changed."
+    toplevel = git_toplevel(root)
+    if toplevel is None:
+        return "[DRAFT] not untracked - this project is not a git repository. Nothing changed."
+    prefix = _prefix(root, toplevel)
+    files = tracked_cache_files(toplevel, prefix)
+    if not files:
+        return "[OK] no tracked cache files - nothing to untrack"
+    if not caches_ignored(toplevel, prefix, files):
+        return (f"[DRAFT] not untracked - the {len(files)} tracked caches under {CODE_DIR}/ are not "
+                f"ignored, so they may be meant to stay tracked. Nothing changed.")
+    specs = _cache_specs(prefix)
+    ls = _git(toplevel, "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", *specs)
+    in_head = [f for f in (ls.stdout.split("\0") if ls is not None and ls.returncode == 0 else []) if f]
+    if not in_head:
+        return "[OK] no cache file is committed - nothing to untrack"
+    subject = f"{invocation}{SEPARATOR}untracked {len(in_head)} regenerable cache files"
+    if dry_run:
+        return (f"[DRY-RUN] would untrack {len(in_head)} cache file(s) in one commit of deletions "
+                f"(files stay on disk): {subject}")
+    tmp = Path(tempfile.mkdtemp(prefix="sdlc-untrack-"))
+    env = {"GIT_INDEX_FILE": str(tmp / "index")}
+    msg = tmp / "message"
+    msg.write_text(_message(subject, []), encoding="utf-8", newline="\n")
+    try:
+        steps = (("read-tree", "HEAD"),
+                 ("rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", *specs),
+                 ("commit", "--quiet", "-F", str(msg)))
+        for step in steps:
+            done = _git(toplevel, *step, env=env)
+            if done is None or done.returncode != 0:
+                reason = _first_line((done.stderr + "\n" + done.stdout) if done else "")
+                return f"[DRAFT] not untracked - {reason}. Nothing changed: the files are on disk."
+    finally:
+        for name in (msg, tmp / "index"):
+            try:
+                name.unlink()
+            except OSError:
+                pass
+        try:
+            tmp.rmdir()
+        except OSError:
+            pass
+    _git(toplevel, "reset", "-q", "--", *specs)
+    sha = _git(toplevel, "rev-parse", "--short", "HEAD")
+    short = sha.stdout.strip() if sha is not None and sha.returncode == 0 else "HEAD"
+    return (f"[OK] untracked {len(in_head)} cache file(s) in {short} - they stay on disk and "
+            f"/sdlc:code regenerates them; a teammate who pulls this commit loses their copies")
 
 
 def cmd_begin(args) -> int:
@@ -686,7 +824,9 @@ def _commit(args, root: Path) -> int:
     if elsewhere:
         note = f" · {len(elsewhere)} file(s) outside docs/ and .claude/" + note
     if not files:
-        print(f"[OK] nothing to commit - {invocation} changed no file the pipeline owns{note}")
+        _left, cached = _left_entries(toplevel, prefix)
+        print(f"[OK] nothing to commit - {invocation} changed no file the pipeline owns{note}"
+              + _cache_hint(root, toplevel, prefix, cached))
         return 0
 
     if args.dry_run:
@@ -727,15 +867,28 @@ def _commit(args, root: Path) -> int:
     left, cached = _left_entries(toplevel, prefix)
     if left:
         line += f" · {len(left)} other pipeline file(s) changed by something else, left uncommitted"
-    if cached:
-        line += " · " + _cache_remedy(cached)
-    print(line)
+    print(line + _cache_hint(root, toplevel, prefix, cached))
     return 0
 
 
 # ---------------------------------------------------------------------------
 # mode
 # ---------------------------------------------------------------------------
+
+def cmd_untrack(args) -> int:
+    root = Path(args.project_root).resolve()
+    if args.decline:
+        if not write_auto_commit(root, {"caches_decided_on": _iso_today()}):
+            print(f"[FAIL] no .claude/sdlc/sdlc-plugin.json in {root} - run /sdlc:setup first; "
+                  f"it owns that file.")
+            return 1
+        print(f"[OK] the tracked caches stay tracked - recorded, no run will mention them again "
+              f"(untrack later with: {UNTRACK_CMD})")
+        return 0
+    invocation = " ".join(args.invocation.split()) or "untrack-caches"
+    print(untrack_caches(root, args.dry_run, invocation))
+    return 0
+
 
 def cmd_mode(args) -> int:
     root = Path(args.project_root).resolve()
@@ -755,6 +908,9 @@ def cmd_mode(args) -> int:
         if env in MODES:
             print(f"      {ENV_OVERRIDE}={env} in this environment is overriding whatever the marker says.")
         print(f"      {repo_status_line(root)}")
+        caches = caches_line(root)
+        if caches:
+            print(f"      {caches}")
         print(f"\nNEXT: change it with: {MODE_CMD} --set on|off")
         return 0
 
@@ -788,6 +944,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help=argparse.SUPPRESS)  # retired; answered with one line
     p.add_argument("--project-root", default=".", help="Project root (default: cwd).")
     p.set_defaults(func=cmd_mode)
+
+    p = sub.add_parser("untrack-caches", help="Stop tracking code's packets/ and stack/ caches "
+                       "(one commit of deletions; the files stay on disk).")
+    p.add_argument("--invocation", default="", help='The command as typed, e.g. "/sdlc:setup"; '
+                   "heads the commit subject.")
+    p.add_argument("--decline", action="store_true",
+                   help="Record that the user chose to leave the caches tracked; change nothing else.")
+    p.add_argument("--dry-run", action="store_true", help="Print what would be untracked; write nothing.")
+    p.add_argument("--project-root", default=".", help="Project root (default: cwd).")
+    p.set_defaults(func=cmd_untrack)
 
     p = sub.add_parser("begin", help="Record the run baseline (Phase 1, before the run's first write).")
     p.add_argument("--skill", required=True, help="The running skill: prd, ux, ..., code, repair, lesson, setup.")
