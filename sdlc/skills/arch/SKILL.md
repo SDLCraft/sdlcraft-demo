@@ -814,7 +814,7 @@ writing an `arch_warnings` entry; it is not restated here.**
 In short: coverage (API/UX/DATA-store/PRD-feature/PRD-integration), edge/
 trace integrity, ID-prefix formats, and — in container mode — work_units
 integrity (#21), FR→work_unit coverage (#22), interface contracts (#23), and
-edge roll-up (#24) all block `complete`; everything else (#25-#32,
+edge roll-up (#24) all block `complete`; everything else (#25-#33,
 provenance staleness, upstream-status awareness) warns only.
 
 **System-mode update / `--reconcile`, when #25 fires.** #25 (a claimed FR
@@ -1216,4 +1216,4 @@ The architecture interview can be long. Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.26"
+skill_version: "1.27"

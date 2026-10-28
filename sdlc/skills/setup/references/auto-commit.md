@@ -46,8 +46,12 @@ and the summary says it is a draft.
 past — after that container's ring, doctor check and ledger write, before the
 continue/stop gate — with `--checkpoint`, which keeps the baseline for the
 rest of the run, so a run that builds three containers leaves three
-reviewable commits and a close that usually has nothing left to commit. Every
-other commit consumes the baseline: the run is over, whatever the outcome.
+reviewable commits and a close that usually has nothing left to commit. `repair`
+does the same once per **located stage** — at the drain of a wave whose next
+wave has a different stage, or that ends the plan — once the drained
+resolutions are written and `doctor.py --quick` is green; it never commits a
+red tree as a checkpoint. Every other commit consumes the baseline: the run is
+over, whatever the outcome.
 
 ```bash
 python .claude/sdlc/autocommit.py commit --skill <skill> \
@@ -120,7 +124,10 @@ Two sets, never `git add -A`:
    changed when the run began and that the run changed again. A file that was
    already changed and that the run did not touch stays where it is — a hand
    edit made before the run never rides in its commit. Code's regenerable
-   caches (below) are never part of it. This is what makes "every file the run
+   caches (below) are never part of it, and neither is Python bytecode (any
+   path under a `__pycache__/` directory, such as the one running an installed
+   helper writes beside it); a path the run names exactly is still staged.
+   This is what makes "every file the run
    touched" hold without a list anyone has to maintain.
 2. **The skill's own files** — the table below, committed even without a
    baseline (a run that started under an older helper, or whose `begin` was

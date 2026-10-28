@@ -291,7 +291,10 @@ lessons:                                   # REQUIRED — list[Lesson]; may be e
     # describing one defect routinely label differently.
     # `--allow-duplicate` overrides when the match is wrong.
     occurrences: 1                         # OPTIONAL — int >= 1. Absent means
-                                           #   once. Written by lessons.py.
+                                           #   once. Written by lessons.py: the
+                                           #   distinct hits the report names
+                                           #   (`add --occurrences N`), summed
+                                           #   over re-sent reports.
     first_seen_at: null                    # OPTIONAL — first report (raised_at
                                            #   stays the original too)
     last_seen_at: null                     # OPTIONAL — most recent report.
@@ -300,7 +303,9 @@ lessons:                                   # REQUIRED — list[Lesson]; may be e
                                            #   next batch and the maintainer's
                                            #   merge updates it in place.
     sightings: []                          # OPTIONAL — [{at, plugin_version,
-                                           #   installed_version, skill_version}],
+                                           #   installed_version, skill_version,
+                                           #   count}] - `count` (int > 1, absent
+                                           #   = 1) is the hits one report named,
                                            #   newest last, capped at 5 like
                                            #   `evidence`. Appended by
                                            #   `stamp_recurrence` on every

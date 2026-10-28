@@ -93,6 +93,11 @@ read for what it is:
   gets its own fix. Only a localizer's own `duplicate_of` skips the check.
   Never fix the same defect twice in one run; the second edit will be
   reasoning against a file the first already changed.
+- **Two findings share a cluster** → the cluster only lets one worker read the
+  shared slices once; it is a reading convenience and makes no duplicate claim.
+  Each finding keeps its own report and located source, and `plan` still
+  groups by write sets. A member whose walk leaves the cluster's ground is
+  ejected, re-clustered once at the next drain, and then walked solo.
 - **The finding's `suspected_stage` is right** → say so plainly and move on.
   Confirming the raiser's guess is a normal outcome; do not manufacture a
   more interesting localization to justify the walk.
@@ -208,7 +213,7 @@ read for what it is:
   (6); say which in one line and carry on. A malformed preference must never
   fail a repair run: it decides how fast to localize, not whether the fix is
   right.
-- **`--parallel N` with at most one finding to localize** (a named-finding run,
+- **`--parallel N` with at most one cluster to localize** (a named-finding run,
   a `--flag` intake) → the flag is still a deliberate statement, so it updates
   the remembered value; this run's effective concurrency is 1. Say both in one
   line rather than implying N applied.

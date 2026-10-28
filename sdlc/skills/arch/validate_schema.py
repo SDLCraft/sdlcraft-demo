@@ -3394,6 +3394,55 @@ def check_owns_callables(container: ArchContainer, file_label: str) -> List[str]
     return warns
 
 
+# Cross-check 33 (warning-only): change history inside a work_unit's contract
+# text. Contract fields state today's behaviour; history lives in
+# metadata.changelog (bump_artifact.py), a "why" sentence in a `<field>_rationale`
+# sibling. The pattern is strict on purpose - a bare `v1.2` would flag
+# "OpenAPI v3.1" prose. Pinned, with the marker phrase, by
+# _smoke/contract_history_selftest.py; a later TEST-STRATEGY / DATA-MODEL check
+# is a lockstep copy of both strings. It blocks nothing, so it needs no version
+# floor (CLAUDE.md 10 gates blocking checks only).
+CONTRACT_HISTORY_PATTERN = r"FND-\d+|Through v\d|\(v\d+\.\d+[,)]"
+CONTRACT_HISTORY_MARKER = "change history"
+_CONTRACT_HISTORY_RE = re.compile(CONTRACT_HISTORY_PATTERN)
+
+
+def _contract_strings(value: Any):
+    """Every string leaf of a contract field (a str, a list, or a mapping)."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _contract_strings(v)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            yield from _contract_strings(v)
+
+
+def check_contract_history(container: ArchContainer, file_label: str) -> List[str]:
+    """Warning-only (cross-check 33): one line per work_unit whose summary /
+    inputs / output / raises / signature carry change history. The line names
+    the unit id and the matched tokens ONLY - never the contract text, so
+    nothing downstream can mint a finding from quoted prose."""
+    warns: List[str] = []
+    for comp in container.components or []:
+        for u in comp.work_units or []:
+            seen: List[str] = []
+            for field in (u.summary, u.inputs, u.output, u.raises, u.signature):
+                for text in _contract_strings(field):
+                    for m in _CONTRACT_HISTORY_RE.finditer(text):
+                        tok = m.group(0)
+                        if tok not in seen:
+                            seen.append(tok)
+            if seen:
+                more = f" | (+{len(seen) - 4} more)" if len(seen) > 4 else ""
+                warns.append(
+                    f"{file_label}: {comp.component_id}/{(u.name or '?').strip()}: "
+                    f"{' | '.join(seen[:4])}{more}"
+                )
+    return warns
+
+
 def check_configuration(container: ArchContainer, file_label: str) -> List[str]:
     """Warning-only (D-arch-2): duplicate config keys, and consumed_by names
     that are not components of this container."""
@@ -4046,6 +4095,7 @@ def validate_all(arch_path: Path) -> int:
     api_mirror_warns: List[str] = []
     gated_wu_warns: List[str] = []      # 21/22/23/24 findings on pre-floor files
     owns_collision_warns: List[str] = []
+    contract_history_warns: List[str] = []
     configuration_warns: List[str] = []
     warning_id_errs: List[str] = check_warning_ids(arch.arch_warnings, "arch_warnings")
     id_format_errs: List[str] = check_arch_id_formats(arch)
@@ -4074,6 +4124,7 @@ def validate_all(arch_path: Path) -> int:
             fr_wu_errs.extend(fr_errs)
             contract_errs.extend(ct_errs)
         owns_collision_warns.extend(check_owns_callables(c, name))
+        contract_history_warns.extend(check_contract_history(c, name))
         configuration_warns.extend(check_configuration(c, name))
         api_mirror_warns.extend(check_api_consumer_mirror(c, name))
         component_trace_errs.extend(
@@ -4203,6 +4254,7 @@ def validate_all(arch_path: Path) -> int:
         ("{n} callable(s) are claimed by more than one function's owns_callables [cross-check 29]", owns_collision_warns),
         ("{n} function(s) are called by nothing in the architecture, so the code built for them would never run [cross-check 32]", unreachable_units),
         ("{n} configuration entr(y/ies) need attention [cross-check 30]", configuration_warns),
+        ("{n} function(s) carry change history inside their contract text (a version tag, an FND id, or \"Through vN\" narrative) - the contract fields state today's behaviour only; strip a tag when you next edit that field, its fact goes to metadata.changelog (bump_artifact.py) [cross-check 33]", contract_history_warns),
         ("{n} store reference(s) do not match the DATA-MODEL store ids", store_resolution_warns),
         ("{n} DATA entit(y/ies) are read or written by no component in any container, so no code will ever touch them - trace each from its owning component, or defer it with a reason", untraced_entities),
         ("{n} external container(s) realize a PRD integration without an external_contract", ext_contract_warns),

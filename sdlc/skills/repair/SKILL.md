@@ -11,7 +11,7 @@ description: >
   handing the user the exact downstream re-invocation sequence (each stage's
   --reconcile form; the walk's reasoning is left on the finding as handoff
   notes, and the chain routes itself). The session orchestrates: opus workers
-  localize every finding, up to N in flight (--parallel N, remembered per
+  localize the findings by cluster, up to N in flight (--parallel N, remembered per
   project; initially 6), one plan gate orders the whole queue upstream-first,
   then workers fix one artifact aggregate at a time. Forms: /sdlc:repair
   (full flow), /sdlc:repair --check [--no-emit] [--provenance] (sweep only,
@@ -59,7 +59,8 @@ the real defect stays in ARCH or PRD, invisible, waiting.
   workers' reports and breadcrumbs, committed with the run (`references/orchestration.md`).
 - A close report naming the stale tasks `/sdlc:code` will offer to rebuild.
 
-It owns no `docs/` artifact of its own.
+It owns no `docs/` artifact of its own. Its scope: the findings a build or an interview skill
+surfaced (about a dozen) plus the defects its own fixes expose beside them — not a corpus audit.
 
 **This skill never writes `CLAUDE.md`.** That file belongs to `/sdlc:setup`, which
 writes one static `## SDLC Documents` block. Never add a section, a bullet, a
@@ -75,10 +76,10 @@ defect is an `LSN-NNN`, and all of them surface, generated, in
 | `SKILL.md` | This file — dispatch, the six phases, the gates. |
 | `FINDINGS.schema.yaml` | Canonical schema for `.claude/skills-state/sdlc-findings.yaml` (version 2). |
 | `validate_findings.py` | Pydantic v2 validator for the queue (+ id/resolution/propagation integrity, version-gated). `--stats` prints the suspected-vs-located matrix. |
-| `findings.py` | The queue's ONLY writer: `add \| list \| plan \| reopen \| validate \| stats`. Every stage calls it as `python "${CLAUDE_SKILL_DIR}/../repair/findings.py"`; `setup` installs a copy at `.claude/sdlc/findings.py` for ambient sessions. Validates before it appends, dedupes, stamps recurrence; `plan` orders the open set into aggregates and stage-waves. |
+| `findings.py` | The queue's ONLY writer: `add \| cluster \| list \| plan \| reopen \| validate \| stats`. Every stage calls it as `python "${CLAUDE_SKILL_DIR}/../repair/findings.py"`; `setup` installs a copy at `.claude/sdlc/findings.py` for ambient sessions. Validates before it appends, dedupes, stamps recurrence; `plan` orders the open set into aggregates and stage-waves. |
 | `doctor.py` | The sweep runner. `--quick` = cross-artifact linter only (what `/sdlc:code` runs at component boundaries); default = the full sweep; `--provenance` = upstream-hash drift; `--emit-findings [--warnings-as-findings]` records failures through `findings.py`. |
 | `bump_artifact.py` | Bumps `metadata.<name>_version` and prepends the changelog line as one text-level edit (comments preserved); refuses an out-of-order changelog unless `--force`. Installed by `setup` at `.claude/sdlc/bump_artifact.py`. |
-| `references/orchestration.md` | The two worker waves: briefs, report shapes, breadcrumbs, aggregates and their order, the plan gate, the drain between waves, the consolidated handoffs, the close card rows. Read by the session in Phase 2. |
+| `references/orchestration.md` | The two worker waves: briefs, report shapes, breadcrumbs, aggregates and their order, the plan gate, the drain between waves, the consolidated handoffs, convergence, the round card, the close card rows. Read by the session in Phase 2. |
 | `references/back-propagation.md` | Finding → source stage, and the write set (Step 3½). Read by every localize worker; by the session when it walks inline. |
 | `references/forward-propagation.md` | Surgical / additive / re-invoke, the scripted sequences, verification, the resolution write, handback. Read by every fix worker; by the session when it fixes inline. |
 | `references/edge-cases.md` | Unusual situations, the sweep's labels, verification caveats. |
@@ -95,7 +96,7 @@ dispatch question (Phase 2) and becomes the remembered `run_defaults.parallel`;
 absent, it means "ask me". Order: **flag > gate answer > remembered value > 6**.
 
 1. **No arguments** → **full flow**: sweep, merge with open findings, localize
-   every one of them, plan, confirm once, fix, verify, hand back. Phases 1–6
+   them by cluster, plan, confirm once, fix, verify, hand back. Phases 1–6
    below. The run works EVERY open finding the extent answer covers, and it
    never stops at a handoff.
 2. **`--check`** → **sweep only**: run the full doctor, print the report, stop.
@@ -173,8 +174,10 @@ handoffs: []                 # Phase 6: the consolidated command chain, printed 
 baseline_checks: {}          # Phase 2: {"<check name> <target>": <exit>} copied from
                              #   doctor.py --json, so Phase 5 can say "red before, red after"
 provenance_drift: []         # Phase 2: the [stale] lines doctor.py --provenance printed
-metrics: {}                  # run telemetry (CLAUDE.md 15): validator_runs, validator_failures,
-                             # resumes, workers_dispatched, localize_concurrency, max_wave_width
+rounds: []                   # appended at each round's end: orchestration.md, "Convergence"
+metrics: {}                  # run telemetry (CLAUDE.md 15): validator_runs, validator_failures, resumes,
+                             # workers_dispatched, localize_concurrency, localize_clusters, max_wave_width,
+                             # worker_context_tokens_localize, worker_context_tokens_fix (host-reported, else omitted)
 lesson_notes: []             # mid-run lesson scratch (CLAUDE.md 15): noted, never
                              # acted on mid-run; drained by the Phase-6 self-review
 ```
@@ -192,13 +195,13 @@ aggregate stands (`references/orchestration.md`, "Resume").
 
 **The queue is re-read after every finding closes and after every stage-wave
 drains.** A finding minted mid-run (`--raised-by sdlc-repair`: a defect a
-worker surfaced beside the one it was fixing, whose decision this run can
-obtain) is `open` in the queue this run owns, so the loop picks it up next —
-it joins the next stage-wave's plan through a localize pass of its own (short:
-the finding that minted it is most of the walk), its gate question offers
-*decide it now* at position 1, and it lands in `findings_worked` like any
-other. A run invoked with named findings (`/sdlc:repair FND-003`) works the
-ones it minted too; they are not "other findings".
+worker met beside the one it was fixing) joins this run only when its site lies
+inside what that fix had to READ; it is then `open` in the queue this run
+owns, goes through the drain's cluster pass, gets *decide it now* at position 1
+and lands in `findings_worked` like any other. A defect reached by looking
+further is latent: minted, then parked (`deferred`, `park_reason: latent`). A
+run invoked with named findings (`/sdlc:repair FND-003`) works the ones it
+minted too. The test and the trend: `references/orchestration.md`, "Convergence".
 
 **`EXIT`** (any free-text field, any phase): persist the state file with
 `status: aborted`, confirm which artifacts were already edited, run
@@ -251,23 +254,26 @@ marked resolved`) name the `triaged` re-invoke findings whose downstream
 artifacts have all been rebuilt since the fix: verify their hops (Phase 5) and
 close them (Phase 6) before any wave — they need no walk.
 
-**The dispatch question.** Load `references/orchestration.md` now; "Choosing
-N" holds the options and labels. Before wave 1, ONE `AskUserQuestion` — how
-many localize workers in flight, the resolved N with its source at position 1,
-the provisional table (`python "${CLAUDE_SKILL_DIR}/findings.py" plan`, no
-`--from`) as its `preview` — **skipped** when `--parallel N` answered it, when
-at most one finding needs localizing, and when the Agent tool is unavailable.
-Record `concurrency:`; only a decided N (flag or answer) rewrites `run_defaults.parallel`.
+**The dispatch question.** Load `references/orchestration.md` now; "Choosing N" holds the
+options and labels. Before wave 1, ONE `AskUserQuestion` — how many localize workers in
+flight, the resolved N with its source at position 1, the provisional table (`python
+"${CLAUDE_SKILL_DIR}/findings.py" plan`, no `--from`) as its `preview` — **skipped** when
+`--parallel N` answered it, when the findings to localize form at most one cluster, and when
+the Agent tool is unavailable. Record `concurrency:`; only a decided N (flag or answer)
+rewrites `run_defaults.parallel`. The call also carries the scope questions (full flow, asked
+even when N is not): *defer the cosmetic findings without a walk* (`list --open` prints each
+row's severity); for the parked latent findings (`list --status deferred`), *work them too*.
 
-**Wave 1 — localize.** Every finding in the open set that carries no
-`resolution.located_stage` gets ONE read-only worker (the Agent tool, `model:
-"opus"`, `run_in_background: true`, N in flight, rolling — a worker even at
-N = 1, for context isolation) whose brief carries paths only — the finding id
-and queue path, `references/back-propagation.md`, the index, the snapshot, and
-the report path `.claude/skills-state/sdlc-repair/localize/<FND>.yaml`. The
-worker walks, computes the write set (Step 3½) and writes that one file; it
-edits nothing and asks nothing. Without the Agent tool, walk them yourself,
-one at a time, and say so on the card. The shape of every walk, whoever runs it:
+**Wave 1 — localize.** `python "${CLAUDE_SKILL_DIR}/findings.py" cluster --json` groups
+the findings to localize (the open set's, without a `resolution.located_stage`); the
+wave dispatches ONE read-only worker per cluster (the Agent tool, `model: "opus"`,
+`run_in_background: true`, N in flight, rolling — a worker even at N = 1, for context
+isolation), its brief carrying paths only: the member ids and queue path,
+`references/back-propagation.md`, the index, the snapshot, one report path per member
+(`.claude/skills-state/sdlc-repair/localize/<FND>.yaml`). It walks each member, writes
+that member's file, edits nothing, asks nothing; membership is no duplicate claim.
+Without the Agent tool, walk them yourself, one finding at a time, and say so on the
+card. The shape of every walk, whoever runs it:
 
 - walk **backwards** from where the finding surfaced to the earliest artifact
   whose content is wrong; a finding raised by an interview skill usually
@@ -323,9 +329,8 @@ into **stage-waves** by the pipeline stage of the located artifact, upstream
 first (`prd → ux → design → data → api → arch → test → task`): an aggregate
 downstream of another aggregate's write set waits for it even when the two
 are disjoint, `related` and `recurrence_of` findings sit together, and the
-close-first findings are already closed. That order is the dependency order
-of the whole queue, and it is stated here once (`references/orchestration.md`
-holds the mechanics).
+close-first findings are already closed. That is the dependency order of the
+whole queue, stated once here (`references/orchestration.md` has the mechanics).
 
 Then ONE `AskUserQuestion`, with the whole table inside it (AUTHORING's channel
 rule: what a decision depends on rides in the call, in the recommended
@@ -343,8 +348,9 @@ option's `preview`, never in chat markdown the same turn):
   owns a new unit, what it is called, which of two contradictory values is
   right): the worker's proposal at position 1 with its `basis`, *hand it off*
   last. Answered, the finding is authored in this run (`additive`); declined,
-  it is a handoff and the run carries on. Four per call; a fifth goes in a
-  second call before wave 2.
+  it is a handoff and the run carries on. Findings a localizer links with
+  `decide_with` share one aggregate and ONE question, its answer written under
+  every linked id. Four per call; a fifth goes in a second call before wave 2.
 
 Per finding the table shows the **walk** (surfacing site → stages examined →
 chosen source → why), the proposed mode (`surgical` / `additive` /
@@ -356,8 +362,7 @@ four-part additive criterion in Phase 4 holds (offered, never argued for).
 **When both rules claim position 1** — the finding is a recurrence *and* its fix
 meets the four-part additive criterion — *fix fully* takes position 1. The
 recurrence default changes which mode leads, never which modes are offered
-(`references/forward-propagation.md` says exactly that: "never a refusal of the
-in-run modes, just a changed default"), while the additive rule rests on a
+(`references/forward-propagation.md`), while the additive rule rests on a
 measured cost — routing a fully-determined item to `re-invoke` costs the user
 two interviews and discards the walk.
 
@@ -468,8 +473,9 @@ close. Without the Agent tool, run the sequences yourself in plan order.
      a baseline failure for Phase 5, not this run's to clear;
   7. verify (Phase 5), exit codes captured into the report;
   8. `python "${CLAUDE_SKILL_DIR}/../code/topo_order.py" --scope <cid> --state .claude/skills-state/sdlc-code.state.yaml` (edition-ok: demo edition skips it — see below)
-     plus `--affected <FR-NNN…>` for a PRD change → `stale_tasks` in the
-     report (stale + affected, with the reason recorded).
+     plus `--affected <FR-NNN…>` for a PRD change → `stale_tasks` in the report:
+     run it in place before the first edit and again here, list only the newly
+     stale + affected tasks, with the reason (`references/orchestration.md`, "Pricing").
 
   Steps 6 and 8 call the `task` and `code` skills. In the **demo edition**
   (`${CLAUDE_SKILL_DIR}/../task/SKILL.md` absent) there is nothing to re-slice
@@ -517,12 +523,13 @@ close. Without the Agent tool, run the sequences yourself in plan order.
   two contradictory values is right, which component owns a unit, what it is
   called), it does not leave this run: the gate asked it (Phase 3), or the worker
   reports it `blocked` and the session asks it at the drain. A defect the worker
-  surfaces BESIDE the one being fixed is minted (`findings.py add … --related
-  FND-NNN --raised-by sdlc-repair`, by the session, from the report's
-  `lesson`-like line) so the audit trail has it, and it joins THIS run's queue —
-  Phase 1 re-reads the queue after each finding closes and after each drain, and
-  works it through the same gate, *decide it now* at position 1. Only a half
-  whose decision is not this run's to take (`references/back-propagation.md`,
+  surfaces BESIDE the one being fixed goes in the report's `beside:` list; the
+  session mints it (`findings.py add … --related FND-NNN --raised-by sdlc-repair
+  --severity <integrity|behavioural|cosmetic>`) so the audit trail has it. Inside
+  what the fix had to read it joins THIS run's queue — Phase 1 re-reads the queue
+  after each finding closes and after each drain, and works it through the same
+  gate, *decide it now* at position 1; further out it is parked ("Convergence").
+  Only a half whose decision is not this run's to take (`references/back-propagation.md`,
   "ask — do not decide alone": a `missing_requirement`, a product-behaviour
   change, a walk ending at PRD) becomes a handoff, and the card says so.
 - **`re-invoke`** (set, not determined) — changes to the *set* of downstream
@@ -597,10 +604,12 @@ A row is pre-existing only when EVERY (artifact, upstream) pair it names is
 already in `provenance_drift` — the Phase 2 pair snapshot, never the
 `--stale` row count — and such rows are stamped right after the gate; a row
 naming even one pair the snapshot lacks is wave-caused and is stamped now;
-re-reads the queue; re-greps each report's `swept_tokens` and routes any hit outside
+re-reads the queue, clustering admitted mints in one pass; re-greps each report's `swept_tokens` and routes any hit outside
 that worker's own write boundary; and asks the user each `blocked` report's question
 (four per call), re-dispatching that finding with the answer, while a `relocated`
 report is re-planned into a later aggregate or listed on the card's `Remaining:` row.
+Then it writes the drained resolutions (the Phase 6 write), commits one checkpoint per located stage on a green tree - the write succeeded and no finding this drain settled still lists open
+(`autocommit.py commit` with `--checkpoint`, "Between waves" step 8) and, at a round's end, prints the round card.
 A downstream wave dispatched before an upstream drain would stamp its shard against upstream bytes still moving.
 
 Validate **every artifact touched**, not just the source. Compare each exit
@@ -614,7 +623,7 @@ If verification cannot run at all, nothing is marked `resolved`.
 ### Phase 6 — Close & hand back
 
 **Resolutions are written from the reports, never from memory.** For each
-finding, copy `.claude/skills-state/sdlc-repair/reports/<FND>.report.yaml`
+finding no drain has settled yet, copy `.claude/skills-state/sdlc-repair/reports/<FND>.report.yaml`
 into its `resolution` block (`by`, `at`, `located_stage`, `mode`,
 `artifacts_touched`, `downstream_rerun`, `stale_tasks`, `fields_changed` /
 `symbols_changed` when known, `sites_considered` when required, `summary`)
@@ -677,10 +686,10 @@ be: editing a task artifact changes each affected task's fingerprints, which
 gates at its plan approval; `topo_order.py`'s `stale` and `--affected`
 sections are already in `resolution.stale_tasks` from the reports.
 
-**Record the run** (CLAUDE.md 15): drain `lesson_notes` (one `lessons.py add` per surviving
+**Record the run** (CLAUDE.md 15): set the state file `status: complete`, drain `lesson_notes` (one `lessons.py add` per surviving
 note, at most 2 unless one is a blocker), then `python .claude/sdlc/lessons.py record-run --skill repair --plugin-root "${CLAUDE_SKILL_DIR}/../.."`
 (best-effort: a non-zero exit is one line in the report; helper absent — skip silently). A `Lessons:`
-row only when one was recorded — never "no lessons". Then set the state file `status: complete`.
+row only when one was recorded — never "no lessons".
 
 **Commit the run** (CLAUDE.md 20; the message rules and what is staged:
 `${CLAUDE_SKILL_DIR}/../setup/references/auto-commit.md`) — the last action before the card, on every exit path, never a blocker:
@@ -697,8 +706,9 @@ Edited:    docs/PRD.yaml, docs/ARCH__demo-api.yaml, docs/TASKS__demo-api.json (2
 Verified:  arch exit 0 · test exit 0 · task exit 0 · reslice --check exit 0 · crosscheck exit 0 · index exit 0 · stale exit 0
 Stale:     demo-api/TSK-003, demo-api/TSK-004 will be offered for regeneration
 Remaining: 1 open, not worked this run — FND-005 (outside the chosen extent: first wave)
+Parked:    2 latent findings parked (FND-008, FND-009) - the next /sdlc:repair run offers to work them
 Handoffs:  2 re-runs owed for FND-004 — first: /sdlc:test demo-api --reconcile (each prints the next; the last routes back here)
-Workers:   6 localizers (N 6 remembered, effective 6), 3 fixers one at a time (opus) - 1 relocated, 0 blocked
+Workers:   6 localize workers over 14 findings (N 6 remembered, effective 6), 3 fixers one at a time (opus) - 1 relocated, 0 blocked
 Commit:    {a1b2c3d  /sdlc:repair → <summary> | nothing to commit — only when auto-commit is on}
 Status:    {computed - e.g. not finished - 1 open finding remains (FND-005)}
 Next:      {the computed next invocation}   ← in a NEW session
@@ -706,20 +716,10 @@ Why new:   the artifacts and state files on disk are the handoff, not this
            transcript.
 ```
 
-**The `Findings:` row** translates each finding's queue state into what is
-done and what is still owed — the table is in `references/orchestration.md`,
-"The close card"; the queue's own state and field names are input to the row,
-never its text (`prd/references/reporting-to-the-user.md`, "translates; it
-never pastes"). Collapse same-state findings into one phrase listing their
-ids, and keep "closed" and "still owes" apart. **`Remaining:`** names every
-finding that was open when the run started and was not worked, each with its
-reason (*outside the chosen extent* / *relocated to <stage> after that wave
-closed* / *its worker stopped on a question the run could not answer*) — it
-prints only when non-empty, and it is what makes a narrowed run honest.
-**`Handoffs:`** prints only when re-runs are owed: the count, the findings, the
-first command. `Workers:` says what was dispatched, on which model, the
-localize N with its source and effective value, and how many relocated or
-blocked (or `inline - the Agent tool was unavailable`).
+The rows' meanings (the `Findings:` state table, `Remaining:`, `Handoffs:`,
+`Parked:`, `Workers:`) are in `references/orchestration.md`, "The close card":
+the queue's own state and field names are input to a row, never its text
+(`prd/references/reporting-to-the-user.md`, "translates; it never pastes").
 
 `Status:` — first match wins, always printed:
 
@@ -821,4 +821,4 @@ on top (`references/orchestration.md`, "Why two waves", "Choosing N").
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.31"
+skill_version: "1.32"

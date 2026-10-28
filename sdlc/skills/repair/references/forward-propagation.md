@@ -92,7 +92,12 @@ two disagree and a concurrent doctor run reports a defect that is mid-repair.
 Nothing in this sequence is a hand edit to a task JSON.
 
 1. **Edit the source artifact.** Make the smallest change that records the
-   missing or corrected fact. Read and edit by `INDEX.yaml` line range.
+   missing or corrected fact. Read and edit by `INDEX.yaml` line range. A
+   contract field states today's behaviour only: when the field you edit
+   carries change history (a version tag, an FND id, a "Through vN" line), the
+   tag's fact moves to `metadata.changelog` in this same edit (step 2's bump),
+   and the fix adds none of its own. The re-stale this edit causes is already
+   paid.
 2. **Bump its metadata in the same write** — one call:
 
    ```bash
@@ -253,7 +258,8 @@ Nothing in this sequence is a hand edit to a task JSON.
    `operation_contract`, `entity_slice`, `design_spec`, `cli_contract`,
    `fixture_briefs.fixture_strategy`) from the *current* upstream, preserves
    every other key, re-derives seeded prose (a description or acceptance line
-   that was byte-equal to the *previous* upstream text follows it — the unit's
+   that equals the *previous* upstream text, leading and trailing whitespace
+   ignored, follows it — the unit's
    `satisfies_acceptance` and the TST's `description` ride along from 1.7 for
    exactly this) and each impl task's test line from `targets_work_units`
    when a re-target made it wrong, bumps the
@@ -268,7 +274,10 @@ Nothing in this sequence is a hand edit to a task JSON.
 7. **Verify** — see below. `reslice_embeds.py --check` must be silent for the
    container(s) touched.
 8. **Name the stale tasks.** The handback needs no new mechanism, but the
-   resolution names what moved:
+   resolution names what moved. This is the one pricing step, run in place
+   on the real tree and never on a copy: run the `--scope <cid>` call once
+   before the first edit and again here, and list only the newly stale tasks
+   (orchestration.md, "Pricing"):
 
    ```bash
    python "${CLAUDE_SKILL_DIR}/../code/topo_order.py" --scope <cid> --state .claude/skills-state/sdlc-code.state.yaml   # edition-ok: demo edition skips step 8 (SKILL.md Phase 4)
@@ -572,3 +581,8 @@ Findings arrive in batches, and the cheapest loop treats them that way:
 
 Never repair mid-component: the ledger and the breadcrumbs assume the artifact
 chain is still while a component is in flight.
+
+When a run's latent rate stays above 1 for two consecutive rounds
+(`orchestration.md`, "Convergence"), this loop is the recommendation: stop at
+that drain, `/sdlc:code <cid>` in a NEW session, and let the build surface the
+findings that matter.

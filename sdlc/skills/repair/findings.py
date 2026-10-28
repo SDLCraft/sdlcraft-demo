@@ -18,8 +18,16 @@ Usage:
         [--suspected-stage arch] [--suspected-source docs/ARCH__x.yaml] \
         [--symbol <sym>] [--qualified-task <cid>/TSK-NNN] [--file docs/X.yaml] \
         [--field-path <dotted>] [--detected-by <check-or-phase>] \
+        [--severity {integrity,behavioural,cosmetic}] \
         [--related FND-NNN ...] [--session-id <id>] [--allow-duplicate]
     findings.py list [--open] [--status s ...] [--stage s] [--raised-by r] [--json]
+                        # each row carries its severity (an unstamped finding
+                        # prints `behavioural*`) under a one-line count
+    findings.py cluster [--path P] [--json]
+                        # the findings still to localize (open/triaged, no
+                        # located_stage) grouped into bounded clusters that
+                        # share identifier tokens - what Phase 2 sends ONE
+                        # localize worker to, instead of one per finding
     findings.py list --owed-by docs/<artifact> [--json]
                         # the re-invoke findings waiting on that file + the
                         # handoff notes left for it (read by every --reconcile)
@@ -52,8 +60,9 @@ Usage:
   Global: [--project-root <dir>] [--path <queue path>] (before or after the verb)
 
 `add` mints the next id (max(last_ids.FND, highest present) + 1), refuses to
-record a second copy of a still-open defect (same detected_by + summary) unless
---allow-duplicate, and stamps recurrence_of / recurrence when a resolved or
+record a second copy of a still-open defect (same detected_by + summary) or of
+one repair parked as latent (status deferred, resolution.park_reason latent:
+it prints `parked as FND-NNN` and writes nothing) unless --allow-duplicate, and stamps recurrence_of / recurrence when a resolved or
 wontfix finding already named the same symbol or task with the same kind AND
 says much the same thing (summary / evidence overlap, RECURRENCE_FLOOR). A
 finding that matches only on symbol and kind is not stamped; it carries
@@ -114,6 +123,11 @@ NEW_FILE_VERSION = "3"
 # checks every time and must not re-mint what a person already dismissed.
 OPEN_STATUSES = ("open", "triaged")
 CLOSED_STATUSES = ("resolved", "wontfix")
+# validate_findings.Severity, most serious first; a copy because `list` and
+# `cluster` need no pydantic (findings_selftest pins the two together). A
+# finding with no stamp reads as behavioural.
+SEVERITIES = ("integrity", "behavioural", "cosmetic")
+UNSTAMPED_SEVERITY = "behavioural"
 
 # /sdlc:<skill> [<cid>]  ->  the artifact that invocation rewrites. One map for
 # every reader of "what does this finding still owe": doctor.py (the awaiting
@@ -451,6 +465,22 @@ def find_duplicate(data: Dict[str, Any], entry: Dict[str, Any],
     return None
 
 
+def find_parked_latent(data: Dict[str, Any], entry: Dict[str, Any]) -> Optional[str]:
+    """The id of a finding repair PARKED as latent (status deferred,
+    resolution.park_reason latent) with the same (detected_by, summary): the
+    defect was already seen and set aside, so a re-sighting is not a new
+    finding. A deferral without a park_reason is a person's decision and is
+    not matched here."""
+    key = dedupe_key(entry)
+    for f in data.get("findings") or []:
+        if not isinstance(f, dict) or f.get("status") != "deferred":
+            continue
+        res = f.get("resolution")
+        if isinstance(res, dict) and res.get("park_reason") == "latent" and dedupe_key(f) == key:
+            return str(f.get("fnd_id"))
+    return None
+
+
 def _anchor(entry: Dict[str, Any]) -> Optional[str]:
     sa = entry.get("surfaced_at") or {}
     if not isinstance(sa, dict):
@@ -582,7 +612,8 @@ def append_findings(path: Path, entries: List[Dict[str, Any]], *,
                     stamp_recurrence: bool = True, tolerate_existing: bool = False):
     """Validate-then-append. Returns (added, skipped, pre_existing_errors):
     added    = [(fnd_id, entry)] in the order they were written
-    skipped  = [(entry, duplicate_of_id)] for entries a still-open twin covers
+    skipped  = [(entry, duplicate_of_id, parked)] for entries a twin covers: a
+               still-open one (parked False) or one repair parked as latent
     pre_existing_errors = problems the queue ALREADY had when this was called
 
     The whole candidate queue (existing rows + every new entry) is validated
@@ -616,14 +647,18 @@ def append_findings(path: Path, entries: List[Dict[str, Any]], *,
 
     counter = next_fnd(data)
     added: List[Tuple[str, Dict[str, Any]]] = []
-    skipped: List[Tuple[Dict[str, Any], str]] = []
+    skipped: List[Tuple[Dict[str, Any], str, bool]] = []
     now = _iso_utc_now()
     for raw_entry in entries:
         entry = dict(raw_entry)
         if not allow_duplicate:
             dup = find_duplicate(data, entry, dedupe_statuses)
             if dup:
-                skipped.append((entry, dup))
+                skipped.append((entry, dup, False))
+                continue
+            parked = find_parked_latent(data, entry)
+            if parked:
+                skipped.append((entry, parked, True))
                 continue
         entry["fnd_id"] = f"FND-{counter:03d}"
         entry.setdefault("raised_at", now)
@@ -725,6 +760,23 @@ def stage_help(argv: "Optional[List[str]]") -> str:
         return generic
 
 
+def severity_help(argv: "Optional[List[str]]") -> str:
+    """The --severity enum, spelled out - read from vf.Severity on an `add`
+    only (kind_help says why), so a raiser composing the call from --help or
+    from the rejection text needs no SKILL.md prose to learn the values."""
+    generic = "How much the defect matters (FINDINGS.schema.yaml lists the values); omitted = unstamped."
+    if "add" not in (argv if argv is not None else sys.argv[1:]):
+        return generic
+    try:
+        values = "|".join(s.value for s in validator_module().Severity)
+        return (f"How much the defect matters ({values}); optional - omitted reads as "
+                f"{UNSTAMPED_SEVERITY}. integrity = data loss, security or a contradiction "
+                f"between specs; behavioural = two builds would behave differently; "
+                f"cosmetic = naming, residue, wording.")
+    except BaseException:
+        return generic
+
+
 def _derive_raised_by() -> str:
     skill_dir = os.environ.get("CLAUDE_SKILL_DIR")
     return f"sdlc-{Path(skill_dir).name}" if skill_dir else "user"
@@ -772,6 +824,10 @@ def cmd_add(args) -> int:
             stage = vf.LEGACY_STAGE_ALIASES[stage]
         if stage not in stages:
             problems.append(f"--suspected-stage {stage!r} is not one of: {', '.join(stages)}.")
+    severities = [s.value for s in vf.Severity]
+    severity = args.severity
+    if severity is not None and severity not in severities:
+        problems.append(f"--severity {severity!r} is not one of: {', '.join(severities)}.")
     summary = (args.summary or "").strip()
     if not summary:
         problems.append("--summary must not be empty.")
@@ -819,6 +875,8 @@ def cmd_add(args) -> int:
     if surfaced:
         entry["surfaced_at"] = surfaced
     entry["kind"] = args.kind
+    if severity is not None:
+        entry["severity"] = severity
     entry["summary"] = summary
     entry["evidence"] = evidence
     entry["suspected_stage"] = stage
@@ -842,7 +900,12 @@ def cmd_add(args) -> int:
         return 1
 
     if skipped:
-        _entry, dup = skipped[0]
+        _entry, dup, parked = skipped[0]
+        if parked:
+            print(f"[OK] not recorded - parked as {dup} (same detected_by and summary, set aside as "
+                  f"latent). A re-sighting, not a new finding; pass --allow-duplicate if it really "
+                  f"is a second defect.")
+            return 0
         print(f"[OK] not recorded - duplicate of {dup} (same detected_by and summary, still open). "
               f"Pass --allow-duplicate if it really is a second defect.")
         return 0
@@ -901,6 +964,13 @@ def _filter(findings: List[Dict[str, Any]], args) -> List[Dict[str, Any]]:
     return out
 
 
+def severity_label(f: Dict[str, Any]) -> str:
+    """The row's severity as `list` prints it: the stamp, or `behavioural*`
+    for a finding nobody stamped (consumers read it as behavioural)."""
+    value = f.get("severity")
+    return str(value) if value in SEVERITIES else UNSTAMPED_SEVERITY + "*"
+
+
 def _print_owed(data: Dict[str, Any], artifact: str, as_json: bool) -> int:
     rows = owed_findings(data, artifact)
     label = f"docs/{_artifact_name(artifact)}"
@@ -953,6 +1023,10 @@ def cmd_list(args) -> int:
               f"({len(data.get('findings') or [])} recorded).")
         return 0
     print(f"{len(rows)} finding(s) in {path}:")
+    counts = {s: 0 for s in SEVERITIES}
+    for f in rows:
+        counts[severity_label(f).rstrip("*")] += 1
+    print("severity: " + ", ".join(f"{s} {counts[s]}" for s in SEVERITIES))
     for f in rows:
         sa = f.get("surfaced_at") or {}
         where = ""
@@ -964,8 +1038,10 @@ def cmd_list(args) -> int:
         if located:
             stage += f" located={located}"
         rec = f" (came back: {f.get('recurrence_of')})" if f.get("recurrence_of") else ""
-        print(f"  {f.get('fnd_id'):<8} {str(f.get('status')):<9} {str(f.get('kind')):<26} "
-              f"{str(f.get('raised_by')):<12} {stage:<28} {where}")
+        if isinstance(res, dict) and res.get("park_reason"):
+            rec += f" [parked: {res['park_reason']}]"
+        print(f"  {f.get('fnd_id'):<8} {str(f.get('status')):<9} {severity_label(f):<12} "
+              f"{str(f.get('kind')):<26} {str(f.get('raised_by')):<12} {stage:<28} {where}")
         print(f"           {str(f.get('summary') or '')[:110]}{rec}")
     return 0
 
@@ -981,9 +1057,12 @@ def cmd_list(args) -> int:
 #     carries - the same surfaced symbol, `related`, `recurrence_of`, the same
 #     surfaced file - ordered by the stage the finding suspects (or, for a
 #     triaged one, the stage its walk located);
-#   * --from <dir> of localize reports (exact): the aggregates are the write
-#     sets that share an artifact, joined transitively and directory-aware,
-#     ordered by the pipeline stage of the located artifact, upstream first.
+#   * --from <dir> of localize reports (exact): the groups are the write
+#     sets that share an artifact, joined transitively and directory-aware;
+#     a group over PLAN_CAP is cut into aggregates that keep the findings a
+#     localizer said to decide together (`decide_with`) in one, and pack by
+#     the symbols they locate; ordered by the pipeline stage of the located
+#     artifact, upstream first.
 # =============================================================================
 
 # Copied from setup/docs_index.py (_PIPELINE / _STAGE_OF): this script cannot
@@ -1197,16 +1276,41 @@ def _stage_name(rank: int) -> str:
     return "unknown"
 
 
+def _decide_links(reports: Dict[str, Dict[str, Any]], kept: List[str]) -> List[Tuple[str, str, str]]:
+    """(declaring finding, linked finding, why) for every `decide_with` pair the
+    localizers asserted. A report that names a finding it shares a decision or an
+    edit with lists it under `decide_with: [FND-NNN]`. Anything else - a value
+    that is not a list, an id that is not a kept finding in this plan, the
+    finding itself - is no link. One link per pair, ordered by the pair's ids."""
+    keep = set(kept)
+    seen: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    for fid in kept:
+        raw = reports[fid].get("decide_with")
+        if not isinstance(raw, list):
+            continue
+        for other in raw:
+            other = other.strip().upper() if isinstance(other, str) else ""
+            if other in keep and other != fid:
+                pair = tuple(sorted((fid, other), key=_fnd_num))
+                seen.setdefault(pair, (fid, other))
+    return [(a, b, f"{a} decides with {b}")
+            for _pair, (a, b) in sorted(seen.items(), key=lambda kv: (_fnd_num(kv[0][0]), _fnd_num(kv[0][1])))]
+
+
 def aggregates_from_reports(reports: Dict[str, Dict[str, Any]], closable: List[str],
-                            kinds: Optional[Dict[str, str]] = None) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
-    """(aggregates, duplicates): union-find over write sets. Only a report's
-    own `duplicate_of` (the localizer's judgment) folds a finding away. Two
-    reports on one located symbol WITH THE SAME KIND are never inferred to be
-    one defect - a coarse kind on a busy symbol names two defects as easily as
-    one, and a false fold silently drops a finding - so the later id stays,
-    flagged in its aggregate's `possible_duplicates` (the fix worker checks it
-    after the earlier fix). An aggregate over PLAN_CAP is split by located
-    stage, then by id; a flagged pair is never split."""
+                            kinds: Optional[Dict[str, str]] = None
+                            ) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]], List[Dict[str, str]]]:
+    """(aggregates, duplicates, unhonored_links): union-find over write sets,
+    plus a `decide_with` link as an edge. Only a report's own `duplicate_of`
+    (the localizer's judgment) folds a finding away. Two reports on one located
+    symbol WITH THE SAME KIND are never inferred to be one defect - a coarse
+    kind on a busy symbol names two defects as easily as one, and a false fold
+    silently drops a finding - so the later id stays, flagged in its
+    aggregate's `possible_duplicates` (the fix worker checks it after the
+    earlier fix). A group over PLAN_CAP is cut by located stage, then packed by
+    the symbols its findings locate; a flagged pair and a linked unit (up to
+    PLAN_CAP + 1) are never cut. A link a bigger set cannot keep is listed as
+    unhonored."""
     kinds = kinds or {}
     ids = sorted((i for i in reports if i not in closable), key=_fnd_num)
     duplicates: List[Dict[str, str]] = []
@@ -1231,38 +1335,79 @@ def aggregates_from_reports(reports: Dict[str, Dict[str, Any]], closable: List[s
             by_symbol[key] = fid
         kept.append(fid)
     sets = {fid: write_set(reports[fid]) for fid in kept}
+    links = _decide_links(reports, kept)
     edges: List[Tuple[str, str, str]] = []
     for i, a in enumerate(kept):
         for b in kept[i + 1:]:
             shared = [x[0] for x in sets[a] for y in sets[b] if _overlap(x, y)]
             if shared:
                 edges.append((a, b, f"{a} and {b} both write {shared[0]}"))
+    edges += links
     roots, why = union_find(kept, edges)
     groups: Dict[str, List[str]] = {}
     for fid in kept:
         groups.setdefault(roots[fid], []).append(fid)
     aggregates: List[Dict[str, Any]] = []
+    unhonored: List[Dict[str, str]] = []
     for root, members in groups.items():
         members = sorted(members, key=_fnd_num)
-        parts = _split(members, reports, [(d["of"], d["fnd"]) for d in possible])
+        parts = _split(members, reports, [(d["of"], d["fnd"]) for d in possible],
+                       [l for l in links if l[0] in members])
+        where = {m: i for i, part in enumerate(parts) for m in part}
+        for a, b, reason in links:
+            if a in where and b in where and where[a] != where[b]:
+                unhonored.append({"fnd": a, "with": b,
+                                  "why": f"{reason}, but the linked set would hold more than "
+                                         f"{PLAN_CAP + 1} findings"})
         for index, part in enumerate(parts):
             located = sorted({p for m in part for p in _located_paths(reports[m])})
             ws = sorted({p[0] for m in part for p in sets[m]})
             rank = min((_report_rank(reports[m]) for m in part), default=len(PIPELINE) + 1)
-            decisions = [{"fnd": m, **{k: v for k, v in (reports[m].get("missing_decision") or {}).items()
-                                       if k in ("question", "proposal", "basis")}}
-                         for m in part if isinstance(reports[m].get("missing_decision"), dict)
-                         and reports[m]["missing_decision"].get("question")]
+            mine = [{"fnd": a, "with": b, "why": reason} for a, b, reason in links
+                    if a in part and b in part]
+            if len(parts) == 1:
+                because = [w for w in why.get(root, []) if w not in {l["why"] for l in mine}]
+            else:
+                because = [f"part {index + 1} of {len(parts)} of a {len(members)}-finding group "
+                           f"(shared write set)"]
             aggregates.append({"findings": part, "located": located, "write_set": ws,
                                "modes": {m: str(reports[m].get("proposed_mode") or "?") for m in part},
-                               "decisions": decisions, "rank": rank, "stage": _stage_name(rank),
+                               "decisions": _decisions(part, reports, mine),
+                               "rank": rank, "stage": _stage_name(rank),
                                "possible_duplicates": [d for d in possible if d["fnd"] in part],
-                               "merged_because": why.get(root, []) if len(parts) == 1 else
-                               [w for w in why.get(root, []) if any(m in w for m in part)],
+                               "linked": mine, "merged_because": because,
                                # the parts of one split group hold the same artifacts, so
                                # they run one after another - never side by side
                                "chain": root if len(parts) > 1 else None, "chain_index": index})
-    return aggregates, duplicates
+    return aggregates, duplicates, unhonored
+
+
+def _decisions(part: List[str], reports: Dict[str, Dict[str, Any]],
+               mine: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    """The decisions an aggregate needs. Findings joined by a `decide_with`
+    link are decided together, so their entries become one - `fnd` a list, the
+    first entry's question - and the gate asks it once."""
+    head = {m: m for m in part}
+
+    def find(x: str) -> str:
+        while head[x] != x:
+            x = head[x]
+        return x
+
+    for l in mine:
+        head[find(l["with"])] = find(l["fnd"])
+    entries: Dict[str, Dict[str, Any]] = {}
+    for m in part:
+        md = reports[m].get("missing_decision")
+        if not (isinstance(md, dict) and md.get("question")):
+            continue
+        group = find(m)
+        if group in entries:
+            first = entries[group]
+            first["fnd"] = (first["fnd"] if isinstance(first["fnd"], list) else [first["fnd"]]) + [m]
+        else:
+            entries[group] = {"fnd": m, **{k: v for k, v in md.items() if k in ("question", "proposal", "basis")}}
+    return sorted(entries.values(), key=lambda d: _fnd_num(d["fnd"][0] if isinstance(d["fnd"], list) else d["fnd"]))
 
 
 def _report_rank(report: Dict[str, Any]) -> int:
@@ -1276,39 +1421,76 @@ def _report_rank(report: Dict[str, Any]) -> int:
     return min(own) if own else len(PIPELINE) + 1
 
 
+def _features(report: Dict[str, Any]) -> set:
+    """What a report locates: each artifact, and each symbol within it. A
+    shared symbol counts for more than a shared artifact, as it should."""
+    out: set = set()
+    for loc in report.get("located") or []:
+        if isinstance(loc, dict) and loc.get("artifact"):
+            art = _norm_docs(loc["artifact"])[0]
+            out.add(("artifact", art))
+            if loc.get("symbol"):
+                out.add(("symbol", art, str(loc["symbol"])))
+    return out
+
+
 def _split(members: List[str], reports: Dict[str, Dict[str, Any]],
-           linked: Optional[List[Tuple[str, str]]] = None) -> List[List[str]]:
-    """Parts of at most PLAN_CAP, one located stage at a time, in id order. A
-    `linked` pair (a possible duplicate) is one unit: it lands in one part,
-    the earlier id first, even when that part runs past the cap."""
+           linked: Optional[List[Tuple[str, str]]] = None,
+           decide: Optional[List[Tuple[str, str, str]]] = None) -> List[List[str]]:
+    """Parts of at most PLAN_CAP, one located stage at a time. A `linked` pair
+    (a possible duplicate) is one unit: it lands in one part, the earlier id
+    first, even when that part runs past the cap. A `decide` link joins units
+    too, but only while the unit stays within PLAN_CAP + 1: the link that would
+    grow it past that is not honoured (the caller reports it). Within a stage a
+    part is a seed - the unit that overlaps the others most in located symbols
+    and artifacts - grown by the units that overlap the seed most; FND number
+    only breaks a tie."""
     if len(members) <= PLAN_CAP:
         return [members]
     head = {m: m for m in members}
+    size = {m: 1 for m in members}
 
     def find(x: str) -> str:
         while head[x] != x:
             x = head[x]
         return x
 
+    def join(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            head[rb] = ra
+            size[ra] += size[rb]
+
     for a, b in linked or []:
         if a in head and b in head:
-            head[find(b)] = find(a)
+            join(a, b)
+    for a, b, _why in decide or []:
+        if a in head and b in head and find(a) != find(b) and size[find(a)] + size[find(b)] <= PLAN_CAP + 1:
+            join(a, b)
     units: Dict[str, List[str]] = {}
     for m in members:
         units.setdefault(find(m), []).append(m)
     by_stage: Dict[int, List[List[str]]] = {}
     for unit in units.values():
         by_stage.setdefault(min(_report_rank(reports[m]) for m in unit), []).append(unit)
+    feats = {m: _features(reports[m]) for m in members}
     parts: List[List[str]] = []
     for rank in sorted(by_stage):
-        cur: List[str] = []
-        for unit in sorted(by_stage[rank], key=lambda u: _fnd_num(u[0])):
-            if cur and len(cur) + len(unit) > PLAN_CAP:
-                parts.append(sorted(cur, key=_fnd_num))
-                cur = []
-            cur = cur + unit
-        if cur:
-            parts.append(sorted(cur, key=_fnd_num))
+        bucket = sorted(by_stage[rank], key=lambda u: _fnd_num(u[0]))
+        fs = [set().union(*(feats[m] for m in u)) for u in bucket]
+        todo = set(range(len(bucket)))
+        made: List[List[str]] = []
+        while todo:
+            seed = min(todo, key=lambda i: (-sum(len(fs[i] & fs[j]) for j in todo if j != i), i))
+            todo.discard(seed)
+            cur = list(bucket[seed])
+            for j in sorted(todo, key=lambda j: (-len(fs[seed] & fs[j]), j)):
+                if len(cur) + len(bucket[j]) > PLAN_CAP:
+                    break
+                cur += bucket[j]
+                todo.discard(j)
+            made.append(sorted(cur, key=_fnd_num))
+        parts += sorted(made, key=lambda p: _fnd_num(p[0]))
     return parts
 
 
@@ -1386,7 +1568,8 @@ def order_waves(aggregates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def _assemble(source: str, closable: List[str], duplicates: List[Dict[str, str]],
               owed: List[Dict[str, Any]], aggregates: List[Dict[str, Any]],
-              unplaced: List[Dict[str, str]]) -> Dict[str, Any]:
+              unplaced: List[Dict[str, str]], unhonored: Optional[List[Dict[str, str]]] = None,
+              skipped: Optional[List[str]] = None) -> Dict[str, Any]:
     waves = order_waves(aggregates)
     # the most aggregates any one stage-wave holds: how wide a fix wave COULD
     # run. Fixes run one at a time (orchestration.md, "Choosing N"); this is
@@ -1394,7 +1577,8 @@ def _assemble(source: str, closable: List[str], duplicates: List[Dict[str, str]]
     width = max((len(w["aggregates"]) for w in waves), default=0)
     return {"source": source, "planned_at": _iso_utc_now(), "close_first": sorted(closable, key=_fnd_num),
             "duplicates": duplicates, "owed": owed, "waves": waves,
-            "max_wave_width": width, "unplaced": unplaced}
+            "max_wave_width": width, "unplaced": unplaced,
+            "unhonored_links": unhonored or [], "skipped_reports": skipped or []}
 
 
 def render_plan(plan: Dict[str, Any]) -> str:
@@ -1415,16 +1599,21 @@ def render_plan(plan: Dict[str, Any]) -> str:
             extra = len(a["write_set"]) - len(a["located"])
             if extra > 0:
                 where += f" + {extra} downstream"
-            modes = ", ".join(a["modes"][m] + ("*" if any(d["fnd"] == m for d in a["decisions"]) else "")
-                              for m in a["findings"])
+            asked = {m for d in a["decisions"] for m in (d["fnd"] if isinstance(d["fnd"], list) else [d["fnd"]])}
+            modes = ", ".join(a["modes"][m] + ("*" if m in asked else "") for m in a["findings"])
             lines.append(f"  {a['id']:<4} {', '.join(a['findings']):<34} {where:<48} {modes}")
             for d in a["decisions"]:
-                lines.append(f"       * {d['fnd']} needs one decision: {d.get('question')} - proposal: {d.get('proposal')}")
+                who = ", ".join(d["fnd"]) + " need" if isinstance(d["fnd"], list) else f"{d['fnd']} needs"
+                lines.append(f"       * {who} one decision: {d.get('question')} - proposal: {d.get('proposal')}")
             for why in a["merged_because"]:
                 lines.append(f"       ({why})")
+            for l in a.get("linked") or []:
+                lines.append(f"       ({l['why']}; planned together)")
             for d in a.get("possible_duplicates") or []:
                 lines.append(f"       ({d['fnd']} may be {d['of']} - {d['why']}; kept apart, "
                              f"checked after {d['of']}'s fix)")
+    for u in plan.get("unhonored_links") or []:
+        lines.append(f"UNHONORED  {u['fnd']} with {u['with']}  {u['why']}; planned in separate aggregates")
     for d in plan["duplicates"]:
         lines.append(f"DUPLICATE  {d['fnd']} = {d['of']} ({d['why']})")
     if plan["owed"]:
@@ -1435,6 +1624,10 @@ def render_plan(plan: Dict[str, Any]) -> str:
         lines.append("Handed off already: none")
     for u in plan["unplaced"]:
         lines.append(f"UNPLACED  {u['fnd']}  {u['why']}")
+    if plan.get("skipped_reports"):
+        shown = ", ".join(plan["skipped_reports"][:8]) + (", ..." if len(plan["skipped_reports"]) > 8 else "")
+        lines.append(f"Skipped {len(plan['skipped_reports'])} localize report(s): the finding is no longer "
+                     f"open or triaged ({shown})")
     if plan["waves"]:
         lines.append("NEXT: answer the plan gate; each stage-wave starts after the previous one drains.")
     elif n_open:
@@ -1465,6 +1658,12 @@ def cmd_plan(args) -> int:
             for p in problems:
                 print(f"  - {p}")
             return 1
+        status_of = {str(f.get("fnd_id")): f.get("status") for f in (data.get("findings") or [])
+                     if isinstance(f, dict)}
+        skipped = sorted((i for i in reports if i in status_of and status_of[i] not in OPEN_STATUSES),
+                         key=_fnd_num)
+        for i in skipped:
+            del reports[i]
         open_ids = [str(f.get("fnd_id")) for f in (data.get("findings") or [])
                     if isinstance(f, dict) and f.get("status") in OPEN_STATUSES]
         owed = []
@@ -1480,15 +1679,133 @@ def cmd_plan(args) -> int:
                 unplaced.append({"fnd": fid, "why": "no localize report"})
         kinds = {str(f.get("fnd_id")): str(f.get("kind") or "") for f in (data.get("findings") or [])
                  if isinstance(f, dict)}
-        aggregates, duplicates = aggregates_from_reports(reports, closable, kinds)
+        aggregates, duplicates, unhonored = aggregates_from_reports(reports, closable, kinds)
         plan = _assemble("localize", [c for c in closable if c in open_ids or c in reports],
-                         duplicates, owed, aggregates, unplaced)
+                         duplicates, owed, aggregates, unplaced, unhonored, skipped)
     else:
         plan = provisional_plan(data, closable)
     if args.as_json:
         print(json.dumps(plan, indent=2, ensure_ascii=False, default=str))
     else:
         print(render_plan(plan))
+    return 0
+
+
+# =============================================================================
+# cluster - the findings still to localize, grouped by what they share.
+#
+# Phase 2 used to send one read-only worker to every such finding, and
+# findings that cluster on the same few work units each paid the same cold read
+# of the same 40-60k-character slices. A cluster is a READING convenience: one
+# worker walks its members together and still writes one report per finding.
+# Seed-and-grow, deliberately not transitive: connected components over shared
+# tokens put 256 of one consumer run's 266 findings into a single component,
+# because identifier tokens chain (A shares with B, B with C ...). So a cluster
+# is the seed plus the findings that share tokens with THE SEED, never with a
+# member's member.
+# =============================================================================
+
+CLUSTER_CAP = 6   # findings per localize worker: a context bound, not a policy
+SHARED_TOKENS_SHOWN = 8
+# Identifier tokens: CamelCase, snake_case and the requirement/task id families.
+CLUSTER_IDENT_RE = re.compile(
+    r"\b(?:[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*|[a-z0-9]+_[a-z0-9_]+|(?:FR|NFR|TSK|TST|OPR|WKF)-[A-Z0-9-]+)\b")
+
+
+# The artifact schemas' own field names. A finding quotes them to say WHERE its
+# defect sits (`work_unit`, `interface_contract`), never WHAT it is, so two
+# findings sharing only these are no closer than two in one artifact. Pinned by
+# hand: this script cannot import the validators from a consumer install, and
+# findings_selftest holds every entry to a name some schema carries.
+FIELD_VOCABULARY = frozenset({
+    "work_unit", "work_units", "interface_contract", "family_contract", "work_unit_family_contracts",
+    "test_spec", "touches_entities", "touches_operations", "implements",
+    "implements_requirements", "targets_work_units", "target_files", "target_symbol", "summary",
+    "inputs", "output", "raises", "signature", "description", "acceptance", "acceptance_criteria",
+    "satisfies_acceptance", "traces_data_entities", "operation_contract", "entity_slice",
+    "design_spec", "config_keys", "unit_kind", "unit_summary", "depends_on", "component_ref",
+    "failure_modes", "validation_rules", "exit_codes", "exit_conditions", "field_path"})
+
+
+def finding_tokens(f: Dict[str, Any]) -> set:
+    """The identifier tokens of a finding: its summary, its evidence and the
+    places it surfaced at (symbol, task, file, field path), minus the artifact
+    field names (FIELD_VOCABULARY)."""
+    parts = [str(f.get("summary") or "")] + [str(e) for e in (f.get("evidence") or [])]
+    sa = f.get("surfaced_at")
+    if isinstance(sa, dict):
+        parts += [str(v) for v in sa.values() if v]
+    return set(CLUSTER_IDENT_RE.findall(" ".join(parts))) - FIELD_VOCABULARY
+
+
+def _to_localize(f: Dict[str, Any]) -> bool:
+    if f.get("status") not in OPEN_STATUSES:
+        return False
+    res = f.get("resolution")
+    return not (isinstance(res, dict) and res.get("located_stage"))
+
+
+def cluster_findings(data: Dict[str, Any], cap: int = CLUSTER_CAP) -> List[Dict[str, Any]]:
+    """[{id, members, shared_tokens}] for the open/triaged findings that carry no
+    located_stage. The seed is the unclustered finding with the most token
+    overlap with the other unclustered findings (ties: the lower FND number);
+    it grows by up to cap-1 members ranked by overlap WITH THE SEED
+    (descending; the lower FND number breaks ties), each sharing at least one
+    token. Repeat until none remain; a finding that shares nothing is alone."""
+    pool = {str(f.get("fnd_id")): f for f in (data.get("findings") or [])
+            if isinstance(f, dict) and FND_RE.match(str(f.get("fnd_id") or "")) and _to_localize(f)}
+    toks = {fid: finding_tokens(f) for fid, f in pool.items()}
+    by_token: Dict[str, List[str]] = {}
+    for fid, ts in toks.items():
+        for tok in ts:
+            by_token.setdefault(tok, []).append(fid)
+    overlap: Dict[str, Dict[str, int]] = {fid: {} for fid in pool}
+    for members in by_token.values():
+        for a in members:
+            for b in members:
+                if a != b and b not in overlap[a]:
+                    overlap[a][b] = len(toks[a] & toks[b])
+    remaining = set(pool)
+    score = {fid: sum(overlap[fid].values()) for fid in pool}
+    out: List[Dict[str, Any]] = []
+    while remaining:
+        seed = min(remaining, key=lambda i: (-score[i], _fnd_num(i)))
+        ranked = sorted((j for j in overlap[seed] if j in remaining),
+                        key=lambda j: (-overlap[seed][j], _fnd_num(j)))
+        members = [seed] + ranked[:max(cap - 1, 0)]
+        shared: List[str] = []
+        if len(members) > 1:
+            counted = [(sum(1 for m in members if tok in toks[m]), tok) for tok in toks[seed]]
+            shared = [tok for n, tok in sorted(counted, key=lambda c: (-c[0], c[1])) if n > 1][:SHARED_TOKENS_SHOWN]
+        for m in members:
+            remaining.discard(m)
+        for m in members:
+            for o, n in overlap[m].items():
+                if o in remaining:
+                    score[o] -= n
+        out.append({"id": f"C{len(out) + 1}", "members": sorted(members, key=_fnd_num),
+                    "shared_tokens": shared})
+    return out
+
+
+def cmd_cluster(args) -> int:
+    path = _queue_path(args)
+    if path.is_file():
+        data = _load_for_read(path)
+        if data == 2:
+            return 2
+    else:
+        data = empty_queue()
+    clusters = cluster_findings(data)
+    if args.as_json:
+        print(json.dumps({"cap": CLUSTER_CAP, "clusters": clusters}, indent=2, ensure_ascii=False))
+        return 0
+    if not clusters:
+        print("[OK] no open finding without a located stage - nothing to cluster.")
+        return 0
+    for c in clusters:
+        print(f"{c['id']} ({len(c['members'])}): {' '.join(c['members'])}  "
+              f"shared: {' '.join(c['shared_tokens']) or '-'}")
     return 0
 
 
@@ -1694,8 +2011,9 @@ def _refresh_statusboard(project_root=None) -> None:
         pass
 
 
-def main(argv=None) -> int:
-    _force_utf8_stdio()
+def build_parser(argv=None) -> argparse.ArgumentParser:
+    """The CLI's parser - its own function so findings_selftest can read the
+    flags the repair prose names against what is really accepted."""
     ap = argparse.ArgumentParser(
         description="Record and inspect FND-NNN findings (.claude/skills-state/sdlc-findings.yaml).")
     _add_global_opts(ap)
@@ -1705,6 +2023,7 @@ def main(argv=None) -> int:
     p.add_argument("--raised-by", default=None,
                    help="sdlc-<skill> or user (default: derived from $CLAUDE_SKILL_DIR, else user).")
     p.add_argument("--kind", required=True, help=kind_help(argv))
+    p.add_argument("--severity", default=None, help=severity_help(argv))
     p.add_argument("--summary", required=True, help="One line: what is wrong.")
     p.add_argument("--evidence", action="append", default=None,
                    help=f"Repeatable, 1..{MAX_EVIDENCE} lines, each <= {MAX_EVIDENCE_LEN} chars.")
@@ -1758,6 +2077,13 @@ def main(argv=None) -> int:
     _add_global_opts(p, sub=True)
     p.set_defaults(func=cmd_plan)
 
+    p = sub.add_parser("cluster", help="The findings still to localize (open/triaged, no "
+                                       "located stage) grouped into bounded clusters that share "
+                                       "identifier tokens - one localize worker per cluster.")
+    p.add_argument("--json", action="store_true", dest="as_json")
+    _add_global_opts(p, sub=True)
+    p.set_defaults(func=cmd_cluster)
+
     p = sub.add_parser("reopen", help="Flip a resolved/wontfix/deferred finding back into "
                                       "scope, mode-aware (the doctor sweep's --provenance report "
                                       "names the id when one is owed a reopen).")
@@ -1777,8 +2103,12 @@ def main(argv=None) -> int:
     p = sub.add_parser("stats", help="Counts + suspected-vs-located matrix per raiser.")
     _add_global_opts(p, sub=True)
     p.set_defaults(func=cmd_stats)
+    return ap
 
-    parsed = ap.parse_args(argv)
+
+def main(argv=None) -> int:
+    _force_utf8_stdio()
+    parsed = build_parser(argv).parse_args(argv)
     return parsed.func(parsed)
 
 

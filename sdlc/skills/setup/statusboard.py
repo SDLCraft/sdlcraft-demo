@@ -505,6 +505,34 @@ def collect_questions(docs):
     return out
 
 
+# Most serious first. The queue's `severity` is optional; a finding nobody
+# stamped reads as behavioural (findings.py `list` says so too).
+SEVERITY_RANK = {"integrity": 0, "behavioural": 1, "cosmetic": 2}
+
+
+def severity_of(f):
+    return str(f.get("severity")) if f.get("severity") in SEVERITY_RANK else ""
+
+
+def collect_parked_latent(state):
+    """Findings repair set aside itself (deferred + park_reason: latent). They
+    are decided, not open, so they never join the open list - but the board
+    says how many wait, because a parked finding nobody can see is lost."""
+    doc = load(state / "sdlc-findings.yaml") or {}
+    out = []
+    for f in doc.get("findings") or []:
+        if not isinstance(f, dict) or str(f.get("status") or "") != "deferred":
+            continue
+        res = f.get("resolution")
+        if not isinstance(res, dict) or res.get("park_reason") != "latent":
+            continue
+        out.append({"id": str(f.get("fnd_id") or f.get("id") or "FND-???"),
+                    "kind": str(f.get("kind") or ""),
+                    "summary": str(f.get("summary") or "").strip(),
+                    "reason": str(res.get("reason") or "").strip()})
+    return out
+
+
 def collect_findings(state):
     doc = load(state / "sdlc-findings.yaml") or {}
     helper = findings_helper()
@@ -531,8 +559,11 @@ def collect_findings(state):
                     "summary": str(f.get("summary") or "").strip(),
                     "source": str(f.get("suspected_source") or ""),
                     "raised_by": str(f.get("raised_by") or ""),
+                    "severity": severity_of(f),
                     "evidence": [str(e) for e in (f.get("evidence") or [])],
                     "owed": owed.get(fid, [])})
+    # integrity first, cosmetic last; the queue's own order inside a rank
+    out.sort(key=lambda r: SEVERITY_RANK.get(r["severity"], SEVERITY_RANK["behavioural"]))
     return out
 
 
@@ -783,12 +814,18 @@ def render_tier1(data, stamp):
         L += ["## Open findings - %d%s" % (len(data["findings"]),
                                            "" if all_owed else "  (`/sdlc:repair`)"), ""]
         for f in data["findings"]:
-            L += ["- **%s** *(%s%s)*%s%s" % (
+            L +=["- **%s** *(%s%s%s)*%s%s" % (
                 f["id"], f["status"], ", " + f["kind"] if f["kind"] else "",
+                ", " + f["severity"] if f.get("severity") else "",
                 " - " + f["source"] if f["source"] else "",
                 " - waiting on `%s`" % f["owed"][0] if f.get("owed") else "")]
             L += wrap(trim(f["summary"], 300))
         L.append("")
+
+    if data.get("parked_latent"):
+        L += ["## Parked", "",
+              "%d parked latent finding(s) - findings.py list --status deferred"
+              % len(data["parked_latent"]), ""]
 
     if risks:
         L += ["## Risks - %d caveat(s), verbatim" % len(risks), ""]
@@ -911,7 +948,8 @@ def render_tier2(data, stamp):
     if data["findings"]:
         L += ["## Open findings", ""]
         for f in data["findings"]:
-            L += ["### %s - %s (%s)" % (f["id"], f["status"], f["kind"] or "no kind"),
+            L += ["### %s - %s (%s%s)" % (f["id"], f["status"], f["kind"] or "no kind",
+                                         ", " + f["severity"] if f.get("severity") else ""),
                   "", f["summary"], ""]
             if f["source"]:
                 L += ["Suspected source: `%s`" % f["source"], ""]
@@ -921,6 +959,15 @@ def render_tier2(data, stamp):
                 L.append("- %s" % e)
             if f["evidence"]:
                 L.append("")
+
+    if data.get("parked_latent"):
+        L += ["## Parked latent findings", "",
+              "Set aside by repair (deferred, park_reason latent): met beside a fix, outside what "
+              "it had to read. `findings.py reopen FND-NNN` brings one back.", ""]
+        for f in data["parked_latent"]:
+            L += ["### %s - parked (%s)" % (f["id"], f["kind"] or "no kind"), "", f["summary"], ""]
+            if f["reason"]:
+                L += ["Reason: %s" % f["reason"], ""]
 
     L += ["## Caveats, verbatim, by artifact", ""]
     # One line for BOTH channels the canonical parser separates. A line that
@@ -1009,11 +1056,12 @@ def gather(root, plugin_root=None):
     warnings, refused = collect_warnings_detail(docs)
     pipeline = collect_pipeline(docs, state, edition)
     findings = collect_findings(state)
+    parked = collect_parked_latent(state)
     blocked = collect_blocked(state)
     questions = collect_questions(docs)
     return {
         "warnings": warnings, "refused_warnings": refused,
-        "pipeline": pipeline, "findings": findings,
+        "pipeline": pipeline, "findings": findings, "parked_latent": parked,
         "blocked": blocked, "questions": questions,
         "integrity": collect_integrity(docs), "lessons": collect_lessons(state, root),
         "next": next_step(pipeline, findings, blocked, questions, pro_url, edition),

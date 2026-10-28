@@ -7,6 +7,12 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.33 (2026-10-27) — statusboard orders open findings by severity and counts parked latent findings; auto-commit.md names repair's per-stage checkpoint; autocommit never stages Python bytecode
+
+- statusboard.py: open findings sorted integrity first, cosmetic last, each row naming its severity, every open finding still verbatim on the ambient board; one count line for findings repair parked latent, listed in STATUS.md. Ledger IMP-276, IMP-275; `_smoke/statusboard_selftest.py` section 9.
+- references/auto-commit.md: repair commits a `--checkpoint` once per located stage. Ledger IMP-277, IMP-279; `_smoke/autocommit_lockstep_selftest.py` arm 2b.
+- autocommit.py HELPER_VERSION 6: Python bytecode (any `__pycache__/` path) is never staged - filtered from the run delta and from directory pathspecs (setup's `.claude/sdlc`), and not counted as changed by something else when untracked; a path the run names exactly (code ledger `files_written`, `--paths`) is still staged; an already-tracked .pyc stays tracked. references/auto-commit.md says so. Ledger IMP-286; `_smoke/autocommit_selftest.py` bytecode arms.
+
 ## 1.32 (2026-10-09) — tracked code caches are untracked once by `autocommit.py untrack-caches` (setup asks); the statusboard reads a stuck report's unit from its body; docs_index resolves `reads_outputs_of`
 
 - `autocommit.py` (HELPER_VERSION 5): new `untrack-caches [--dry-run] [--decline]` ends the tracked `sdlc-code/packets` / `stack` dirt in ONE deletions-only commit built in a temporary index (`git commit --only` would re-add the working-tree files), guarded by `git check-ignore --no-index`; working files and the user's staged work are untouched; acts only while auto-commit is on. `mode` prints a `caches:` line (detected by `git ls-files`, so unchanged tracked caches count too); every close path names the subcommand instead of a raw `git rm` hint; `--decline` records `auto_commit.caches_decided_on`. Setup step 4 asks once with a verbatim consent notice (references/auto-commit.md, "Tracked code caches"). Ledger IMP-270; regression `_smoke/autocommit_selftest.py` (`SDLC_AUTOCOMMIT_UNDER_TEST`).

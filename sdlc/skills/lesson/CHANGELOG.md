@@ -7,6 +7,11 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.21 (2026-10-27) — `lessons.py add --occurrences N` records the distinct hits one report names (one sighting carrying `count`); a figure in evidence states what it counts
+
+- lessons.py add --occurrences N (default 1): a fresh lesson records occurrences N plus one sighting carrying `count: N`; a repeat adds N and appends one sighting carrying N; the dry-run lines print the summed total. LESSONS.schema.yaml documents `sightings[].count`; the maintainer's collector reads it so a fresh N > 1 lesson is never flagged as recurred. references/lessons-capture.md: pass the distinct hits, retry without the flag on an older installed copy, and a number in evidence names what it counts and how it was measured. Ledger IMP-292; `_smoke/lessons_selftest.py` check_occurrences_flag.
+- `_smoke/collect_selftest.py --only <check>` runs named checks alone and prints PARTIAL, never the full-pass line; `_smoke/collect_only_selftest.py` pins it. Ledger IMP-293.
+
 ## 1.20 (2026-10-02) — Phase 1 records the run baseline (`autocommit.py begin`) so the close commit takes every file the run touched
 
 - Phase 1's opening line runs `python .claude/sdlc/autocommit.py begin --skill lesson` before the run's first write (helper absent or older → skip). The close commit (setup 1.31) then stages the run delta — every file under the project root changed since — beside the owned set, so a file the run writes outside the helper's table (a script, a worker report) is no longer left uncommitted. Folded into the existing Phase 1 lines; SKILL.md line count unchanged.

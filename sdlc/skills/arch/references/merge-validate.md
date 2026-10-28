@@ -312,7 +312,17 @@ This validates:
     own-component qualified `component.unit` form (no verb required) or as a
     bare name in a sentence that also names it alongside a call verb — a
     purely descriptive mention, and a name immediately followed
-    by `.<ext>` (a file reference, never a call), do not count.
+    by `.<ext>` (a file reference, never a call), do not count. **#33** —
+    change history inside a work_unit's contract text: a `work_units[]`
+    `summary` / `inputs` / `output` / `raises` / `signature` string matching
+    `FND-\d+`, `Through v\d` or `\(v\d+\.\d+[,)]` (strict on purpose: a bare
+    `v3.1` is API prose, not history). One grouped, exit-neutral warning that
+    names each unit id and its matched tokens, never the text. A contract field
+    states today's behaviour only: the history goes to `metadata.changelog`
+    (`bump_artifact.py`), a "why" sentence to a `<field>_rationale` sibling.
+    Strip a tag when you next edit that field — editing a built task's
+    contract text moves its build fingerprint, so there is no bulk strip. It
+    blocks nothing, so it carries no version floor.
 
 18. **Version gating (CLAUDE.md §10).** Checks **#21–#24** and the
     component-containment gate ERROR at schema version >= 2.0
@@ -325,7 +335,7 @@ This validates:
 
 **Numbering.** Two disjoint sequences share this file: `#1`-`#15` above are
 this document's own system-mode list (never printed with a bracket tag by
-the validator); `#21`-`#32` are the container/suite checks the validator
+the validator); `#21`-`#33` are the container/suite checks the validator
 prints verbatim as `[cross-check N]` — this section is their one canonical
 table. `SKILL.md`, `ARCH.schema.yaml` and `ARCH__CONTAINER.schema.yaml`
 point here rather than keep their own copy.

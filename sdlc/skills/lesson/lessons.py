@@ -966,8 +966,12 @@ def stamp_recurrence(prior: dict, fresh: dict) -> dict:
     top-level plugin_version/skill_version keep dating occurrence 1 forever
     otherwise, so a recurrence across a fix could never be told from one
     before it (ledger IMP-231).
+
+    A repeat that reports N distinct new hits (`add --occurrences N`) adds N,
+    not 1, and its one sighting carries `count: N`.
     """
-    prior["occurrences"] = _occurrences(prior) + 1
+    hits = _occurrences(fresh)
+    prior["occurrences"] = _occurrences(prior) + hits
     prior.setdefault("first_seen_at", prior.get("raised_at"))
     prior["last_seen_at"] = fresh.get("raised_at") or _iso_utc_now()
     prior.pop("sent_at", None)
@@ -976,6 +980,8 @@ def stamp_recurrence(prior: dict, fresh: dict) -> dict:
     for key in ("plugin_version", "installed_version", "skill_version"):
         if fresh.get(key):
             sighting[key] = fresh[key]
+    if hits > 1:
+        sighting["count"] = hits
     sightings = prior.setdefault("sightings", [])
     sightings.append(sighting)
     del sightings[:-MAX_SIGHTINGS]
@@ -2209,6 +2215,10 @@ def cmd_add(args) -> int:
         bad.append(
             f"--generalizes {args.generalizes!r} is not one of {'|'.join(GENERALIZES)}."
         )
+    hits = getattr(args, "occurrences", 1)
+    if hits < 1:
+        bad.append(f"--occurrences {hits} must be a whole number >= 1 (distinct hits "
+                   f"this report names).")
     if bad:
         return _reject_add(" ".join(bad))
 
@@ -2336,6 +2346,17 @@ def cmd_add(args) -> int:
         lesson["generalizes"] = args.generalizes
     if args.related:
         lesson["related_findings"] = list(args.related)
+    if hits > 1:
+        # The reporter states how many distinct hits this report names; a
+        # fresh lesson carries them as its count plus ONE sighting carrying
+        # the same count, so the collector never reads N>1 without a
+        # sighting as "recurred, later version unknown".
+        lesson["occurrences"] = hits
+        first = {"at": lesson["raised_at"], "count": hits}
+        for key in ("plugin_version", "installed_version", "skill_version"):
+            if lesson.get(key):
+                first[key] = lesson[key]
+        lesson["sightings"] = [first]
 
     hints = lesson_hints(lesson, plugin_root=plugin_root, installed_version=installed)
     if version_hint:
@@ -2378,12 +2399,12 @@ def cmd_add(args) -> int:
         if prior is not None and reopening:
             print(
                 f"[OK] dry run - would reopen {prior.get('lsn_id')} "
-                f"(seen {_occurrences(prior) + 1}x); nothing written."
+                f"(seen {_occurrences(prior) + hits}x); nothing written."
             )
         elif prior is not None:
             print(
                 f"[OK] dry run - would be recorded as a recurrence of "
-                f"{prior.get('lsn_id')} (seen {_occurrences(prior) + 1}x); nothing written."
+                f"{prior.get('lsn_id')} (seen {_occurrences(prior) + hits}x); nothing written."
             )
         else:
             print(
@@ -3034,6 +3055,15 @@ def main(argv=None) -> int:
     p.add_argument("--session-id", default=None)
     p.add_argument("--plugin-root", default=None)
     p.add_argument("--plugin-version", default=None)
+    p.add_argument(
+        "--occurrences",
+        type=int,
+        default=1,
+        metavar="N",
+        help="How many distinct hits this report names (default 1). A "
+             "re-send of a known lesson adds N, so pass only hits not "
+             "already recorded.",
+    )
     p.add_argument(
         "--dry-run",
         action="store_true",

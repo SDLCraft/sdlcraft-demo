@@ -7,6 +7,10 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.27 (2026-10-27) — warn-only [cross-check 33]: a work_unit contract field carrying change history (FND ids, 'Through vN', '(vN.NN,') draws one grouped, exit-neutral warning
+
+- validate_schema.py: `[cross-check 33]` names unit ids and the matched tokens only (never quoted contract text, so doctor --warnings-as-findings mints nothing) and its remedy - strip a tag when that field is next edited and move its fact to `metadata.changelog`; no sweep, no migration. ARCH__CONTAINER.schema.yaml echoes the rule; references/merge-validate.md row 33; SKILL.md cross-check range #25-#33. The regex and marker are one pinned string in `_smoke/contract_history_selftest.py` (fixture `_smoke/48_contract_history`). Ledger IMP-282.
+
 ## 1.26 (2026-10-02) — Phase 1 records the run baseline (`autocommit.py begin`) so the close commit takes every file the run touched
 
 - Phase 1's opening line runs `python .claude/sdlc/autocommit.py begin --skill arch` before the run's first write (helper absent or older → skip). The close commit (setup 1.31) then stages the run delta — every file under the project root changed since — beside the owned set, so a file the run writes outside the helper's table (a script, a worker report) is no longer left uncommitted. Folded into the existing Phase 1 lines; SKILL.md line count unchanged.

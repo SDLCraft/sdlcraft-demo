@@ -118,6 +118,14 @@ Record a lesson when — and only when — one of these fires:
     though one already exists — it is not a duplicate, it is the second data
     point. If the match is wrong (a different defect that happens to live in
     the same file), re-run with `--allow-duplicate`.
+
+    `add` counts one hit per call unless you say otherwise. When this report
+    names N distinct hits, pass `--occurrences N` and list those hits (ids
+    only) in the evidence: a fresh lesson then records N, and a repeat of a
+    known lesson adds N. Pass only hits the queue has not recorded yet; a
+    re-sent set double-counts. If the installed `lessons.py` rejects the flag,
+    it is older than the plugin: re-run the same command without it and state
+    N in the evidence, so the lesson is not lost.
 11. You **confidently followed an instruction, produced something wrong, and
     had to redo it** — and the correction shows the instruction (not the
     project) misled you. Ordinary iteration on the user's content feedback is
@@ -199,6 +207,12 @@ mechanically — as a `Check:` line printed after `[OK]`, never as a rejection
 - **The evidence is judgeable without the project.** Ids, counts, skill
   locations, the exact message — never "test", never the summary repeated.
 - **`blocker` means the run stopped.** It also sends at the next close.
+
+No helper checks one more rule, so it rests on you: a number or percentage
+in evidence says what it counts. Write `N of M <what>`, or the command that
+produced it, or label it `estimate`. The maintainer re-runs your figure before
+acting on it; a headline percentage nobody can reproduce sends the fix at the
+wrong problem.
 
 `add --dry-run` runs the same checks and writes nothing — the `/sdlc:lesson`
 flow uses it on the draft, before its one confirmation. The close-phase

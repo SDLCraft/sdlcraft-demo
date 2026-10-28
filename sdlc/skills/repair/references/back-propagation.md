@@ -1,7 +1,7 @@
 # Back-propagation — finding to source stage (sdlc-repair)
 
-Read by the wave-1 localize worker (SKILL.md Phase 2), and by the session
-when it runs a walk inline. It answers one question per finding: **which
+Read by the wave-1 localize worker — one worker per cluster, one walk per
+finding (SKILL.md Phase 2) — and by the session when it runs a walk inline. It answers one question per finding: **which
 artifact's content is actually wrong?** — and, in Step 3½, which artifacts
 the fix will have to touch.
 
@@ -55,6 +55,17 @@ Who raised the finding tells you where to *start* the walk, not where it ends:
 | `sdlc-repair` (doctor) | the artifact a validator or the linter named | that artifact — unless the error is a coverage / trace failure naming an upstream id |
 | `sdlc-<interview skill>` (`sdlc-ux` … `sdlc-task`) | the raiser's Phase 2/3 pre-fill, a stale-ref prompt, a delta-review, an `upstream_incomplete` auto-raise at close | **one stage upstream of the raiser** — the raiser read its inputs and found them wanting; it did not write the defect. Its `suspected_stage` is usually its immediate upstream; check that one first, then keep walking |
 | `user` (`--flag`) | wherever the user was looking | the `--stage` / `--path` given, then the owner table below; the user's guess is a hint, not a verdict |
+
+**Surface, never hunt.** A defect you meet while reading what this finding
+needs goes in the report's `beside:` list (summary, site, `read_for`); you read
+no further to find more and propose no fix for it. A finding already in the
+queue, open or parked, goes in `resighted:`. What the run does with the entry
+is the session's call (`orchestration.md`, "Convergence").
+
+**Decided together.** List a finding in the report's `decide_with` only when its
+decision or edit is the same act as yours — one answer settles both. Never for
+proximity, a shared symbol or a shared cluster: the link keeps the findings in
+one aggregate and asks their decision once.
 
 Three absolutes:
 

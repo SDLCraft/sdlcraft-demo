@@ -381,6 +381,14 @@ components:                                # REQUIRED — non-empty
                                            #   entities the owning component traces.
         satisfies_acceptance:              # OPTIONAL — the component acceptance_criterion
           - "Creating a task returns 201 with a persisted id."  # string(s) this fulfils.
+        # --- contract text states TODAY'S behaviour only. Keep change history
+        #     out of summary / inputs / output / raises / signature: no version
+        #     tags, no FND ids, no "Through vN" narrative. The history goes to
+        #     metadata.changelog (bump_artifact.py); a "why" sentence goes to a
+        #     `<field>_rationale` sibling. `task` copies these fields verbatim
+        #     into build tasks, so a tag edit restales a built task. Strip a tag
+        #     when you next edit the field; cross-check 33 counts the rest
+        #     (warning only). ---
         # --- interface contract (codegen-grade). DEFER-OR-DECLARE, ENFORCED by
         #     cross-check #23:
         #       DEFER   — allowed ONLY when `traces_api_operation` is set (the
@@ -566,7 +574,7 @@ arch_warnings:                             # OPTIONAL — list of "WRN-NNN: ..."
 # Cross-check table — see references/merge-validate.md
 # =============================================================================
 # In addition to the system-level checks in ARCH.schema.yaml, this file's
-# fields feed cross-checks #10 (owns_api_resources) through #32 (unreachable
+# fields feed cross-checks #10 (owns_api_resources) through #33 (change history in
 # work_units). The canonical table — what every numbered check asserts,
 # which block `status: complete` and which only warn, and the version-gating
 # floor (CLAUDE.md §10, arch_container_version >= 2.0) — is

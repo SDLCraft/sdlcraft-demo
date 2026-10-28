@@ -1035,12 +1035,20 @@ PER_LINE_CHECKS = ("crosscheck_artifacts", "docs_index --check")
 MAX_PER_CHECK = 20
 
 
+# A failed validator, crosscheck or dangling-reference check is a contradiction
+# between specs (FINDINGS.schema.yaml severity: integrity). A warning lifted to
+# a finding is left UNSTAMPED: a risk warning is not cosmetic, and a blanket
+# cosmetic stamp would hide one from the board.
+FAILURE_SEVERITY = "integrity"
+
+
 def _entry(c: Check, summary: str, where: str, evidence: List[str], *,
            kind: Optional[str] = None, stage: Optional[str] = "auto",
-           detected_by: Optional[str] = None, docs: Optional[Path] = None) -> Dict[str, Any]:
+           detected_by: Optional[str] = None, docs: Optional[Path] = None,
+           severity: Optional[str] = None) -> Dict[str, Any]:
     if docs is not None:
         where = project_relative(where, docs)
-    return {
+    entry = {
         "fnd_id": None,
         "raised_by": "sdlc-repair",
         "detected_by": detected_by or c.name,
@@ -1053,6 +1061,9 @@ def _entry(c: Check, summary: str, where: str, evidence: List[str], *,
         "status": "open",
         "resolution": None,
     }
+    if severity:
+        entry["severity"] = severity
+    return entry
 
 
 def failure_entries(c: Check, docs: Path) -> List[Dict[str, Any]]:
@@ -1062,11 +1073,13 @@ def failure_entries(c: Check, docs: Path) -> List[Dict[str, Any]]:
         items = [ln for ln in lines if not ln.startswith("(+")]
         for ln in items[:MAX_PER_CHECK]:
             where = artifact_in(ln, docs, c.target)
-            out.append(_entry(c, f"{c.name} exit {c.exit}: {ln}", where, [ln], docs=docs))
+            out.append(_entry(c, f"{c.name} exit {c.exit}: {ln}", where, [ln], docs=docs,
+                              severity=FAILURE_SEVERITY))
         if len(items) > MAX_PER_CHECK:
             out.append(_entry(
                 c, f"{c.name} exit {c.exit}: {len(items) - MAX_PER_CHECK} further defect line(s) not itemized",
                 c.target, [f"exit {c.exit}", f"{len(items)} defect lines in total"], docs=docs,
+                severity=FAILURE_SEVERITY,
             ))
     else:
         # The shard the defect is IN, not the file the check ran on: the row
@@ -1075,7 +1088,7 @@ def failure_entries(c: Check, docs: Path) -> List[Dict[str, Any]]:
         # sibling sweep records the one defect against the system file
         # (ledger IMP-130; artifact_in's docstring states the same rule).
         out.append(_entry(c, f"{c.name} exit {c.exit}: {c.summary}", c.located or c.target,
-                          lines[:MAX_EVIDENCE], docs=docs))
+                          lines[:MAX_EVIDENCE], docs=docs, severity=FAILURE_SEVERITY))
     return out
 
 

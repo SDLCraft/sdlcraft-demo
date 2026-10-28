@@ -20,7 +20,9 @@ state file, the findings/lessons queues, the statusboard files, the marker;
 `code` adds the source files its ledger and manifest say it wrote, plus the
 file pins of the units it recorded failed and the files an interrupted unit's
 breadcrumb recorded) PLUS the run delta - every file under the project root
-that changed after `begin`, wherever the run wrote it - and commits them as
+that changed after `begin`, wherever the run wrote it (Python bytecode under
+a `__pycache__/` is never part of it, unless a path is named exactly) - and
+commits them as
 
     <invocation> → <summary>
 
@@ -80,7 +82,7 @@ try:
 except Exception:
     pass
 
-HELPER_VERSION = "5"
+HELPER_VERSION = "6"
 MARKER_REL = Path(".claude/sdlc/sdlc-plugin.json")
 ENV_OVERRIDE = "SDLC_AUTO_COMMIT"
 MODES = ("off", "on")
@@ -471,8 +473,14 @@ def _hashes(toplevel: Path, paths: "list[str]") -> "dict[str, str | None]":
     return out
 
 
+def _is_bytecode(path: str) -> bool:
+    """Python bytecode: any `__pycache__` path component (Python 3 writes it
+    nowhere else). Regenerable and interpreter-specific, never run-authored."""
+    return "__pycache__" in path.split("/")
+
+
 def _is_cache(path: str, prefix: str) -> bool:
-    return any(path.startswith(f"{prefix}{CODE_DIR}/{d}/") for d in CACHE_DIRS)
+    return _is_bytecode(path) or any(path.startswith(f"{prefix}{CODE_DIR}/{d}/") for d in CACHE_DIRS)
 
 
 def record_baseline(root: Path, skill: str) -> None:
@@ -519,7 +527,8 @@ def run_delta(toplevel: Path, prefix: str, baseline: "dict[str, str | None]") ->
     """Every file under the project root the run touched: changed now and
     clean when the run began, or changed when it began and changed again since
     (its content differs from the snapshot). Gitignored files never appear;
-    code's regenerable caches are skipped even without their .gitignore."""
+    code's regenerable caches and Python bytecode are skipped even without a
+    .gitignore."""
     entries = _status_entries(toplevel, [_root_spec(prefix)])
     if entries is None:
         return None
@@ -602,7 +611,7 @@ def _left_entries(toplevel: Path, prefix: str) -> "tuple[list[str], list[str]]":
     """(files changed by something else, tracked cache files that changed).
 
     code's own regenerable caches are not someone else's edit: an UNTRACKED
-    file under packets/ or stack/ is not counted at all, and a TRACKED changed
+    file under packets/ or stack/ (or any Python bytecode) is not counted at all, and a TRACKED changed
     one (a project that committed them once) is counted apart so the line can
     name the one command that ends it. The second list holds the cache dir of
     each such file."""
@@ -611,6 +620,8 @@ def _left_entries(toplevel: Path, prefix: str) -> "tuple[list[str], list[str]]":
     tracked: "list[str]" = []
     for code, path in entries:
         rel = path[len(prefix):] if prefix and path.startswith(prefix) else path
+        if code == "??" and _is_bytecode(path):
+            continue
         hit = next((d for d in CACHE_DIRS if rel.startswith(f"{CODE_DIR}/{d}/")), None)
         if hit is None:
             left.append(path)
@@ -814,6 +825,10 @@ def _commit(args, root: Path) -> int:
     specs = [prefix + s for s in owned_pathspecs(args.skill, root, args.paths or [],
                                                   has_baseline=baseline is not None)]
     files = _status_paths(toplevel, specs)
+    if files is not None:
+        # bytecode under a directory pathspec is never the run's content; a
+        # path the run names exactly (ledger files_written, --paths) still is
+        files = [p for p in files if not _is_bytecode(p) or p in specs]
     delta = run_delta(toplevel, prefix, baseline) if baseline is not None else []
     if files is None or delta is None:
         print("[DRAFT] not committed - git status failed. Nothing is lost: the files are on disk.")

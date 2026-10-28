@@ -136,6 +136,25 @@ findings:                                  # REQUIRED — list[Finding]; may be 
       # older upstream is a known state, reported by doctor.py --provenance and
       # reviewed by the owning skill's delta-review — never a spec defect.
 
+    severity: integrity | behavioural | cosmetic   # OPTIONAL — how much it matters,
+                                           #   stamped by the raiser or writer that has
+                                           #   the context (`findings.py add --severity`;
+                                           #   the doctor stamps a failed check
+                                           #   integrity). An unstamped finding reads as
+                                           #   behavioural. No findings_file_version
+                                           #   floor: the key has no legacy spellings,
+                                           #   so any other value is an error at every
+                                           #   version.
+                                           #   integrity   — data loss, a security hole,
+                                           #                 or a contradiction between
+                                           #                 specs
+                                           #   behavioural — two builds would behave
+                                           #                 observably differently
+                                           #   cosmetic    — naming, residue, wording
+                                           #   Read by: `findings.py list` (a column
+                                           #   and a count line), the statusboard (sort;
+                                           #   cosmetic collapses to a count on the
+                                           #   ambient board) and repair's Phase 2 gate.
     summary: <one line>                    # REQUIRED — what is wrong, stated once
     evidence:                              # REQUIRED — list[str], 1..5 lines, each
       - "exit 1: TST-006 red after 3 attempts"   #   <= 300 chars: the failing
@@ -241,6 +260,14 @@ findings:                                  # REQUIRED — list[Finding]; may be 
       #                                    #   and at least one hop is `downstream`
       #   reason: <one line>               # wontfix / deferred: why (REQUIRED for
       #                                    #   deferred)
+      #   park_reason: latent              # OPTIONAL, deferred only — repair set this
+      #                                    #   aside itself (a defect met beside the fix
+      #                                    #   but outside what the fix had to read); a
+      #                                    #   deferral the user asked for carries none.
+      #                                    #   `findings.py add` skips a re-sighting of
+      #                                    #   it (prints `parked as FND-NNN`) and the
+      #                                    #   statusboard counts it. Any other value,
+      #                                    #   or the key on another status, is an error.
       #   artifacts_touched:               # every file edited, in edit order.
       #     - docs/ARCH__aicf-cli.yaml     #   v2: every entry starts with docs/
       #     - docs/TEST-STRATEGY__aicf-cli.yaml

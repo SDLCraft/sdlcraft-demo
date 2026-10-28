@@ -54,6 +54,10 @@ Beyond field types it checks the invariants that keep the queue trustworthy:
     token list, and a note that enumerates two or more foreign TST-/TSK- ids
     with retirement wording and no `retired` list (the FND-104 shape, ledger
     IMP-193).
+  * `severity` (integrity | behavioural | cosmetic) is optional and an error at
+    EVERY version when it holds anything else - the key has no legacy spellings,
+    so no floor applies; `resolution.park_reason` (latent) is meaningful only on
+    status: deferred.
   * A finding that pins `expected_count` with no detected_by is WARNED, never
     rejected: doctor.py accepts a pinned count only from a finding that names
     its check (references/accepted-deviance.md).
@@ -252,6 +256,24 @@ class Status(str, Enum):
     duplicate = "duplicate"
 
 
+class Severity(str, Enum):
+    """How much a defect matters, stamped by the raiser or the writer that has
+    the context (optional: an unstamped finding reads as `behavioural`).
+    integrity = data loss, a security hole or a contradiction between specs;
+    behavioural = two generators would build observably different behaviour;
+    cosmetic = naming, residue, wording. No findings_file_version floor: the key
+    has no legacy spellings, so a bad value is an error at every version."""
+    integrity = "integrity"
+    behavioural = "behavioural"
+    cosmetic = "cosmetic"
+
+
+class ParkReason(str, Enum):
+    """Why a deferral was parked rather than decided by a person. One value
+    today; a deferral the user asked for carries none."""
+    latent = "latent"
+
+
 class Mode(str, Enum):
     surgical = "surgical"
     additive = "additive"       # repair authored the new downstream item(s) itself
@@ -320,6 +342,10 @@ class Resolution(BaseModel):
     symbols_changed: Optional[List[str]] = None
     sites_considered: Optional[List[SiteConsidered]] = None
     summary: Optional[str] = None
+    # Set only on a deferral repair parked itself (a defect met beside the fix
+    # but outside what the fix had to read); `findings.py add` dedupes a
+    # re-sighting against it and the statusboard counts it.
+    park_reason: Optional[ParkReason] = None
     # What the localization walk concluded each owed re-invocation should do,
     # per downstream item: [{artifact: docs/<file>, key: <item key | null>,
     # note: <why it moved + the proposed disposition>}]. The stage's
@@ -340,6 +366,7 @@ class Finding(BaseModel):
     session_id: Optional[str] = None
     surfaced_at: Optional[SurfacedAt] = None
     kind: Kind
+    severity: Optional[Severity] = None
     summary: str
     evidence: List[str]
     suspected_stage: Optional[Stage] = None
@@ -533,6 +560,12 @@ def cross_checks(doc: FindingsFile, version: int) -> Tuple[List[str], List[str]]
                     f"{fid}: status=deferred requires resolution.reason - say why the "
                     f"defect stays unfixed, so the next reader does not re-triage it"
                 )
+
+        if res is not None and res.park_reason is not None and f.status is not Status.deferred:
+            errors.append(
+                f"{fid}: resolution.park_reason is set but status is {f.status.value} - "
+                f"it is meaningful only on status: deferred"
+            )
 
         # ---- duplicates -----------------------------------------------------
         if f.status is Status.duplicate and not f.duplicate_of:
