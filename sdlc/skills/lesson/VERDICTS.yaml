@@ -176,6 +176,19 @@ rows:
   - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-163, status: resolved, imp_id: IMP-275, fixed_in: "0.9.27", "on": "2026-10-27"}
   - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-164, status: resolved, imp_id: IMP-274, fixed_in: "0.9.27", "on": "2026-10-27"}
   - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-165, status: resolved, imp_id: IMP-281, fixed_in: "0.9.27", "on": "2026-10-27"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-166, status: resolved, imp_id: IMP-294, fixed_in: "0.9.28", "on": "2026-11-01"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-167, status: resolved, imp_id: IMP-298, fixed_in: "0.9.28", "on": "2026-11-01"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-168, status: resolved, imp_id: IMP-303, fixed_in: "0.9.28", "on": "2026-11-01"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-169, status: resolved, imp_id: IMP-304, fixed_in: "0.9.28", "on": "2026-11-01"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-170, status: resolved, imp_id: IMP-300, fixed_in: "0.9.28", "on": "2026-11-01"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-171, status: resolved, imp_id: IMP-296, fixed_in: "0.9.28", "on": "2026-11-01"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-172, status: resolved, imp_id: IMP-301, fixed_in: "0.9.28", "on": "2026-11-01"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-173, status: resolved, imp_id: IMP-296, fixed_in: "0.9.28", "on": "2026-11-01"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-174, status: resolved, imp_id: IMP-302, fixed_in: "0.9.28", "on": "2026-11-01"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-175, status: resolved, imp_id: IMP-299, fixed_in: "0.9.28", "on": "2026-11-01"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-176, status: resolved, imp_id: IMP-294, fixed_in: "0.9.28", "on": "2026-11-01"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-177, status: resolved, imp_id: IMP-295, fixed_in: "0.9.28", "on": "2026-11-01"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-178, status: resolved, imp_id: IMP-297, fixed_in: "0.9.28", "on": "2026-11-01"}
   - {project: "df3214d59237", lsn_id: LSN-001, status: resolved, imp_id: IMP-035, fixed_in: "0.9.4", "on": "2026-09-22"}
   - {project: "df3214d59237", lsn_id: LSN-002, status: resolved, imp_id: IMP-034, fixed_in: "0.9.13", "on": "2026-09-22"}
   - {project: "df3214d59237", lsn_id: LSN-003, status: resolved, imp_id: IMP-028, fixed_in: "0.9.4", "on": "2026-09-22"}

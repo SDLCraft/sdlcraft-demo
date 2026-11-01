@@ -582,7 +582,7 @@ python "${CLAUDE_SKILL_DIR}/../repair/findings.py" add --raised-by sdlc-ux \
   --file <file> --detected-by sdlc-ux
 ```
 
-Cap 3 per run unless one is blocking; skip silently when the script is absent
+Cap: user-confirmed notes and upstream_incomplete uncapped; past 3 other sightings ask once (record all | first 3 | none), listing them in the question; on EXIT, or when you cannot ask, record all. Skip silently when the script is absent
 (keep the notes in state for a later run). `upstream_incomplete` summaries
 start `docs/PRD.yaml <field.path>:` so the (detected_by, summary) dedupe
 lands each defect once across runs. Mid-run the agent NEVER stops to record —
@@ -789,4 +789,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.28"
+skill_version: "1.29"

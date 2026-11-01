@@ -7,6 +7,14 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.33 (2026-11-01) — a note for a held downstream file is a re-invoke, and the surgical-handoff warning names the three destinations; localize reads a TASKS structural proposal against the task validator's pins and names a new file's owner
+
+Handoff (ledger IMP-298): no new field and no closed-finding reader, since either lets a note outlive the tracking that guarantees someone reads it. `forward-propagation.md` gains 'A note for a held file is a re-invoke': run the surgical steps, then record `re-invoke` with the owed command and `sites_considered`. The warning names re-invoke, the bump summary its `--drift` quotes, and `resolution.summary` for reasoning no downstream file needs. Pin: `_smoke/findings_selftest.py`.
+
+Localize (ledger IMP-299): the brief gains a `PINS:` row (the task validator's docstring; absent in the free edition). Step 3 1/2 names the row, never a path, because a `${CLAUDE_SKILL_DIR}` token resolves to nothing in a subagent. A broken pin follows the existing additive criteria. A new delivered file's owner goes in a `sites_considered_draft` row. Pin: `_smoke/orchestration_selftest.py`.
+
+New cross-skill pin `_smoke/findings_drain_cap_selftest.py` holds the findings-drain clause (ledger IMP-296).
+
 ## 1.32 (2026-10-27) — a run converges: mid-run mints are admitted by what the fix had to read and the rest parked latent; one localize worker per findings.py cluster; finding severity; a checkpoint commit per located stage and a round card; plan keeps decided-together findings in one aggregate; the fixer prices its edit as a stale-set delta
 
 - Convergence (orchestration.md `## Convergence`, the one definition of a round): a beside-defect inside the slice its worker had to read for its own fix joins this run; one reached by looking further is latent - `status: deferred` + `resolution.park_reason: latent`. Workers surface (`beside:` / `resighted:` report keys), never hunt. `rounds[]` in the state file; the round question's recommendation follows the latent rate (<= 1 work them now, > 1 park, two rounds above 1 the structural route). The SKILL intro states the designed scope. In-run healing of a defect the fix had to read is kept. Ledger IMP-275; pins in `_smoke/orchestration_selftest.py` (convergence section), eval case 18.

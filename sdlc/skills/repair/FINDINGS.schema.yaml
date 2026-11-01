@@ -296,8 +296,11 @@ findings:                                  # REQUIRED — list[Finding]; may be 
       #                                    #   mode, a file nothing owes, a malformed
       #                                    #   `retired`, a note that enumerates
       #                                    #   consumers with no `retired` list — see
-      #                                    #   `retired` below).
-      #       basis: measured              #   REQUIRED per note (warns when absent):
+      #                                    #   `retired` below). A fix that leaves a
+      #                                    #   note a held file must still author is
+      #                                    #   a re-invoke: record it with that
+      #                                    #   file's reconcile command.
+      #       basis: measured             #   REQUIRED per note (warns when absent):
       #                                    #   measured = read from the artifacts the
       #                                    #   note names (a siting the caller's own
       #                                    #   declared order confirms); inferred = an

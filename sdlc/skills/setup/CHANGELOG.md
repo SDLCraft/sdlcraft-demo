@@ -7,6 +7,14 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.34 (2026-11-01) — autocommit adds only untracked files, so a staged rename or rm no longer aborts the commit, and lesson owns the board files; --drift grants [changelog names this file] per entry with a second label
+
+autocommit (ledger IMP-300, HELPER_VERSION 7): `git add` runs only on untracked rows, because `commit --only` already takes the worktree state of every path git knows. A `git commit --dry-run --only` exit code decides `[OK] nothing to commit` in any locale and fires no hook. A failed commit stages what it would have taken, so 'commit them by hand' stays true. A rename out of the owned set with no baseline commits the deletion and leaves the new side staged, by choice (`references/auto-commit.md`).
+
+Lesson's set (ledger IMP-302): a `BOARD` tuple is shared by the common set and `EXACT['lesson']`, so a skipped `begin` no longer leaves the two generated board files dirty. Pins: `_smoke/autocommit_selftest.py`, `_smoke/autocommit_lockstep_selftest.py`.
+
+--drift (ledger IMP-304, capability 14): an entry citing a changed item grants those items the plain mark, an entry citing none grants all, and any other changed item prints `[changelog names this file, not this item]`. Every such item stays marked and relevant, so `re-stamp only` cannot newly appear. `index_selftest.py` section 12a also pins that a traces-only edit still lists the component (ledger IMP-303). Pin: `_smoke/index_selftest.py`.
+
 ## 1.33 (2026-10-27) — statusboard orders open findings by severity and counts parked latent findings; auto-commit.md names repair's per-stage checkpoint; autocommit never stages Python bytecode
 
 - statusboard.py: open findings sorted integrity first, cosmetic last, each row naming its severity, every open finding still verbatim on the ambient board; one count line for findings repair parked latent, listed in STATUS.md. Ledger IMP-276, IMP-275; `_smoke/statusboard_selftest.py` section 9.

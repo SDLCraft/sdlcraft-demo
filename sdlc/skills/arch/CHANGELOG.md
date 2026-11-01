@@ -7,6 +7,10 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.28 (2026-11-01) — the findings drain never caps what the user confirmed; past 3 unprompted sightings it asks once instead of dropping
+
+Phase 8 findings drain: user-confirmed notes and `upstream_incomplete` are never capped; past 3 other sightings the close asks once (record all | first 3 | none) with the notes listed in the question; on EXIT, or when it cannot ask, it records them all. 'Unless one is blocking' is gone: FINDINGS has no such severity, and it left a fourth note with no stated fate (ledger IMP-296; pin `repair/_smoke/findings_drain_cap_selftest.py`).
+
 ## 1.27 (2026-10-27) — warn-only [cross-check 33]: a work_unit contract field carrying change history (FND ids, 'Through vN', '(vN.NN,') draws one grouped, exit-neutral warning
 
 - validate_schema.py: `[cross-check 33]` names unit ids and the matched tokens only (never quoted contract text, so doctor --warnings-as-findings mints nothing) and its remedy - strip a tag when that field is next edited and move its fact to `metadata.changelog`; no sweep, no migration. ARCH__CONTAINER.schema.yaml echoes the rule; references/merge-validate.md row 33; SKILL.md cross-check range #25-#33. The regex and marker are one pinned string in `_smoke/contract_history_selftest.py` (fixture `_smoke/48_contract_history`). Ledger IMP-282.

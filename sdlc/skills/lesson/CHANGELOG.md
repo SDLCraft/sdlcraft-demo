@@ -7,6 +7,10 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.22 (2026-11-01) — the close states the real staged set: queue, marker, the regenerated board files and what the run wrote after begin
+
+Step 5 said 'only the lessons queue and the marker', which hid the run delta. The helper now owns the two board files regardless of `begin` (setup 1.34, ledger IMP-302). That one reported run skipped `begin` is inferred from a probe, not proven; the fix does not depend on the cause.
+
 ## 1.21 (2026-10-27) — `lessons.py add --occurrences N` records the distinct hits one report names (one sighting carrying `count`); a figure in evidence states what it counts
 
 - lessons.py add --occurrences N (default 1): a fresh lesson records occurrences N plus one sighting carrying `count: N`; a repeat adds N and appends one sighting carrying N; the dry-run lines print the summed total. LESSONS.schema.yaml documents `sightings[].count`; the maintainer's collector reads it so a fresh N > 1 lesson is never flagged as recurred. references/lessons-capture.md: pass the distinct hits, retry without the flag on an older installed copy, and a number in evidence names what it counts and how it was measured. Ledger IMP-292; `_smoke/lessons_selftest.py` check_occurrences_flag.

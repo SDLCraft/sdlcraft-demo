@@ -486,9 +486,11 @@ The steps, in order:
    - *changed in body* → only the items the report marks `[referenced here]`
      (a structured trace), `[cited in prose xN]` (a mention in a
      description or directive — re-read those N sites), `[changelog names
-     this file]` (the upstream's own changelog since the stamp already names
-     this file — read the entry and check each changed item against what
-     this file says about it), or `[deferred here]` (this file defers the
+     this file]` or `[changelog names this file, not this item]` (the
+     upstream's own changelog since the stamp already names this file — read
+     the entry once; check an item with the plain mark against what this file
+     says about it, and one with the second label against that entry only),
+     or `[deferred here]` (this file defers the
      item — does the deferral's reason still hold now that the contract
      changed? keep it, or author the test/task). The report computes
      this filter; never re-derive it by hand, and an unmarked list means an

@@ -417,6 +417,19 @@ The shape of a sequence, rooted in one artifact:
   files its note cited, and nothing marked it as a guess. Never mix the two
   registers in one note.
 
+  **A note for a held file is a re-invoke.** A surgical or additive fix that
+  determines something a held downstream file must still author (a case for a
+  TST it holds, a wire in a task graph it holds) owes that file's reconcile,
+  so it is not a relabel to record it `re-invoke`: run the surgical steps as
+  usual, then write `mode: re-invoke` with the command that file's reconcile
+  runs and `sites_considered`, and put the notes in `handoff`. A command
+  another open finding already owes joins the same chain once, deduplicated,
+  and both findings' notes reach that reconcile. The finding stays `triaged`
+  until the reconcile verifies. When the held file only needs to KNOW, name it
+  in the `bump_artifact.py --summary` line (its `--drift` quotes it) and leave
+  `handoff` unset; `resolution.summary` is for reasoning no downstream file
+  needs.
+
   **Retiring or renaming a token: put the token, never an authored consumer
   list.** When the fix removes or renames a named token, add
   `retired: [<token>, ...]` to the handoff entry — `note` explains WHY, never
@@ -526,8 +539,9 @@ by trial (canonical: `FINDINGS.schema.yaml`):
   say which finding it repeats in `resolution.summary` instead.
 - `resolved`, `wontfix` and `deferred` all carry a `resolution` block
   (`deferred` with a `reason`).
-- `handoff` (re-invoke only) is `{artifact: docs/<file>, key, note, basis,
-  retired}` — `retired` carries the literal token(s), never which items use
+- `handoff` (re-invoke only; a note for a held file makes the fix a re-invoke,
+  see "A note for a held file is a re-invoke") is `{artifact: docs/<file>,
+  key, note, basis, retired}` — `retired` carries the literal token(s), never which items use
   them; `artifact` is a file an owed command rewrites. Warns only on a
   misplaced note or a malformed `retired`.
 - `sites_considered` (`{artifact, disposition: edited | resliced | unaffected

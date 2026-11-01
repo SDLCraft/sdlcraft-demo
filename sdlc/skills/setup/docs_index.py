@@ -138,6 +138,12 @@ and an LF checkout of the same file hash the same. Every skill that records a
 provenance hash reads it from ``INDEX.yaml`` or calls ``--hash`` — never a raw
 ``sha256(bytes)`` of its own, which differs on CRLF.
 
+Capability version: 14 (the ``[changelog names this file]`` mark says how far
+the changelog's evidence reaches: the plain mark for an item a naming entry
+cites, or for every changed item when an entry cites none; ``[changelog names
+this file, not this item]`` for a changed item only other items are cited
+for. Every such item is still marked and still relevant.)
+
 Capability version: 12 (an item ADDED upstream since the stamp that this file
 already references or cites - an id it covered before the item existed, a
 container it already names - is marked ``[referenced here]`` / ``[cited in
@@ -227,7 +233,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-CAPABILITY_VERSION = 13
+CAPABILITY_VERSION = 14
 
 
 # =============================================================================
@@ -3386,7 +3392,8 @@ def _changelog_names_target(newer: "list[str]", target_name: str) -> bool:
     return False
 
 
-_FLAGGED_MARKS = ("[changelog names this file]", "[deferred here]")
+_FLAGGED_MARKS = ("[changelog names this file]", "[changelog names this file, not this item]",
+                  "[deferred here]")
 
 
 def _mark_tail(marked: "list[tuple[str, bool]]") -> str:
@@ -3748,7 +3755,11 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
     upstream's changelog already names the target, every changed-in-body
     item of that upstream is marked, even one no structured field or prose
     mention would otherwise catch (a ``conventions.*`` body edit, whose id is
-    never quoted downstream by design).
+    never quoted downstream by design). The label says how far the evidence
+    reaches: ``[changelog names this file]`` when a naming entry cites the
+    item (or cites no changed item at all), ``[changelog names this file,
+    not this item]`` when every naming entry cites other items - the same
+    walk, a narrower claim.
 
     ``deferred`` (the TARGET's own structurally-deferred ids/keys, from
     ``_parse_deferrals`` on the target's lines - never recomputed here)
@@ -3792,7 +3803,25 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
     modified_keys = [k for k in old_items
                      if k in current_items and current_items[k] != old_items[k]]
     referenced = {r for _fam, r in my_refs}
-    changelog_hit = bool(target_name) and _changelog_names_target(changelog_lines or [], target_name)
+    # The upstream's changelog entries (raw lines) that name this TARGET. The
+    # mark is granted per entry: an entry that cites changed items grants those
+    # the plain mark, an entry that cites none grants every changed item the
+    # plain mark, and a changed item no naming entry cites prints the second
+    # label - still marked and still relevant, so no item loses the walk and
+    # nothing newly reads as re-stamp only.
+    naming = [ln for ln in (changelog_lines or [])
+              if target_name and _changelog_names_target([ln], target_name)]
+    changelog_hit = bool(naming)
+    changed_nonadded = removed_keys + modified_keys + index_new_keys
+    changelog_plain: "set[str]" = set()
+    for ln in naming:
+        cited_here = set()
+        for k in changed_nonadded:
+            for tok in {k, k.rsplit("/", 1)[-1]}:
+                if re.search(r"(?<![\w-])" + re.escape(tok) + r"(?![\w-])", ln):
+                    cited_here.add(k)
+                    break
+        changelog_plain |= cited_here if cited_here else set(changed_nonadded)
 
     def mark(key: str, added: bool = False) -> "tuple[str, bool]":
         bare = key.rsplit("/", 1)[-1]
@@ -3824,7 +3853,8 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
             # conventions.* body edit (or anything else no structured field
             # or prose mention would ever quote) is not "unreferenced", it is
             # unindexed by design (ledger IMP-186).
-            bits = ["changelog names this file"]
+            bits = ["changelog names this file" if key in changelog_plain
+                    else "changelog names this file, not this item"]
         if not bits and deferred and _deferred_match(key, deferred):
             # The TARGET defers this item structurally - it is not
             # "unreferenced", it is a standing decision the change may have

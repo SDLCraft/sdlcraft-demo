@@ -49,7 +49,7 @@ note about another artifact and never a silent workaround:
 - **Phase 8 drains the list** through
   `python "${CLAUDE_SKILL_DIR}/../repair/findings.py" add
   --raised-by sdlc-api ...` (skip silently when the script is
-  absent). Cap 3 findings per run unless one is blocking.
+  absent; capped per the Phase 8 drain).
 - The user-facing option reads "the upstream is wrong — record a
   finding for `/sdlc:repair`" and appears only at prompts that have
   room (≤3 options today); where a prompt already has 4 options,

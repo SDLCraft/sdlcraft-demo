@@ -182,6 +182,7 @@ WRITE:     <abs path>/.claude/skills-state/sdlc-repair/localize/FND-NNN.yaml - O
 SURFACE, NEVER HUNT: a defect you meet while reading what a finding needs goes in that report's
            `beside:` (summary, site, read_for: that FND); a finding already in the queue goes in
            `resighted:`. Never read further to find more; never propose a fix for one.
+PINS:      <abs path>/../task/validate_schema.py, module docstring only; absent in the free edition, skip   # edition-ok: demo edition has no task skill; the row is dropped from the brief
 PRICE:     none - read-only: run no topo_order.py or reslice_embeds.py and copy no docs; the
            fixer prices the edit ("Pricing").
 EJECT:     a member whose walk leaves the cluster's ground gets NO report; name it on EJECTED.
@@ -210,7 +211,7 @@ proposed_mode: surgical | additive | re-invoke | wontfix | duplicate | lesson
 criterion:                      # the four-part additive test, answered even for surgical
   additive: true
   determined: false
-  provable: true
+  provable: true                #   a TASKS edit is read against the PINS: file, not run
   chain_closes: true
 missing_decision:               # null unless proposed_mode would be re-invoke for want of ONE decision
   question: "which component owns the store-read unit, and what is it called?"

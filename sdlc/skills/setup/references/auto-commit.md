@@ -146,11 +146,14 @@ that should not enter the history never lands in the tree.
 | `arch` | also `.claude/skills-state/sdlc-arch.derivation-report-*.yaml` |
 | `code` | `docs/CODE-MANIFEST.json`, the ledger, `sdlc-code/inflight/` and `stuck/`, every generated file the ledger's `files_written` and the manifest name, the file pins (`target_files`) of the units the ledger records `failed` — joined from the TASKS shard, a directory pin skipped — and the `files_written` an interrupted unit's breadcrumb recorded; never `packets/` or `stack/` (regenerable caches, ignored by the `sdlc-code/.gitignore` that `topo_order.py --emit` ensures, and never counted as someone else's edit; a project that had committed them gets one printed `untrack-caches` line, and `setup` offers to run it once - see "Tracked code caches") |
 | `repair` | its state file, doctor report and run tree `.claude/skills-state/sdlc-repair/` (the workers' localize and fix reports — a report the next run's Phase 1 prunes is committed as a deletion); without a baseline, every artifact under `docs/` — never `code`'s ledger |
-| `lesson` | only the lessons queue and the marker — it is model-invocable in ambient sessions, and its baseline is taken at its own start, so an edit the session made before it never rides along |
+| `lesson` | the lessons queue, the marker and the two generated statusboard files its own helper rewrites, plus whatever the run changed after `begin` — it is model-invocable in ambient sessions, and its baseline is taken at its own start, so an edit the session made before it never rides along |
 | `setup` | `.claude/sdlc/`, `.claude/rules/sdlc-*.md`, `docs/INDEX.yaml`, the lessons queue, `CLAUDE.md`, `.claude/settings.json` |
 
 A gitignored path is never added (the helper asks `git status`, which never
-lists ignored files). A file the user had staged outside both sets stays
+lists ignored files). A deletion or rename git already staged is committed as
+it stands: the helper adds only files git does not know yet, and a rename's
+new side outside both sets stays staged while its old side commits as a
+deletion. A file the user had staged outside both sets stays
 staged and uncommitted. A hand edit to an artifact the run did not touch is
 left where it is and counted on the printed line.
 

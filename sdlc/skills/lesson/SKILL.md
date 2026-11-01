@@ -128,8 +128,9 @@ addressed; never re-record to answer one — that makes a duplicate.
 
 **Commit the run** (CLAUDE.md 20; the message rules and what is staged:
 `${CLAUDE_SKILL_DIR}/../setup/references/auto-commit.md`) — before the card, never a
-blocker. Only the lessons queue and the marker are staged: this skill runs in
-ambient sessions, so a hand edit elsewhere is never swept into its commit.
+blocker. Staged: the lessons queue, the marker, the regenerated statusboard
+files and whatever this run wrote after step 1's `begin`. This skill runs in
+ambient sessions, so a hand edit made before `begin` is never swept in.
 
 ```bash
 python .claude/sdlc/autocommit.py commit --skill lesson --invocation "/sdlc:lesson" \
@@ -187,4 +188,4 @@ defect is an `LSN-NNN`, and all of them surface, generated, in
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.21"
+skill_version: "1.22"

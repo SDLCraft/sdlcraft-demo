@@ -940,8 +940,8 @@ Before the close card:
    `python "${CLAUDE_SKILL_DIR}/../repair/findings.py" add --raised-by
    sdlc-arch --kind <kind_guess> --summary "<summary>" --evidence "<line>"
    [--file <file>]` call. Skip silently when the helper is absent (fall back
-   to `.claude/sdlc/findings.py` for ambient installs). Cap: 3 findings per
-   run unless one is blocking.
+   to `.claude/sdlc/findings.py` for ambient installs). Cap: user-confirmed notes and upstream_incomplete uncapped; past 3 other sightings ask once (record all | first 3 | none),
+   listing them in the question; on EXIT, or when you cannot ask, record all.
 2. Auto-raise `upstream_incomplete` for every schema-REQUIRED upstream field
    found null/empty in a `complete` upstream during Phase 2/3 pre-fill. The
    summary MUST start `"<upstream file> <field path>: "` so the queue's
@@ -1216,4 +1216,4 @@ The architecture interview can be long. Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.27"
+skill_version: "1.28"

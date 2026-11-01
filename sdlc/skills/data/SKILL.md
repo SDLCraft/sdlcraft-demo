@@ -693,7 +693,7 @@ without anyone writing them down by hand. Harmless no-op if it is not installed.
 **Drain `state.finding_notes`** (CLAUDE.md 13; mechanics in "Findings
 capture" below): raise each noted upstream defect through
 `python "${CLAUDE_SKILL_DIR}/../repair/findings.py" add --raised-by sdlc-data
-...` — cap 3 per run unless one is blocking; skip silently when the script is
+...` — user-confirmed notes and upstream_incomplete uncapped; past 3 other sightings ask once (record all | first 3 | none), listing them in the question; on EXIT, or when you cannot ask, record all; skip silently when the script is
 absent. Additionally auto-raise one `upstream_incomplete` finding per
 schema-REQUIRED upstream field the Phase 2/3 scan found null/empty in a
 `complete` upstream, its summary prefixed `<upstream file> <field path>: `
@@ -774,8 +774,8 @@ closed:
 Mid-run the agent NEVER stops to record: append
 `{noted_at, kind_guess, file, summary, evidence}` to `state.finding_notes`
 in the next state write (same cadence as answers) and continue the
-interrupted step. Phase 8 drains the list — at most 3 findings per run
-unless one is blocking — through:
+interrupted step. Phase 8 drains the list — capped per the Phase 8 drain
+(above) — through:
 
 ```bash
 python "${CLAUDE_SKILL_DIR}/../repair/findings.py" add \
@@ -931,4 +931,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.23"
+skill_version: "1.24"

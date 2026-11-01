@@ -338,6 +338,24 @@ by symbol class, and say in the report that the radius came from grep:
 | TST-NNN | `docs/TASKS__<cid>.json` | `implements_tests` (+ `test_spec` is its embed) |
 | API operation | `docs/ARCH__*.yaml docs/TASKS__*.json` | `traces_api_operation`, `touches_operations`, `operation_contract` |
 
+**A TASKS structural change is read against the task validator's pins.** When
+the write set EDITS a task's `kind`, `unit_kind`, `target_symbol`,
+`component_ref` or `target_files`, or ADDS a task or a delivered file, answer
+`criterion.provable` by reading what the task validator pins — the brief's
+`PINS:` row gives the file; read its module docstring only, never the whole
+validator. You run nothing, so this read is the whole proof. An implementation
+task pins exactly one `target_files` entry, so a second file on it breaks a
+pin; the other pins are in that docstring and are not copied here. A proposal
+that breaks a pin cannot stand as written: the mode follows the additive
+criteria (additive when all four hold — typically a new work_unit and its own
+implementation task, the ARCH and TASKS shards both in `write_set` — re-invoke
+otherwise). A pin-satisfying add stays as those criteria judge it. Every NEW
+delivered file names its owner — the work_unit and implementation task, or the
+scaffold, config, migration or design task that delivers it — as a
+`sites_considered_draft` row whose `how:` names that owner; a file with no
+owner is not a plan. No `PINS:` row (the free edition ships no task validator):
+skip the pin read and say so in the walk.
+
 The write set is the located artifact(s) plus every artifact a checklist
 entry will be *edited*, *stamped* or *re-sliced* in — an entry the fix will
 leave *unaffected* or *deferred* is a `sites_considered` line, not a write.

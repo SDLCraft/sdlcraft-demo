@@ -346,7 +346,7 @@ NOT stop to record it — append
 `finding_notes` list in the next state write (same cadence as answers) and
 continue the step. Phase 8 drains the list through
 `python "${CLAUDE_SKILL_DIR}/../repair/findings.py" add --raised-by
-sdlc-prd …` on every exit path (cap 3 per run unless one is blocking; helper
+sdlc-prd …` on every exit path (capped per the Phase 8 drain; helper
 absent → skip silently). `prd` consumes no upstream artifact, so this fold
 is its ONLY findings route — there is no automatic close-time raise.
 

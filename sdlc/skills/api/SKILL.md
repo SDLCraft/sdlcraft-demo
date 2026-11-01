@@ -624,7 +624,7 @@ without anyone writing them down by hand. Harmless no-op if it is not installed.
    upstream. The summary MUST start `<upstream file> <field path>:` and
    `--detected-by` is `sdlc-api`, so the (detected_by, summary) dedupe in
    `findings.py` lands each defect once across runs, not once per run.
-3. Cap: at most 3 findings per run, unless one is blocking.
+3. Cap: user-confirmed notes and upstream_incomplete uncapped; past 3 other sightings ask once (record all | first 3 | none), listing them in the question; on EXIT, or when you cannot ask, record all.
 
 Close by telling the user where the artifacts live and what comes next:
 
@@ -846,4 +846,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.18"
+skill_version: "1.19"

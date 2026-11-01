@@ -524,7 +524,7 @@ in an existing `docs/` artifact mid-interview (the a-2 free-text fold,
 python "${CLAUDE_SKILL_DIR}/../repair/findings.py" add --raised-by sdlc-prd --kind <kind_guess> --summary "<summary>" --evidence "<evidence>"
 ```
 
-Cap: 3 per run unless one is blocking. Helper absent (project never ran
+Cap: user-confirmed notes and upstream_incomplete uncapped; past 3 other sightings ask once (record all | first 3 | none), listing them in the question; on EXIT, or when you cannot ask, record all. Helper absent (project never ran
 `/sdlc:setup`) — skip silently and keep the notes in state. This drain runs
 on **every** exit path, EXIT included. When any finding was recorded, the
 close card gains a `Findings:` row.
@@ -706,4 +706,4 @@ The interview is potentially long. Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.24"
+skill_version: "1.25"

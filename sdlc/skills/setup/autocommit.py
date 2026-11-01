@@ -30,7 +30,9 @@ The separator is U+2192 with a space on each side: the invocation carries its
 own colon, and no human types an arrow into a subject, so
 `git log --grep='→'` lists exactly the commits this helper made.
 
-What it never does: `git add -A`, push, amend, rebase, `--no-verify`, an empty
+What it never does: `git add -A` (it adds only files git does not know yet and
+commits every owned path by name, so a deletion or rename already staged is
+committed as it stands), push, amend, rebase, `--no-verify`, an empty
 commit, or any commit while the mode is off. A file that was already changed
 when the run began and that the run did not touch stays where it is; anything
 the user had staged outside the set stays staged and uncommitted (the commit
@@ -82,7 +84,7 @@ try:
 except Exception:
     pass
 
-HELPER_VERSION = "6"
+HELPER_VERSION = "7"
 MARKER_REL = Path(".claude/sdlc/sdlc-plugin.json")
 ENV_OVERRIDE = "SDLC_AUTO_COMMIT"
 MODES = ("off", "on")
@@ -95,13 +97,15 @@ MODE_CMD = "python .claude/sdlc/autocommit.py mode"
 UNTRACK_CMD = "python .claude/sdlc/autocommit.py untrack-caches"
 
 STATE = ".claude/skills-state"
+# The two files statusboard.py regenerates; every `lessons.py add` and every
+# artifact write refreshes them, and nothing hand-edits them.
+BOARD = (".claude/rules/sdlc-statusboard.md", ".claude/sdlc/STATUS.md")
 # Every artifact skill's close touches these (record-run may stamp the marker).
 COMMON = (
     "docs/INDEX.yaml",
     STATE + "/sdlc-findings.yaml",
     STATE + "/sdlc-lessons.yaml",
-    ".claude/rules/sdlc-statusboard.md",
-    ".claude/sdlc/STATUS.md",
+    *BOARD,
     ".claude/sdlc/sdlc-plugin.json",
 )
 # The artifact (and shards) each skill writes, as git pathspecs relative to the
@@ -137,9 +141,10 @@ _GLOB_CHARS = "*?["
 CODE_DIR = STATE + "/sdlc-code"
 # Skills whose set is EXACTLY this - no COMMON, no `sdlc-<skill>.state.yaml`.
 # `lesson` is model-invocable in an ambient session, so it must never sweep a
-# hand edit to docs/; `setup` installs, it does not write an artifact.
+# hand edit to docs/; it owns the board files because its own helper writes
+# them. `setup` installs, it does not write an artifact.
 EXACT = {
-    "lesson": (STATE + "/sdlc-lessons.yaml", ".claude/sdlc/sdlc-plugin.json"),
+    "lesson": (STATE + "/sdlc-lessons.yaml", ".claude/sdlc/sdlc-plugin.json", *BOARD),
     "setup": (".claude/sdlc", ".claude/rules/sdlc-*.md", "docs/INDEX.yaml",
               STATE + "/sdlc-lessons.yaml", "CLAUDE.md", ".claude/settings.json"),
 }
@@ -321,8 +326,8 @@ def _strip_dot_slash(p: str) -> str:
 
 def _failed_task_ids(text: str) -> "list[str]":
     """Qualified ids (`<cid>/TSK-NNN`) of every ledger entry whose status is
-    `failed`: a failed unit records no files_written, so its pins come from the
-    TASKS shard instead. `skipped` and `blocked` units never ran and wrote
+    `failed`: a failed row's files_written, when it has any, names an earlier
+    build and not this attempt, so its pins come from the TASKS shard instead. `skipped` and `blocked` units never ran and wrote
     nothing, so they stay out."""
     try:
         import yaml  # type: ignore
@@ -850,27 +855,62 @@ def _commit(args, root: Path) -> int:
             print(f"          {p}")
         return 0
 
+    # `git add` takes only what git does not know yet: it refuses a literal path
+    # that is in neither the worktree nor the index (a staged rename's old side,
+    # a `git rm`), while `commit --only` takes the worktree state of every path
+    # git knows, a staged deletion included.
+    entries = _status_entries(toplevel, [_root_spec(prefix)])
+    if entries is None:
+        print("[DRAFT] not committed - git status failed. Nothing is lost: the files are on disk.")
+        return 0
+    listed = set(files)
+    untracked = sorted({p for code, p in entries if code == "??" and p in listed})
     spec_file = _pathspec_file(files)
+    add_file = _pathspec_file(untracked) if untracked else None
     msg_file = tempfile.NamedTemporaryFile("w", suffix=".msg", delete=False, encoding="utf-8", newline="\n")
     with msg_file:
         msg_file.write(_message(subject, args.trailer or []))
     try:
-        added = _git(toplevel, "add", "--pathspec-from-file=" + spec_file, "--pathspec-file-nul")
-        if added is None or added.returncode != 0:
-            print(f"[DRAFT] not committed - git add failed: "
-                  f"{_first_line(added.stderr if added else '')}. Nothing is lost: the files are on disk.")
+        if add_file:
+            added = _git(toplevel, "add", "--pathspec-from-file=" + add_file, "--pathspec-file-nul")
+            if added is None or added.returncode != 0:
+                print(f"[DRAFT] not committed - git add failed: "
+                      f"{_first_line(added.stderr if added else '')}. Nothing is lost: the files are on disk.")
+                return 0
+        # every named path already matches HEAD (a file removed and recreated
+        # identically, one added and deleted again): not a failure. The exit
+        # code says so in any locale, and a dry run fires no commit hook.
+        dry = _git(toplevel, "commit", "--dry-run", "--only",
+                   "--pathspec-from-file=" + spec_file, "--pathspec-file-nul")
+        if dry is not None and dry.returncode == 1:
+            _left, cached = _left_entries(toplevel, prefix)
+            print(f"[OK] nothing to commit - {invocation} changed no file the pipeline owns{note}"
+                  + _cache_hint(root, toplevel, prefix, cached))
             return 0
         committed = _git(toplevel, "commit", "--quiet", "--only",
                          "--pathspec-from-file=" + spec_file, "--pathspec-file-nul",
                          "-F", msg_file.name)
     finally:
-        for name in (spec_file, msg_file.name):
+        for name in (spec_file, add_file, msg_file.name):
             try:
-                os.unlink(name)
+                if name:
+                    os.unlink(name)
             except OSError:
                 pass
 
     if committed is None or committed.returncode != 0:
+        # the commit failed (no identity, a hook): stage what it would have
+        # taken, so "commit them by hand" is true - a staged deletion already is
+        stage = sorted({p for code, p in entries if p in listed and code != "D "})
+        if stage:
+            stage_file = _pathspec_file(stage)
+            try:
+                _git(toplevel, "add", "--pathspec-from-file=" + stage_file, "--pathspec-file-nul")
+            finally:
+                try:
+                    os.unlink(stage_file)
+                except OSError:
+                    pass
         reason = _first_line((committed.stderr + "\n" + committed.stdout) if committed else "")
         print(f"[DRAFT] not committed - {reason}. Nothing is lost: {len(files)} file(s) are "
               f"staged; commit them by hand with: git commit -m \"{subject}\"")

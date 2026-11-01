@@ -733,8 +733,12 @@ def handoff_problems(fid: str, res: Resolution) -> List[str]:
     if res.mode is not Mode.re_invoke:
         mode = res.mode.value if res.mode else "mode-less"
         return [f"{fid}: resolution.handoff is set on a {mode} fix - only a re-invoke owes a "
-                f"downstream run, so no reconcile will read these notes; move the reasoning into "
-                f"resolution.summary"]
+                f"downstream run, so no reconcile will read these notes. Pick the destination: if a "
+                f"downstream file must still author what this fix determined, record mode: re-invoke "
+                f"with the downstream_rerun command that file's reconcile runs (a command another "
+                f"finding already owes joins the same chain); if that file only needs to know, name "
+                f"it in the bump_artifact.py --summary line, which its --drift quotes; keep "
+                f"resolution.summary for reasoning no downstream file needs"]
     out: List[str] = []
     owed = _owed_by(res)
     for i, h in enumerate(res.handoff):
