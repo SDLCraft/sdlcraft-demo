@@ -483,6 +483,12 @@ The steps, in order:
      discover anything.
    - *removed* → the §4 stale-ref case: re-trace, remove with approval, or
      defer; never a silent delete.
+   - *text outside the indexed items* → a report line `text outside the indexed
+     items moved: <section> (docs/<file>:<a>-<b>)` names a top-level section no
+     item holds (a UX `cli` or `state_patterns` block, an ARCH `tech_stack`).
+     It carries no mark, so read that line range itself (`--show` cannot slice a
+     section), one card per section, asking the same two questions of what this
+     file says about it. It never counts toward `re-stamp only`.
    - *changed in body* → only the items the report marks `[referenced here]`
      (a structured trace), `[cited in prose xN]` (a mention in a
      description or directive — re-read those N sites), `[changelog names
@@ -534,16 +540,22 @@ The steps, in order:
    storage paradigm, a new surface family) — save the decisions so far, stop,
    and name the plain form as `Next:`; its Phase 2 resumes this review from
    the `delta_review` slot instead of asking again.
-6. **Hash moved, no item delta** (a comment or formatting edit), or the report
-   says `re-stamp only` (items moved, none this file references or cites) →
-   re-stamp and add one changelog line, with no question. That "no question"
-   scopes the delta review only — whatever the skill's own SKILL.md owes
-   every update run (pre-flight WRNs, ask-once gates, Phase 7/8) still runs
-   regardless. **The report says it cannot itemize the upstream** (both the
+6. **Hash moved, no item delta** (a comment, formatting or metadata edit; the
+   report names no text outside the indexed items), or `re-stamp only` (items
+   moved, none this file references or cites) → re-stamp and add one
+   changelog line, with no question. That "no question" scopes the delta
+   review only — whatever the skill's own SKILL.md owes every update run
+   (pre-flight WRNs, ask-once gates, Phase 7/8) still runs regardless.
+   **The report says it cannot itemize the upstream** (both the
    recorded snapshot and the current index hold no items for it) → read the
    upstream's `git diff` since the stamp, or its changelog lines, and card
    what changed; the re-stamp-with-no-question path above is only for "no
    item delta" on an upstream the report DID itemize.
+   **The report names text outside the indexed items** (`text outside the
+   indexed items moved: cli (docs/UX.yaml:12-30)`, or says that text cannot be
+   compared) → no item carries it, so no mark does: read each named section by
+   its line range, card what changed in it, and re-stamp only after that
+   review, never with no question.
 7. **Phase 7 and Phase 8 as usual** — merge (never drop an item the user did
    not approve dropping), `--stamp` against every upstream consumed, validate
    bare, refresh the index and the statusboard, drain `finding_notes` and

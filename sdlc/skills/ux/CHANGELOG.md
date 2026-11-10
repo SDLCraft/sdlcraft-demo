@@ -7,6 +7,10 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.30 (2026-11-10) — upstream-reconciliation reads docs_index's "text outside the indexed items moved" line by line range and cards it per section; the no-question re-stamp is only for a metadata or comment edit
+
+Steps 4 and 6 (ledger IMP-316): docs_index now reports an upstream edit confined to text in no indexed item (UX `cli.exit_codes`, `state_patterns`, ARCH `tech_stack`) instead of calling it "re-stamp only". Step 6's "hash moved, no item delta -> re-stamp, no question" clause applies only when no such line is printed. Pin: setup `_smoke/index_selftest.py`.
+
 ## 1.29 (2026-11-01) — upstream-reconciliation names both changelog labels; the findings drain never caps what the user confirmed
 
 Phase 8 findings drain: user-confirmed notes and `upstream_incomplete` are never capped; past 3 other sightings the close asks once (record all | first 3 | none) with the notes listed in the question; on EXIT, or when it cannot ask, it records them all. 'Unless one is blocking' is gone: FINDINGS has no such severity, and it left a fourth note with no stated fate (ledger IMP-296; pin `repair/_smoke/findings_drain_cap_selftest.py`).

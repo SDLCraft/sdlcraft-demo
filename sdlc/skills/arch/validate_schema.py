@@ -577,6 +577,9 @@ class WorkUnit(_Base):
     traces_api_operation: Optional[str] = None          # operation_id in API__*.yaml
     implements_requirements: Optional[List[str]] = None  # FR-NNN/NFR-NNN ⊆ component
     touches_entities: Optional[List[str]] = None         # ⊆ component traces_data_entities
+    touches_enums: Optional[List[str]] = None            # DATA-MODEL enums a kind: module
+                                                         # unit DEFINES (no entity field
+                                                         # reaches them); checked in #21
     satisfies_acceptance: Optional[List[str]] = None
     inputs: Optional[List[str]] = None
     output: Optional[Any] = None
@@ -2047,6 +2050,7 @@ def check_component_work_units(
     file_label: str,
     api_operation_ids: Set[str],
     data_entity_names: Set[str],
+    data_enum_names: Optional[Set[str]] = None,
 ) -> Tuple[List[str], List[str]]:
     """Cross-check #21 — validate each component's work_units[] (the named callables
     the downstream `task` skill slices exactly one atomic task per).
@@ -2062,6 +2066,9 @@ def check_component_work_units(
           implements_requirements.
         * touches_entities ⊆ the owning component's traces_data_entities (and a
           DATA-MODEL entity when present).
+        * touches_enums is declared only on a `kind: module` unit (the one
+          kind that DEFINES a type) and each name is a DATA-MODEL enum when
+          DATA-MODEL declares any. Version-gated like the rest of #21.
         * a NON-TRIVIAL component (archetype outside the plumbing set AND carrying
           implements_requirements or a traced contract) that declares no work_units
           and records no `work_units_waiver` — this BLOCKS complete. Without it a
@@ -2231,6 +2238,27 @@ def check_component_work_units(
                         f"component's traces_data_entities to the union of its "
                         f"units' touches_entities (Phase 7 derive rule)"
                     )
+            # touches_enums: the enums a MODULE unit defines. No other kind
+            # defines a type, so the field there is a mis-filed trace; each
+            # name must be a DATA-MODEL enum (an entity name is refused with
+            # the right field named). Names are not part of the component's
+            # traces_data_entities - an enum is not an entity.
+            enum_names = [str(e).strip() for e in (op.touches_enums or [])]
+            if enum_names and (op.kind or "callable").strip() != "module":
+                errs.append(
+                    f"{where}.touches_enums is declared on a unit of kind "
+                    f"'{op.kind or 'callable'}' - only a `kind: module` unit defines "
+                    f"enums; move the unit to kind: module or drop the list"
+                )
+            elif data_enum_names:
+                for en in enum_names:
+                    if en not in data_enum_names:
+                        hint = (" (it is an entity - list it under touches_entities)"
+                                if en in data_entity_names else "")
+                        errs.append(
+                            f"{where}.touches_enums '{en}' is not an enum in "
+                            f"DATA-MODEL.yaml enums_and_lookups.enums{hint}"
+                        )
             # Gap-2 (advisory): a DECLARE-dialect unit that declares nothing to
             # emit (no inputs, output "None", raises nothing) is usually a policy
             # honored externally, not a callable — model it as a security_concern /
@@ -4106,7 +4134,7 @@ def validate_all(arch_path: Path) -> int:
         consistency_errs.extend(check_container_self_consistency(c, arch, name))
         code_location_warnings.extend(check_component_code_location(c, name))
         op_errs, op_warns = check_component_work_units(
-            c, name, api_operation_ids, data_entity_names
+            c, name, api_operation_ids, data_entity_names, data_enum_names
         )
         component_op_warnings.extend(op_warns)
         fr_errs, fr_roll = check_component_fr_work_unit_coverage(c, name)

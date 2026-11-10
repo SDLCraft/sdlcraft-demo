@@ -348,6 +348,8 @@ The arch validator warns (#23) on the empty-callable shape.
 - Optional traces: `traces_api_operation` (⊆ API operation_ids),
   `implements_requirements` (FR/NFR ⊆ the owning component's),
   `touches_entities` (⊆ the component's `traces_data_entities`),
+  `touches_enums` (`kind: module` units only: the DATA-MODEL enums the unit
+  DEFINES - never a traced entity, so a definer restales when a member moves),
   `satisfies_acceptance` (the component criterion it fulfils).
 - Optional `owns_callables` — additional symbols this unit's build task owns
   beyond `name` (private helpers it also writes). Downstream `task` copies the

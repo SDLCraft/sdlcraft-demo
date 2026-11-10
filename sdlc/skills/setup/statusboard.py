@@ -187,14 +187,42 @@ def warning_parser():
 # reading
 # ---------------------------------------------------------------------------
 
+# One gather asks for the same artifact from several collectors, and once more per
+# warning for its line number: each file is read and parsed ONCE per run, through
+# libyaml when this PyYAML has it (the pure-Python loader took ~100 s on a project
+# with a 700-finding queue). gather() empties both caches first, so a second gather
+# in one process sees the sources as they are now. Collectors never edit what
+# load() returns.
+_TEXT = {}
+_DOCS = {}
+
+
+def read_text(path):
+    """The file's text, or None when it is absent or unreadable. Cached per run."""
+    key = str(path)
+    if key not in _TEXT:
+        try:
+            _TEXT[key] = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            _TEXT[key] = None
+    return _TEXT[key]
+
+
 def load(path):
     """One artifact as a mapping, or None when it is absent or unreadable."""
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    key = str(path)
+    if key not in _DOCS:
+        _DOCS[key] = _parse(path)
+    return _DOCS[key]
+
+
+def _parse(path):
+    raw = read_text(path)
+    if raw is None:
         return None
     try:
-        doc = json.loads(raw) if path.suffix == ".json" else yaml.safe_load(raw)
+        doc = (json.loads(raw) if path.suffix == ".json"
+               else yaml.load(raw, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader)))
     except (ValueError, yaml.YAMLError):
         return None
     return doc if isinstance(doc, dict) else None
@@ -349,12 +377,11 @@ def _as_written(entry, source):
 
 def line_of(path, needle):
     """1-based line where `needle` first appears, so a reader can slice to it."""
-    try:
-        for n, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
+    text = read_text(path)
+    if text is not None:
+        for n, line in enumerate(text.split("\n"), 1):
             if needle in line:
                 return n
-    except (OSError, UnicodeDecodeError):
-        pass
     return None
 
 
@@ -1050,6 +1077,8 @@ def render_tier2(data, stamp):
 # ---------------------------------------------------------------------------
 
 def gather(root, plugin_root=None):
+    _TEXT.clear()
+    _DOCS.clear()
     docs, state = root / "docs", root / STATE_REL
     edition, pro_url = read_edition(root)
     setup_lag = collect_setup_lag(root, state, plugin_root)

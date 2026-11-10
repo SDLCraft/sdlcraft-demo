@@ -79,7 +79,8 @@ Exit codes
     1 — the gate failed (--check: a dangling reference in a blocking family;
         --drift: an upstream changed; --stale: at least one artifact is stale;
         --show/--refs: unknown symbol; --stamp: an upstream the artifact
-        records no longer exists, or it names none).
+        records no longer exists, or it names none, or an --upstream is a
+        same-family file or a not-earlier stage).
     2 — could not read a required file or directory.
     3 — never (stdlib only; kept for parity with the other SDLC scripts).
 
@@ -103,7 +104,7 @@ upstream defines (work units, components, tests, entities, requirement items,
 tasks, ...) to a short body hash; ``--drift`` then names exactly what was
 added, removed and modified, without git and without guessing from what the
 artifact happens to reference. A work unit's hash ignores its declaration-only
-fields (``touches_entities``, ``status``), so an entity-trace backfill is not
+fields (``touches_entities``, ``touches_enums``, ``status``), so an entity-trace backfill is not
 "modified" - only behaviour-bearing fields are (ledger IMP-073/IMP-064, aicf
 LSN-051/052/053). Without ``items`` (a stamp written by hand or by an older
 version) ``--drift`` first looks through the upstream's recent git history for
@@ -137,6 +138,25 @@ Text-level on purpose: ``read_text`` normalises line endings, so a CRLF checkout
 and an LF checkout of the same file hash the same. Every skill that records a
 provenance hash reads it from ``INDEX.yaml`` or calls ``--hash`` — never a raw
 ``sha256(bytes)`` of its own, which differs on CRLF.
+
+Capability version: 15 (``--stamp`` names every upstream it newly adds to a record
+that already held others - a ``newly recorded: <file>`` row and an ``added`` key in
+``--json`` - and refuses an ``--upstream`` that is the artifact's own family or a
+stage that is not earlier (exit 1, nothing written): a peer or consumer is not an
+upstream, and an unranked file, one outside the pipeline, always passes; ledger
+IMP-311. Each entry also records ``outside``, one hash per top-level section's
+text that lies in no indexed item and not in metadata, a changelog, a deferral
+list or a ``*_warnings`` list - ``--drift`` / ``--stale`` / ``--stamp`` compare
+it, so an edit confined to such text (UX ``cli.exit_codes``, ARCH ``tech_stack``)
+is a delta to review, never ``re-stamp only``; an empty remainder is written
+``outside: ''``, distinct from an old entry with no key, which git recovers or
+the report hedges; ledger IMP-316). A work unit's ``touches_enums`` (the
+enums a ``module`` unit defines) is a named reference like ``touches_entities``
+- an enum name resolves, an unknown one is a ``dangling_warnings`` row, and
+``--refs <Enum>`` lists the declaring unit - and is declaration-only for
+``--drift``; ``--check`` also warns, once over the union of every ARCH shard
+and only when some unit declares the field, of each DATA-MODEL enum that no
+unit's ``touches_enums`` names (advisory, exit code unchanged).
 
 Capability version: 14 (the ``[changelog names this file]`` mark says how far
 the changelog's evidence reaches: the plain mark for an item a naming entry
@@ -233,7 +253,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-CAPABILITY_VERSION = 14
+CAPABILITY_VERSION = 15
 
 
 # =============================================================================
@@ -611,6 +631,7 @@ _TYPED_KINDS = {
 # ``components[].component_id``), task (``TSK-NNN`` / ``<cid>/TSK-NNN``).
 _NAMED_KEYS_YAML = {
     "traces_data_entities": "entity", "touches_entities": "entity", "via_entity": "entity",
+    "touches_enums": "entity",
     "primary_entity": "entity", "to_entity": "entity", "from_entity": "entity",
     "entity": "entity",
     "via_unit": "unit", "targets_work_units": "unit", "targets_work_unit": "unit",
@@ -625,7 +646,7 @@ _NAMED_KEYS_YAML = {
     "targets_failure_mode": "failure_mode", "targets_security_concern": "security_concern",
 }
 _NAMED_KEYS_JSON = {
-    "touches_entities": "entity", "entity": "entity",
+    "touches_entities": "entity", "touches_enums": "entity", "entity": "entity",
     "target_symbol": "unit", "component_ref": "component", "depends_on": "task",
 }
 _YAML_ANCHOR_RE = re.compile(
@@ -2114,6 +2135,10 @@ def _build_edges(
     dangling_warnings: list[Reference] = []
     ambiguous: list[str] = []
     admitted: set[str] = set()  # unaddressable ids a reference actually hit
+    # touches_enums as ARCH shards declare it (the TASKS copies are not the
+    # declaration): the resolved names, and whether any unit declares the field
+    declared_enums: set[str] = set()
+    enum_declared_anywhere = False
 
     for filename, lines in lines_by_file.items():
         is_shard = filename in shard_files
@@ -2186,6 +2211,10 @@ def _build_edges(
             }[kind]
             target, candidates = defs.resolve(kind, value, cid, context)
             file_refs.add((family, target or value))
+            if key == "touches_enums" and filename.startswith("ARCH") and filename.endswith(".yaml"):
+                enum_declared_anywhere = True
+                if target is not None:
+                    declared_enums.add(target)
             if target is not None:
                 if target != container:
                     add_edge(target, container)
@@ -2208,6 +2237,26 @@ def _build_edges(
             f"checked - write the item with its id on its own line to index it"
         )
     warnings.extend(ambiguous)
+    if enum_declared_anywhere:
+        # one advisory over the UNION of every ARCH shard: a DATA-MODEL enum no
+        # unit declares is one whose member change no module unit will notice
+        orphan_enums = sorted(
+            name for name, sym in named_symbols.items()
+            if sym.file.startswith("DATA-MODEL") and sym.path.startswith("enums_and_lookups.enums.")
+            and name not in declared_enums
+        )
+        if len(orphan_enums) > 4:
+            warnings.append(
+                f"{len(orphan_enums)} DATA-MODEL enums are declared by no ARCH unit's touches_enums "
+                f"({join_ids(orphan_enums, 12)}) - name each on the module unit that defines it, "
+                f"or leave it to an entity module that imports it"
+            )
+        else:
+            for name in orphan_enums:
+                warnings.append(
+                    f"DATA-MODEL enum {name} is declared by no ARCH unit's touches_enums - name it "
+                    f"on the module unit that defines it, or leave it to an entity module that imports it"
+                )
     return EdgeGraph(
         definitions=definitions,
         referenced_by={k: sorted(v, key=_id_sort_key) for k, v in referenced_by.items()},
@@ -2688,7 +2737,7 @@ def find_symbols(
 # --drift: an artifact's recorded upstream_provenance vs the upstreams now
 # ---------------------------------------------------------------------------
 
-_PROV_KEYS = ("file", "sha256", "session_id", "last_updated", "version", "capability")
+_PROV_KEYS = ("file", "sha256", "session_id", "last_updated", "version", "capability", "outside")
 # The CAPABILITY_VERSION a symbol kind first became indexable at - so --drift
 # can tell "this item is new to the DOCUMENT" from "this item was always
 # there, but the stamp recording it predates the index capability that can
@@ -2707,7 +2756,7 @@ _ITEM_HASH_LEN = 12
 # changes no contract, so it does not make the item "modified" (ledger IMP-064,
 # aicf LSN-052: 33 of 40 changed work-unit bodies differed only here).
 _DECLARATION_ONLY_KEYS: "dict[str, tuple[str, ...]]" = {
-    "work_unit": ("touches_entities", "status"),
+    "work_unit": ("touches_entities", "touches_enums", "status"),
     # A component's children are items of their own; the component's hash is
     # its own contract (purpose, responsibilities, code_location, traces).
     "component": ("work_units", "status"),
@@ -2888,6 +2937,86 @@ def items_of(index: DocIndex, docs_dir: Path, upstream: str) -> "dict[str, str]"
     return {k: v[0] for k, v in items_of_full(index, docs_dir, upstream).items()}
 
 
+_OUTSIDE_HASH_LEN = 8
+# A line that carries no content of its own: closing brackets / commas of a
+# JSON list whose members are all items, or a JSON key that only opens one.
+_STRUCTURAL_RE = re.compile(r'^(?:[\]\[{},\s]*|"[^"]*"\s*:\s*[\[{]\s*)$')
+
+
+def _outside_sections(index: DocIndex, docs_dir: Path, upstream: str) -> "dict[str, tuple[str, int, int]]":
+    """``{section: (hash, first line, last line)}`` for every top-level section
+    of ``upstream`` that holds text in NO indexed item - UX ``cli``, ARCH
+    ``tech_stack``, ``overview`` - the bytes a whole-file hash covers and the
+    per-item map does not (ledger IMP-316). Blank and comment lines are dropped
+    and trailing space stripped, exactly as ``item_body`` does, so a reflow
+    cannot move the hash. The metadata block, every changelog, the ``deferrals``
+    blocks (``_artifact_scan_ranges``) and every top-level ``*_warnings`` list are
+    excluded: they move on nearly every upstream edit and none is content a
+    consumer built from. A section left with nothing is omitted."""
+    try:
+        lines = (docs_dir / upstream).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return {}
+    is_json = upstream.endswith(".json")
+    sections = _scan_json(lines)[0] if is_json else _top_level_sections(lines)
+    skip = list(_artifact_scan_ranges(lines, is_json))
+    # The cite scan keeps a *_warnings list (a downstream WRN naming an upstream
+    # id is a real citation); the content remainder does not - a warning moves
+    # on nearly every run and is not a thing a consumer was built from.
+    skip += [rng for key, rng in sections.items() if key.endswith("_warnings")]
+    covered = [False] * (len(lines) + 2)
+    for sym in list(index.symbols.values()) + list(index.shadowed):
+        if sym.file == upstream:
+            for i in range(sym.start, min(sym.end, len(lines)) + 1):
+                covered[i] = True
+    out: "dict[str, tuple[str, int, int]]" = {}
+    for key, (first, last) in sections.items():
+        if _in_ranges(first, skip):
+            continue
+        kept = [lines[i - 1].rstrip() for i in range(first, min(last, len(lines)) + 1)
+                if not covered[i] and not _in_ranges(i, skip) and _is_boundary(lines[i - 1])
+                and not _STRUCTURAL_RE.match(lines[i - 1].strip())]
+        if kept and not (len(kept) == 1 and kept[0].strip().rstrip(":") == key and kept[0].endswith(":")):
+            digest = sha256("\n".join(kept).encode("utf-8")).hexdigest()[:_OUTSIDE_HASH_LEN]
+            out[key] = (digest, first, last)
+    return out
+
+
+def _pack_outside(sections: "dict[str, tuple[str, int, int]]") -> str:
+    """The scalar a provenance entry records: ``name=hash;name=hash``, sorted.
+    The empty string is a real value - a fully itemized upstream - and is
+    written as ``outside: ''``, distinct from an entry with no key at all."""
+    return ";".join(f"{re.sub(r'[;=]', '_', k)}={v[0]}" for k, v in sorted(sections.items()))
+
+
+def _outside_of(index: DocIndex, docs_dir: Path, upstream: str) -> str:
+    """The packed remainder hash of one upstream (``--stamp`` records it,
+    ``--drift`` / ``--stale`` compare it, ``--items --json`` hands it to the
+    re-slice writer): one function for every site, so they cannot disagree."""
+    return _pack_outside(_outside_sections(index, docs_dir, upstream))
+
+
+def _unpack_outside(packed: str) -> "dict[str, str]":
+    return dict(p.split("=", 1) for p in str(packed).split(";") if "=" in p)
+
+
+def _outside_moved(recorded: str, current: "dict[str, tuple[str, int, int]]") -> "list[tuple[str, int, int]]":
+    """Sections whose remainder differs between a recorded ``outside`` value
+    and the current sections, as ``(name, first, last)``; a section that is gone
+    now has ``(name, 0, 0)``."""
+    old = _unpack_outside(recorded)
+    cur = {re.sub(r"[;=]", "_", k): (k, v) for k, v in current.items()}
+    moved = [(k, v[1], v[2]) for k, (_orig, v) in sorted(cur.items()) if old.get(k) != v[0]]
+    moved += [(k, 0, 0) for k in sorted(old) if k not in cur]
+    return moved
+
+
+def _outside_sections_moved(recorded: str, now: str) -> "list[str]":
+    """The section NAMES that differ between two packed values."""
+    old, cur = _unpack_outside(recorded), _unpack_outside(now)
+    return sorted(k for k in set(old) | set(cur) if old.get(k) != cur.get(k))
+
+
 def _item_family(key: str, index: DocIndex) -> str:
     """The family label of an item key, for ``--drift`` grouping - also for a
     key the current corpus no longer defines."""
@@ -3023,7 +3152,7 @@ def _render_provenance_yaml(entries: "list[dict]", indent: int) -> "list[str]":
     out = [f"{pad}upstream_provenance:"]
     for e in entries:
         out.append(f"{pad}  - file: {_flow(str(e.get('file', '')))}")
-        for key in ("session_id", "last_updated", "version", "capability", "sha256"):
+        for key in ("session_id", "last_updated", "version", "capability", "sha256", "outside"):
             if e.get(key) is not None:
                 out.append(f"{pad}    {key}: {_sq(e[key])}")
         items = e.get("items")
@@ -3037,14 +3166,56 @@ def _render_provenance_yaml(entries: "list[dict]", indent: int) -> "list[str]":
     return out
 
 
-def _moved_since_stamp(old: dict, new: dict) -> Optional[dict]:
+def _outside_baseline(old: dict, docs_dir: Path, up: str, new_sha: str) -> Optional[str]:
+    """The ``outside`` value to compare an upstream's new remainder against: the
+    one the old entry recorded - an empty string included, which is a real value -
+    else, for an entry that predates the key and whose sha moved, the remainder
+    of the git revision that sha names. None when there is nothing to compare
+    (the sha did not move, or git cannot recover the old text) (ledger IMP-316)."""
+    recorded = old.get("outside")
+    if recorded is not None:
+        return str(recorded)
+    sha = str(old.get("sha256") or "")[:_SHA_LEN]
+    if not sha or sha == new_sha[:_SHA_LEN]:
+        return None
+    status, _rev, _items, outside = _recover_from_git(docs_dir, up, sha)
+    return outside if status == "hit" else None
+
+
+def _moved_since_stamp(old: dict, new: dict, old_outside: Optional[str] = None) -> Optional[dict]:
     """What moved in one upstream between its recorded entry and the entry
     about to replace it: ``{changed, added, removed}`` item keys from the
-    recorded items map, or ``{sha_only: True}`` when the old record had no
+    recorded items map, ``outside`` (the names of the top-level sections whose
+    text lies in no item and moved, ledger IMP-316) or ``outside_unverified``
+    (the old entry recorded no remainder, git cannot recover it and the hash
+    moved), or ``{sha_only: True}`` when the old record had no
     items map but a different hash - also when it HAD one but neither side
     has any item to itemize (ledger IMP-185, LSN-090: an unindexed shard's
     items map is always ``{}``, so a real edit and no edit are otherwise
     indistinguishable). None when nothing moved."""
+    delta = _moved_items(old, new)
+    if delta is not None and delta.get("sha_only"):
+        return delta
+    now = new.get("outside")
+    outside: "list[str]" = []
+    unverified = False
+    if now is not None:
+        if old_outside is not None:
+            outside = _outside_sections_moved(old_outside, str(now))
+        elif old.get("sha256") and old.get("sha256") != new.get("sha256"):
+            unverified = True
+    if not outside and not unverified:
+        return delta
+    merged = dict(delta or {})
+    if outside:
+        merged["outside"] = outside
+    if unverified:
+        merged["outside_unverified"] = True
+    return merged
+
+
+def _moved_items(old: dict, new: dict) -> Optional[dict]:
+    """The item-level half of ``_moved_since_stamp``."""
     old_items = old.get("items")
     if isinstance(old_items, dict):
         new_items = new.get("items") or {}
@@ -3072,6 +3243,11 @@ def _moved_line(up: str, moved: dict) -> str:
         return (f"re-stamped {up}: changed since the last stamp, which recorded no items to name "
                 f"what moved - reviewed by this run?")
     parts = [f"{', '.join(moved[k])} {k}" for k in ("changed", "added", "removed") if moved.get(k)]
+    if moved.get("outside"):
+        parts.append(f"text outside the indexed items moved ({', '.join(moved['outside'])})")
+    if moved.get("outside_unverified"):
+        parts.append("text outside the indexed items could not be compared (the last stamp "
+                     "recorded no hash of it)")
     return f"re-stamped {up}: {'; '.join(parts)} since the last stamp - reviewed by this run?"
 
 
@@ -3115,6 +3291,15 @@ def stamp_artifact(docs_dir: Path, artifact: str, extra_upstreams: "list[str]",
               f"stamp it or hold it, not both; nothing written", file=sys.stderr)
         return 2
     not_recorded = [h for h in held if h not in recorded]
+    peers = []
+    for f in extra_upstreams:
+        base = Path(str(f)).name if f else ""
+        if base and base != name and _peer_or_later(name, base) and base not in peers:
+            peers.append(base)
+    if peers:
+        print(f"[docs-stamp] {', '.join(peers)}: same family as {label} or not an earlier pipeline "
+              f"stage - a peer or consumer, not an upstream; nothing written", file=sys.stderr)
+        return 1
     wanted: list[str] = []
     for f in [e.get("file", "") for e in existing] + list(extra_upstreams):
         base = Path(str(f)).name if f else ""
@@ -3143,8 +3328,12 @@ def stamp_artifact(docs_dir: Path, artifact: str, extra_upstreams: "list[str]",
         entry["capability"] = str(CAPABILITY_VERSION)
         entry["sha256"] = content_hash(docs_dir / up)
         entry["items"] = items_of(index, docs_dir, up)
+        entry["outside"] = _outside_of(index, docs_dir, up)
         entries.append(entry)
-        delta = _moved_since_stamp(old, entry) if old is not None else None
+        delta = None
+        if old is not None:
+            delta = _moved_since_stamp(
+                old, entry, _outside_baseline(old, docs_dir, up, str(entry["sha256"])))
         if delta is not None:
             moved.append((up, delta))
     newline = "\r\n" if "\r\n" in text else "\n"
@@ -3191,12 +3380,17 @@ def stamp_artifact(docs_dir: Path, artifact: str, extra_upstreams: "list[str]",
     # What the artifact references that the stamp still does not record: an
     # earlier-stage file a change to which could never make it stale (IMP-148).
     gaps = _provenance_gaps(index, name, set(wanted))
+    # An add to a record that already held others is a provenance claim the
+    # artifact never made before this run (IMP-311); a first-ever stamp is not.
+    added = [u for u in wanted if recorded and u not in recorded
+             and u not in missing and u not in held]
     if as_json:
         print(json.dumps({
             "artifact": label,
             "stamped": [{"file": e["file"], "sha256": e.get("sha256"), "items": len(e["items"])} for e in stamped],
             "missing": missing,
             "held": [f"docs/{u}" for u in kept],
+            "added": [f"docs/{u}" for u in added],
             "hold_not_recorded": [f"docs/{u}" for u in not_recorded],
             "moved": [dict({"file": f"docs/{u}"}, **d) for u, d in moved],
             "provenance_gaps": [{"file": f"docs/{u}", "ids": ids} for u, ids in gaps],
@@ -3208,6 +3402,8 @@ def stamp_artifact(docs_dir: Path, artifact: str, extra_upstreams: "list[str]",
             print(f"     Held exactly as recorded: {', '.join(kept)} - a later --drift still reports "
                   f"what moved there.")
         warnings = [_moved_line(u, d) for u, d in moved]
+        warnings += [f"newly recorded: {u} - {label} did not record it as an upstream before this "
+                     f"stamp; confirm it is an upstream of this file" for u in added]
         warnings += _gap_warnings(label, gaps)
         warnings += [
             f"{u} is recorded as an upstream but no longer exists in {docs_dir} - its old "
@@ -3497,10 +3693,17 @@ def _stale_rows(docs_dir: Path) -> "tuple[list[dict], list[str]]":
                     _lines, relevant = _item_delta_lines(
                         index, docs_dir, up, items, index.refs_by_file.get(name, set()),
                         "the stamp", lines, art_skip, recorded_capability, name, changelog_raw,
-                        deferred, recorded_sha=recorded)
+                        deferred, recorded_sha=recorded, recorded_outside=e.get("outside"))
                     reviewable.append(relevant)
                 else:
                     reviewable.append(True)  # sha-only: cannot tell, so it is reviewed
+            elif e.get("outside") is not None and _outside_moved(
+                    str(e["outside"]), _outside_sections(index, docs_dir, up)):
+                # The hash was refreshed (a re-slice writes it) while the recorded
+                # remainder was left as the last review saw it: the text outside
+                # the items moved since that review (ledger IMP-316).
+                moved.append(up)
+                reviewable.append(True)
         if moved or missing:
             order = (_PIPELINE.index(skill) if skill in _PIPELINE else len(_PIPELINE),
                      1 if "__" in name else 0, name)
@@ -3616,14 +3819,22 @@ _GIT_REVISIONS = 40   # how far back --drift looks for a revision matching a sha
 
 
 def _recover_items_from_git(docs_dir: Path, up_name: str, recorded: str):
+    """``_recover_from_git`` without its fourth value - the ``(status, revision,
+    items)`` triple every item-level caller reads."""
+    status, rev, items, _outside = _recover_from_git(docs_dir, up_name, recorded)
+    return status, rev, items
+
+
+def _recover_from_git(docs_dir: Path, up_name: str, recorded: str):
     """The old upstream a sha-only stamp did not snapshot, recovered from git.
 
-    Returns ``("hit", revision, items)`` for the newest of the last
+    Returns ``("hit", revision, items, outside)`` for the newest of the last
     ``_GIT_REVISIONS`` commits touching ``docs/<up_name>`` whose text hash equals
     ``recorded`` (the hash ``--hash`` prints: text-level, so a CRLF checkout and
-    an LF blob agree); ``("miss", None, None)`` when history holds no such
-    revision (an uncommitted stamp); ``("unavailable", None, None)`` when git is
-    absent or ``docs_dir`` is in no repository. Never raises.
+    an LF blob agree); ``("miss", None, None, None)`` when history holds no such
+    revision (an uncommitted stamp); ``("unavailable", None, None, None)`` when git
+    is absent or ``docs_dir`` is in no repository. Never raises. ``outside`` is
+    that revision's packed ``_outside_of`` remainder (ledger IMP-316).
 
     ``items`` is ``items_of_full``'s ``{id: (hash, text)}`` - hash for
     ``--drift``'s item-by-item delta, text for ``--items-at`` (IMP-203), from
@@ -3631,7 +3842,7 @@ def _recover_items_from_git(docs_dir: Path, up_name: str, recorded: str):
     hash-only caller already found, because this is the only place a
     revision's checkout ever gets built."""
     if not recorded:
-        return "unavailable", None, None
+        return "unavailable", None, None, None
     import subprocess
     import tempfile
     try:
@@ -3640,9 +3851,9 @@ def _recover_items_from_git(docs_dir: Path, up_name: str, recorded: str):
             capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
     except OSError:
-        return "unavailable", None, None
+        return "unavailable", None, None, None
     if log.returncode != 0:
-        return "unavailable", None, None
+        return "unavailable", None, None, None
     for rev in log.stdout.split():
         try:
             show = subprocess.run(
@@ -3650,7 +3861,7 @@ def _recover_items_from_git(docs_dir: Path, up_name: str, recorded: str):
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
             )
         except OSError:
-            return "unavailable", None, None
+            return "unavailable", None, None, None
         if show.returncode != 0:
             continue
         old_text = show.stdout
@@ -3661,8 +3872,9 @@ def _recover_items_from_git(docs_dir: Path, up_name: str, recorded: str):
             old_docs.mkdir()
             (old_docs / up_name).write_text(old_text, encoding="utf-8", newline="\n")
             old_index = build_index(old_docs)
-            return "hit", rev, items_of_full(old_index, old_docs, up_name)
-    return "miss", None, None
+            return ("hit", rev, items_of_full(old_index, old_docs, up_name),
+                    _outside_of(old_index, old_docs, up_name))
+    return "miss", None, None, None
 
 
 def _cite_counts(lines: "list[str]", skip: "list[tuple[int, int]]", token: str) -> "tuple[int, int]":
@@ -3712,7 +3924,8 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
                       changelog_lines: "Optional[list[str]]" = None,
                       deferred: "Optional[set[str]]" = None,
                       recovered: bool = False,
-                      recorded_sha: str = "") -> "tuple[list[str], bool]":
+                      recorded_sha: str = "",
+                      recorded_outside: Optional[str] = None) -> "tuple[list[str], bool]":
     """The per-family added / removed / changed-in-body lines of one upstream,
     diffed item by item against ``old_items`` (a stamp's items map, or the
     items of a revision recovered from git); ``basis`` names the old side.
@@ -3784,7 +3997,15 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
     cli_args/run.log content - ledger IMP-185, LSN-090), a real edit and no
     edit are indistinguishable from this map alone; ``relevant`` is True and
     the lines hedge exactly like the sha-only fallback, instead of the
-    "nothing moved" claim this file's own edit would otherwise earn."""
+    "nothing moved" claim this file's own edit would otherwise earn.
+
+    ``recorded_outside`` is the stamp's ``outside`` value (``_outside_of``) -
+    or, for a revision recovered from git, that revision's. Text in no item
+    (UX ``cli``, ARCH ``tech_stack``) is compared section by section, and a
+    section that moved is a delta to review (``relevant``), whatever the item
+    map says (ledger IMP-316). A stamp that recorded none falls back to the
+    revision ``recorded_sha`` names in git; where git cannot recover it either,
+    the move is hedged ``relevant`` rather than called re-stamp only."""
     out: list[str] = []
     current_items = items_of(index, docs_dir, up_name)
     if not old_items and not current_items:
@@ -3968,15 +4189,52 @@ def _item_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
                 f"recoverable - a change cannot be ruled out ({', '.join(t for t, _h in marked)})"
             )
             relevant = True
+    outside_lines, outside_relevant = _outside_delta_lines(
+        index, docs_dir, up_name, recorded_outside, recorded_sha)
+    out.extend(outside_lines)
+    relevant = relevant or outside_relevant
     if not (added_keys or removed_keys or modified_keys):
         if not index_new_keys:
-            out.append(
-                "no item was added, removed or changed - the edit touched only text outside "
-                "the indexed items, or declaration-only fields (touches_entities, status)"
-            )
+            if outside_lines:
+                out.append("no item was added, removed or changed")
+            else:
+                out.append(
+                    "no item was added, removed or changed, and no text outside the indexed items "
+                    "moved - the edit touched only metadata, comments or declaration-only fields "
+                    "(touches_entities, touches_enums, status)"
+                )
     else:
         out.append(f"compared item by item against {basis}")
     return out, relevant
+
+
+def _outside_where(name: str, up_name: str, first: int, last: int) -> str:
+    return f"{name} (docs/{up_name}:{first}-{last})" if first else f"{name} (removed)"
+
+
+def _outside_delta_lines(index: DocIndex, docs_dir: Path, up_name: str,
+                         recorded_outside: Optional[str], recorded_sha: str) -> "tuple[list[str], bool]":
+    """The ``(lines, relevant)`` of one upstream's text outside its indexed items
+    (ledger IMP-316). ``recorded_outside`` None means the stamp recorded none:
+    the remainder of the git revision ``recorded_sha`` names is compared
+    instead, and where that is unrecoverable too the move is hedged relevant -
+    a stamp must not claim more than was compared. No ``recorded_sha`` and no
+    ``recorded_outside`` means there is no stamped comparison to make."""
+    baseline = recorded_outside
+    if baseline is None and recorded_sha:
+        status, _rev, _items, recovered = _recover_from_git(docs_dir, up_name, recorded_sha)
+        baseline = recovered if status == "hit" else None
+    if baseline is None:
+        if not recorded_sha:
+            return [], False
+        return ([f"text outside the indexed items cannot be compared - the last stamp recorded no "
+                 f"hash of it and no committed revision of {up_name} carries the stamped content; "
+                 f"review the diff"], True)
+    moved = _outside_moved(baseline, _outside_sections(index, docs_dir, up_name))
+    if not moved:
+        return [], False
+    where = ", ".join(_outside_where(n, up_name, a, b) for n, a, b in moved)
+    return [f"text outside the indexed items moved: {where} - read those sections, not an item"], True
 
 
 _RESTAMP_ONLY = ("nothing this file references or cites was added, removed or changed - re-stamp only "
@@ -3988,6 +4246,22 @@ _RESTAMP_ONLY = ("nothing this file references or cites was added, removed or ch
 def _stage_rank(name: str) -> Optional[int]:
     skill = _STAGE_OF.get(name.split("__", 1)[0].rsplit(".", 1)[0])
     return _PIPELINE.index(skill) if skill in _PIPELINE else None
+
+
+def _family_stem(name: str) -> str:
+    return name.split("__", 1)[0].rsplit(".", 1)[0]
+
+
+def _peer_or_later(name: str, up: str) -> bool:
+    """True when ``up`` can never be an upstream of ``name``: it is the artifact's
+    own family (a same-family shard), or both stages are known and ``up`` is not
+    EARLIER. A file outside the pipeline has no rank and always passes here. The
+    one rule ``--stamp --upstream`` refuses on and ``_provenance_gaps`` skips on
+    (ledger IMP-311)."""
+    if _family_stem(up) == _family_stem(name):
+        return True
+    mine, theirs = _stage_rank(name), _stage_rank(up)
+    return mine is not None and theirs is not None and theirs >= mine
 
 
 def _provenance_gaps(index: DocIndex, name: str, recorded: "set[str]") -> "list[tuple[str, list[str]]]":
@@ -4008,11 +4282,9 @@ def _provenance_gaps(index: DocIndex, name: str, recorded: "set[str]") -> "list[
         if definition is None:
             continue
         def_file = definition[0]
-        if def_file == name or def_file in recorded \
-                or def_file.split("__", 1)[0].rsplit(".", 1)[0] == stem:
+        if def_file == name or def_file in recorded or _peer_or_later(name, def_file):
             continue
-        rank = _stage_rank(def_file)
-        if rank is None or rank >= my_rank:
+        if _stage_rank(def_file) is None:
             continue
         by_file.setdefault(def_file, set()).add(ref)
     return [(f, sorted(ids, key=_id_sort_key)) for f, ids in sorted(by_file.items())]
@@ -4106,6 +4378,16 @@ def drift_report(docs_dir: Path, artifact: str) -> int:
             warnings.append(f"{up_file}: no sha256 recorded - cannot tell whether it changed")
             continue
         if current == recorded:
+            held_out = entry.get("outside")
+            stale_out = (_outside_moved(str(held_out), _outside_sections(index, docs_dir, up_name))
+                         if held_out is not None else [])
+            if stale_out:
+                where = ", ".join(_outside_where(n, up_name, a, b) for n, a, b in stale_out)
+                changed.append((up_name, [
+                    f"the hash is unchanged since the stamp, but text outside the indexed items "
+                    f"moved since its last review: {where} - read those sections, not an item "
+                    f"(a re-slice refreshed the hash and left the review owed)"]))
+                continue
             unchanged.append(up_name)
             continue
         details = [f"recorded {recorded}, now {current}"]
@@ -4130,7 +4412,8 @@ def drift_report(docs_dir: Path, artifact: str) -> int:
             delta_lines, relevant = _item_delta_lines(
                 index, docs_dir, up_name, recorded_items, my_refs,
                 "the snapshot recorded at the last write", lines, art_skip,
-                recorded_capability, name, changelog_raw, deferred, recorded_sha=recorded)
+                recorded_capability, name, changelog_raw, deferred, recorded_sha=recorded,
+                recorded_outside=entry.get("outside"))
             details.extend(delta_lines)
             if not relevant:
                 details.append(_RESTAMP_ONLY)
@@ -4140,14 +4423,14 @@ def drift_report(docs_dir: Path, artifact: str) -> int:
         # No item snapshot in the stamp. Every recorded sha256 is a text hash a
         # committed revision of the upstream can match, so history is tried
         # first: a hit gives the same exact delta (ledger IMP-083, aicf LSN-065).
-        found, rev, old_full = _recover_items_from_git(docs_dir, up_name, recorded)
+        found, rev, old_full, old_out = _recover_from_git(docs_dir, up_name, recorded)
         old_items = {k: v[0] for k, v in old_full.items()} if old_full is not None else None
         if found == "hit" and old_items is not None:
             delta_lines, relevant = _item_delta_lines(
                 index, docs_dir, up_name, old_items, my_refs,
                 f"revision {str(rev)[:8]} of docs/{up_name}, recovered from git (its content "
                 f"matches the hash this stamp recorded)", lines, art_skip,
-                deferred=deferred, recovered=True)
+                deferred=deferred, recovered=True, recorded_outside=old_out)
             details.extend(delta_lines)
             if not relevant:
                 details.append(_RESTAMP_ONLY)
@@ -4482,15 +4765,18 @@ def main(argv: "Optional[list[str]]" = None) -> int:
             print(f"[docs-items] cannot read {args.items}: no such file (looked in {docs_dir})", file=sys.stderr)
             return 2
         if args.items_at:
-            status, _rev, full = _recover_items_from_git(docs_dir, target.name, args.items_at)
+            status, _rev, full, old_outside = _recover_from_git(docs_dir, target.name, args.items_at)
             text_items = {k: v[1] for k, v in full.items()} if status == "hit" and full else {}
-            print(json.dumps({"status": status, "items": text_items}, indent=2, sort_keys=True))
+            print(json.dumps({"status": status, "items": text_items,
+                              "outside": old_outside if status == "hit" else None},
+                             indent=2, sort_keys=True))
             return 0
         index = build_index(docs_dir)
         items = items_of(index, docs_dir, target.name)
         if args.json:
             print(json.dumps({"file": f"docs/{target.name}", "sha256": content_hash(target),
-                              "items": items}, indent=2, sort_keys=True))
+                              "items": items, "outside": _outside_of(index, docs_dir, target.name)},
+                             indent=2, sort_keys=True))
         else:
             print(f"# {len(items)} item(s) defined in docs/{target.name} (sha256 {content_hash(target)})")
             for k in sorted(items, key=_id_sort_key):

@@ -7,6 +7,10 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.29 (2026-11-10) — a `kind: module` work unit declares the DATA-MODEL enums it defines in `touches_enums`, so code can restale the definer when an enum gains or loses a member
+
+`touches_enums` (ledger IMP-315): a new optional work-unit trace. Enum names stay out of `touches_entities`, which keeps the documented rule that enums are not entities. Cross-check 21 refuses a name that is not a DATA-MODEL enum, and the field on any unit whose kind is not `module`. It blocks from the 2.0 gate floor and warns below it. component-discovery.md and merge-validate.md name the field. Pins: fixtures `49_touches_enums_at_floor` (exit 1), `50_touches_enums_below_floor` (exit 0), `51_touches_enums_valid` (exit 0), `_smoke/touches_enums_selftest.py`.
+
 ## 1.28 (2026-11-01) — the findings drain never caps what the user confirmed; past 3 unprompted sightings it asks once instead of dropping
 
 Phase 8 findings drain: user-confirmed notes and `upstream_incomplete` are never capped; past 3 other sightings the close asks once (record all | first 3 | none) with the notes listed in the question; on EXIT, or when it cannot ask, it records them all. 'Unless one is blocking' is gone: FINDINGS has no such severity, and it left a fourth note with no stated fate (ledger IMP-296; pin `repair/_smoke/findings_drain_cap_selftest.py`).

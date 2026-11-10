@@ -7,6 +7,16 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.34 (2026-11-10) — a fix report gains `unverified` for edits that landed unverified, routed by blocked_on and sequence_complete; the worker model is a remembered per-role setting (--localize-model / --fix-model, default opus) shown in the dispatch question
+
+Fix report (ledger IMP-305): `blocked`, `relocated` and `duplicate` keep "touch no file"; the new fifth status `unverified` carries `owed_checks`, `phase` and `sequence_complete`. Drain step 5 routes it: a non-null `blocked_on` (a write error after an edit) stops the run as edge-cases already ruled; `sequence_complete: true` -> the session re-runs the owed checks in the foreground and writes `verified_at`; `false` -> the Resume row (RESUME FROM `phase`). Then the aggregate's remaining findings are re-dispatched. No phase threshold, since re-invoke mode never reslices. edge-cases' write-error bullet reports `unverified` after the first edit. Pin: `_smoke/orchestration_selftest.py`.
+
+Worker model (ledger IMP-313): the dispatches no longer pin `model: "opus"` in prose. `--localize-model` / `--fix-model` (opus|sonnet) write `run_defaults.localize_model` / `fix_model`, resolved flag > remembered value > opus, per role, because the sonnet slips seen were fixer-only and localize is read-only and most of the spend. No fourth question: the model line rides in the dispatch question's text (the plan-gate summary when that question is skipped) and on the Workers: row. The sticky run_defaults schema names both keys. A malformed value is a one-line note and writes nothing. Pin: `_smoke/orchestration_selftest.py`.
+
+forward-propagation.md (ledger IMP-310): the re-slice step says a test task's `<its TST id>: ` line follows too, and a line still holding the old text is printed as `prose_unfollowed` for a hand edit in the same pass. Pin: task `_smoke/12_reslice/reslice_selftest.py`.
+
+findings.py / validate_findings.py (ledger IMP-314): load and dump use libyaml (CSafeLoader/CSafeDumper) when PyYAML has it, with the pure-Python path as the fallback. The queue dump is byte-identical. On a 711-finding queue a full CLI add went from 120 to 7.8 s, most of it the board redraw (see setup 1.35). Pin: `_smoke/findings_selftest.py` (loader and dumper class, counted, never timed).
+
 ## 1.33 (2026-11-01) — a note for a held downstream file is a re-invoke, and the surgical-handoff warning names the three destinations; localize reads a TASKS structural proposal against the task validator's pins and names a new file's owner
 
 Handoff (ledger IMP-298): no new field and no closed-finding reader, since either lets a note outlive the tracking that guarantees someone reads it. `forward-propagation.md` gains 'A note for a held file is a re-invoke': run the surgical steps, then record `re-invoke` with the owed command and `sites_considered`. The warning names re-invoke, the bump summary its `--drift` quotes, and `resolution.summary` for reasoning no downstream file needs. Pin: `_smoke/findings_selftest.py`.

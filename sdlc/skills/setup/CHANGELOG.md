@@ -7,6 +7,16 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.35 (2026-11-10) — docs_index capability 15: --stamp --upstream refuses a same-family or later-stage upstream and names new pairs; an upstream move outside every indexed item is a delta, never "re-stamp only"; the statusboard reads each file once with libyaml
+
+`--stamp --upstream` (ledger IMP-311): one shared predicate, `_peer_or_later` (same family, or both stage ranks known and the upstream's rank >= the artifact's; an unranked upstream such as a hand-written `docs/architecture.md` passes), now drives both the refusal (exit 1, nothing written, under the existing --stamp exit-1 clause) and the provenance-gap check. An upstream added to an existing record prints `newly recorded: <file>`, and `--json` gains `added`. The add stays legal, because it is the documented gap fix. The SKILL.md target table no longer restates the capability number. Pin: `_smoke/index_selftest.py` section 15b; `wire_selftest.py` pins capability 15.
+
+statusboard.py (ledger IMP-314): one gather reads each file once, including `line_of()`, which re-read a file per warning, and parses YAML with libyaml when available. The cache is cleared at the start of every gather. A redraw on aicf read UX.yaml 7 times and made 16 pure-Python loads. Pin: `_smoke/statusboard_selftest.py` (reads per file, and a second gather sees a mutated fixture).
+
+docs_index `outside` (ledger IMP-316): every provenance entry records `outside`, a per-section hash of the text in no indexed item, excluding metadata, changelogs, deferrals and every `*_warnings` key. An empty remainder is written `outside: ''`. --drift, --stale and a plain --stamp compare it, so an edit confined to e.g. UX `cli.exit_codes` or ARCH `tech_stack` is a delta to review (`text outside the indexed items moved: <section> (docs/<file>:<a>-<b>)`), never "re-stamp only", while a metadata or warnings-only bump still is. An entry without the key is compared against the git revision of its sha, and hedged as relevant when git cannot recover it. Pin: `_smoke/index_selftest.py`.
+
+`touches_enums` (ledger IMP-315): it is a named key and declaration-only for --drift. `--check` warns once over the ARCH union about each DATA-MODEL enum that no unit declares. It fires only when some unit declares the field, and the exit code is unchanged. Pin: `_smoke/index_selftest.py`.
+
 ## 1.34 (2026-11-01) — autocommit adds only untracked files, so a staged rename or rm no longer aborts the commit, and lesson owns the board files; --drift grants [changelog names this file] per entry with a second label
 
 autocommit (ledger IMP-300, HELPER_VERSION 7): `git add` runs only on untracked rows, because `commit --only` already takes the worktree state of every path git knows. A `git commit --dry-run --only` exit code decides `[OK] nothing to commit` in any locale and fires no hook. A failed commit stages what it would have taken, so 'commit them by hand' stays true. A rename out of the owned set with no baseline commits the deletion and leaves the new side staged, by choice (`references/auto-commit.md`).

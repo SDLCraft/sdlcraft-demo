@@ -45,7 +45,7 @@ file of its own. Two localizers cannot disturb each other, whatever they walk;
 two that walk to the same defect meet afterwards in `findings.py plan` (a
 report's own `duplicate_of` folds; a shared write set → one aggregate). The
 independence is known in advance, by construction, so the default is wide (6).
-What N costs: under a per-window token cap, N opus walks finish no sooner per
+What N costs: under a per-window token cap, N walks finish no sooner per
 window than one — they spend the budget N times faster — and an interrupted
 wave loses up to N unfinished walks (a cluster worker writes each member's
 report as that walk ends, so the reports already on disk survive, and a resume
@@ -78,7 +78,9 @@ remembered from your last run"*, *"6 — the default, never chosen"* — then th
 other rungs of `6` / `3` / `1`, deduplicated against position 1; "Other" takes
 any N. Label each by its consequence, not its rationale: *6 — fastest; an
 interruption loses up to 6 unfinished walks*, *1 — slowest; an interruption
-loses one walk*. The `preview` is the provisional plan table. Skipped when
+loses one walk*. The question's text also carries the models ("Worker model"):
+*localize model <m> (<source>), fix model <m> (<source>) - change with
+--localize-model / --fix-model*. The `preview` is the provisional plan table. Skipped when
 `--parallel N` answered it, when the findings to localize form at most one
 cluster, and without the Agent tool (then say, in one line, that a remembered N
 above 1 cannot be honoured this run).
@@ -106,6 +108,23 @@ localize leave it untouched. A value that is missing, non-integer or outside
 1–8 is clamped when it can be, otherwise read as never chosen (6), said in one
 line; a preference never fails a run. `concurrency: {requested, source,
 effective}` records what this run used.
+
+**Worker model.** Each worker role has its own model: `--localize-model <m>` and
+`--fix-model <m>`, `<m>` being `opus` or `sonnet`, remembered in
+`run_defaults.localize_model` and `run_defaults.fix_model`. Each resolves **flag >
+remembered value > opus**, and the source is printed as *flag*, *remembered* or
+*default*. There is no question of its own: the dispatch question's text names
+both models (above), and when that question is skipped — one cluster,
+`--parallel` given, no Agent tool — the plan gate's extent question carries the
+same model line. Only a flag writes a key; a skipped question, `EXIT` and a run
+without the flag leave it untouched, and restart or discard carry it forward. A
+value that is neither name is read as never chosen (opus) and said in one
+`Attention:` line; it never fails a run. The roles are separate because a
+localizer is read-only and its walk is adjudicated at the plan gate, while a
+fixer writes artifacts inside a boundary and a stamp discipline it can slip on;
+the round card's `Context:` row is the record to compare a tier against. The
+default stays opus, and `code`'s heal escalation is a separate rule this setting
+never touches.
 
 ## Layout on disk
 
@@ -153,9 +172,9 @@ only groups; the plan still groups by write sets. Severity is display only
 here: `findings.py list` prints each row's severity (an unstamped finding prints
 `behavioural*`) and it never splits a cluster or an aggregate.
 
-**Dispatch:** the Agent tool, `model: "opus"` (the walk is the cross-artifact
-reasoning this skill's model policy reserves opus for), `run_in_background:
-true`. Keep N clusters in flight ("Choosing N") and dispatch the next the
+**Dispatch:** the Agent tool, `model` = the resolved localize model ("Worker
+model"; the walk is the cross-artifact reasoning this skill's model policy
+reserves opus for by default), `run_in_background: true`. Keep N clusters in flight ("Choosing N") and dispatch the next the
 moment one returns — rolling, not batched; at N = 1 it is still a worker. A
 worker is **read-only**: it edits nothing, asks nothing, and writes one report per
 member.
@@ -297,7 +316,8 @@ channel rule: content a decision depends on rides inside the call, in the
 recommended option's `preview`, never in chat markdown the same turn):
 
 - Q1, the extent ladder, single-select — position 1 **all N aggregates, in
-  wave order** with the full table as its `preview`; then *the first
+  wave order** with the full table as its `preview` (headed by the model line
+  of "Worker model" when the dispatch question did not run); then *the first
   stage-wave only*; then *the first aggregate only*. The auto-added "Other"
   carries the per-finding dispositions: `all except FND-…`, `defer FND-…:
   <reason>`, `wontfix FND-…`, `accept-as-is FND-… (expected_count N)`,
@@ -318,7 +338,8 @@ with the next aggregate.
 
 ## Wave 2 — fix
 
-One worker per aggregate, `model: "opus"`, `run_in_background: true`, **one
+One worker per aggregate, `model` = the resolved fix model ("Worker model"),
+`run_in_background: true`, **one
 aggregate at a time, in plan order** — never two side by side, however
 disjoint ("Choosing N"). The brief:
 
@@ -354,7 +375,7 @@ DO NOT: write the queue or the state file; run docs_index.py bare; run another s
         (status, diff, show, log); the tree holds the user's uncommitted docs, the queue
         and the state file, and those commands belong to the session.
 REPORT in exactly this block per finding, nothing else:
-  FND: <id>  MODE: <mode>  TOUCHED: <n> file(s)  HOPS: <verified>/<total>  STATUS: ok | blocked | relocated | duplicate
+  FND: <id>  MODE: <mode>  TOUCHED: <n> file(s)  HOPS: <verified>/<total>  STATUS: ok | blocked | relocated | duplicate | unverified
 ```
 
 Inside the aggregate the worker runs each finding's Phase-4 sequence exactly
@@ -389,7 +410,7 @@ the resolution from:
 
 ```yaml
 fnd_id: FND-002
-status: ok | blocked | relocated | duplicate
+status: ok | blocked | relocated | duplicate | unverified
 duplicate_of: null              # FND-X, when status is duplicate
 mode: surgical
 located_stage: arch
@@ -409,12 +430,26 @@ handoff_notes: []               # re-invoke only: {artifact, key, note, basis, r
 swept_tokens: []                # every key grepped: the token, its sibling/parent keys, the old-shape words
 out_of_boundary: []             # {artifact, token, hits}: sweep hits outside the write boundary that restate a swept token
 relocated_to: null              # {stage, artifact} when status is relocated
-blocked_on: null                # the question, when status is blocked
+blocked_on: null                # the question, when status is blocked; the write or permission error, when status is unverified and the worker could not go on
+owed_checks: []                 # unverified only: the checks not run or not finished, as in `validators:`
+phase: null                     # unverified only: the breadcrumb phase reached - a resume point, never a router
+sequence_complete: null         # unverified only: true when the finding's mode sequence finished
 summary: "one line for resolution.summary"
 lesson: null                    # a skill defect met on the way, one line (the session routes it)
 beside: []                      # as in the localize report: defects met while fixing, {summary, site, read_for}
 resighted: []                   # FND ids already in the queue this fix met again
 ```
+
+`unverified` means one or more edits landed and Phase-5 verification did not
+finish, whatever stopped it: a killed verifier, a gate the worker could not
+run, or a write error after the first edit. The report names every landed file
+in `artifacts_touched`, lists the hops it reached with `verified_at: null`, and
+fills `owed_checks`, `phase` and `sequence_complete`. `sequence_complete` is
+`true` when the finding's mode sequence finished: surgical through the reslice,
+additive and re-invoke through the last step `forward-propagation.md` scripts
+for that mode; `false` otherwise. The worker stops its aggregate after an
+`unverified` report: the aggregate's later findings get no report until the
+session settles it, which keeps the serial stamp discipline.
 
 `blocked`, `relocated` and `duplicate` reports carry no `propagation` and
 touch no file: the worker stops before its first edit on that finding and
@@ -464,6 +499,19 @@ session, before the next wave is dispatched:
    the answer in `gate/answers.yaml`; a `relocated` report → re-plan the
    finding into a later aggregate (its new write set) when that stage-wave has
    not run yet, else it goes on the card's `Remaining:` row with the reason;
+   an `unverified` report is routed by `blocked_on` and `sequence_complete`,
+   never by a phase word: a non-null `blocked_on` stops the run - no further
+   wave, no Resume worker, no session-verify - and the session reports which
+   artifacts were edited (`edge-cases.md`); with `blocked_on` null and
+   `sequence_complete` true, the session re-runs `owed_checks` in the
+   foreground (compared to `baseline_checks`, step 1) and, when all are green,
+   writes the hops' `verified_at` and `how` itself from that run and settles
+   the finding as `ok`; with `blocked_on` null and `sequence_complete` false,
+   it is the Resume row below (RESUME FROM the report's `phase`) - never a
+   fresh dispatch and never a question. A re-run that is not green leaves the
+   finding `open` with one evidence line (Phase 6). Once settled, re-dispatch
+   the aggregate's remaining findings (no breadcrumb -> fresh) before the next
+   stage-wave;
 6. re-grep each report's `swept_tokens` across `docs/` (changelog lines
    excepted) and compare the hits to THAT worker's own write boundary, not
    the wave's edited files. Route every hit outside it — listed in the
@@ -525,7 +573,9 @@ as the way back.
 
 The state file's `plan:` block plus the breadcrumbs and reports decide, per
 aggregate, where an interrupted run stands: a report `ok` with the resolution
-written → done; a report `ok` without a resolution → Phase 6 for it; a
+written → done; a report `ok` without a resolution → Phase 6 for it; a report
+`unverified` → the drain's routing (step 5), and when that is a Resume, hash
+every `baseline` entry first and go on as for a breadcrumb without a report; a
 breadcrumb without a report → find the finding's touched files by hashing
 every `baseline` entry again, then re-dispatch the aggregate with
 `RESUME FROM: <breadcrumb path>` in the brief; nothing at all → dispatch
@@ -648,8 +698,8 @@ Open:    severity: integrity 1, behavioural 4, cosmetic 3
   `rounds[]` entry, and a project with no price prints `not reported`.
 - **Open** is the `severity:` count line of `findings.py list --open`.
 
-Walks and fixes stay opus: a cheaper tier for either needs this record first,
-so the card only records.
+Workers default to opus: a project that picks a cheaper tier for a role ("Worker
+model") judges it against this record, so the card only records.
 
 ## Pricing
 
@@ -695,8 +745,9 @@ re-runs are owed across how many findings and the first command; the full
 chain is printed once, above the card. `Parked:` prints only when this run
 parked latent findings: how many, which, and that the next run offers them.
 `Workers:` says what was dispatched on which model — the localize workers, the
-findings they covered, N with its source and its effective value — and how many
-fixers relocated or blocked (or `inline - the Agent tool was unavailable`).
+findings they covered, N with its source and its effective value, and each role's
+model with where it came from (*flag*, *remembered* or *default*) — and how many
+fixers relocated, blocked or left unverified (or `inline - the Agent tool was unavailable`).
 
 ```
 ── /sdlc:repair — what changed ────────────────────────────
@@ -708,7 +759,7 @@ Stale:     demo-api/TSK-003, demo-api/TSK-004 will be offered for regeneration
 Remaining: 1 open, not worked this run — FND-005 (outside the chosen extent: first wave)
 Parked:    2 latent findings parked (FND-008, FND-009) - the next /sdlc:repair run offers to work them
 Handoffs:  2 re-runs owed for FND-004 — first: /sdlc:test demo-api --reconcile (each prints the next; the last routes back here)
-Workers:   6 localize workers over 14 findings (N 6 remembered, effective 6), 3 fixers one at a time (opus) - 1 relocated, 0 blocked
+Workers:   6 localize workers over 14 findings (N 6 remembered, effective 6, model sonnet remembered), 3 fixers one at a time (model opus default) - 1 relocated, 0 blocked
 Commit:    a1b2c3d  /sdlc:repair → 3 findings closed at prd/arch, 1 handed off
 Status:    not finished - 1 open finding remains (FND-005)
 Next:      /sdlc:repair FND-005   ← in a NEW session

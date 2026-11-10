@@ -379,6 +379,17 @@ components:                                # REQUIRED — non-empty
         touches_entities:                  # OPTIONAL — DATA-MODEL entity name(s) this
           - Task                           #   work_unit reads/writes. Validated ⊆ the
                                            #   entities the owning component traces.
+        touches_enums:                     # OPTIONAL, `kind: module` units ONLY - the
+          - ItemStatus                     #   DATA-MODEL enum name(s) this unit DEFINES
+                                           #   (a unit that touches no entity reaching
+                                           #   them). Each must be an enum in DATA-MODEL
+                                           #   enums_and_lookups.enums: any other kind, or
+                                           #   an unknown name, errors from
+                                           #   arch_container_version 2.0 (warns below).
+                                           #   Not an entity - never list it under
+                                           #   touches_entities or traces_data_entities.
+                                           #   `task` copies it onto the task, `code`
+                                           #   restales the unit when an enum moves.
         satisfies_acceptance:              # OPTIONAL — the component acceptance_criterion
           - "Creating a task returns 201 with a persisted id."  # string(s) this fulfils.
         # --- contract text states TODAY'S behaviour only. Keep change history

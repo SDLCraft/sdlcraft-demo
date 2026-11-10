@@ -261,7 +261,9 @@ Nothing in this sequence is a hand edit to a task JSON.
    that equals the *previous* upstream text, leading and trailing whitespace
    ignored, follows it — the unit's
    `satisfies_acceptance` and the TST's `description` ride along from 1.7 for
-   exactly this) and each impl task's test line from `targets_work_units`
+   exactly this; a test task's `<its TST id>: ` line follows too; any other
+   line still holding the old text is printed as `prose_unfollowed` — edit
+   each by hand in the same pass) and each impl task's test line from `targets_work_units`
    when a re-target made it wrong, bumps the
    shard's `tasks_container_version` with a changelog line, refreshes the
    shard's `upstream_provenance` hash for the changed upstream (so the next

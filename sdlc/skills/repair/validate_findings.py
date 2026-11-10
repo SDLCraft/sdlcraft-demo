@@ -827,7 +827,9 @@ def main() -> int:
         print(f"[FAIL] cannot read {path}: file not found", file=sys.stderr)
         return 2
     try:
-        raw: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
+        # libyaml when present (a 700-finding queue: 18 s pure-Python, 1.5 s here)
+        raw: Any = yaml.load(path.read_text(encoding="utf-8"),
+                             Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
     except (OSError, yaml.YAMLError) as e:
         print(f"[FAIL] cannot parse {path}: {e}", file=sys.stderr)
         return 2

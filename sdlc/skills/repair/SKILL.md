@@ -10,7 +10,7 @@ description: >
   computed blast radius — surgically (edit + bump + re-slice, scripted), or by
   handing the user the exact downstream re-invocation sequence (each stage's
   --reconcile form; the walk's reasoning is left on the finding as handoff
-  notes, and the chain routes itself). The session orchestrates: opus workers
+  notes, and the chain routes itself). The session orchestrates: workers (opus by default)
   localize the findings by cluster, up to N in flight (--parallel N, remembered per
   project; initially 6), one plan gate orders the whole queue upstream-first,
   then workers fix one artifact aggregate at a time. Forms: /sdlc:repair
@@ -94,6 +94,9 @@ Classify `$ARGUMENTS`. The modifier **`--parallel <N>`** (1–8, clamped with a
 one-line note) sets how many localize workers may be in flight, answers the
 dispatch question (Phase 2) and becomes the remembered `run_defaults.parallel`;
 absent, it means "ask me". Order: **flag > gate answer > remembered value > 6**.
+**`--localize-model <m>`** and **`--fix-model <m>`** (`opus` or `sonnet`) choose a worker
+role's model and become the remembered `run_defaults.localize_model` / `fix_model`;
+neither is ever asked. Order: **flag > remembered value > opus**.
 
 1. **No arguments** → **full flow**: sweep, merge with open findings, localize
    them by cluster, plan, confirm once, fix, verify, hand back. Phases 1–6
@@ -167,7 +170,7 @@ findings_worked: []          # FND ids resolved/triaged/wontfixed/deferred this 
 current_finding: null
 dispatch: agent              # agent | inline (the Agent tool was unavailable)
 concurrency: {}              # localize N this run: {requested, source, effective}
-run_defaults: {}             # STICKY {parallel, parallel_set_at}: carried into every new state file
+run_defaults: {}             # STICKY {parallel, parallel_set_at, localize_model, fix_model}: carried into every new state file
 plan: {}                     # Phase 3: `findings.py plan --json` + extent, decisions,
                              #   per-aggregate status (planned | dispatched | done | relocated)
 handoffs: []                 # Phase 6: the consolidated command chain, printed once
@@ -254,26 +257,23 @@ marked resolved`) name the `triaged` re-invoke findings whose downstream
 artifacts have all been rebuilt since the fix: verify their hops (Phase 5) and
 close them (Phase 6) before any wave — they need no walk.
 
-**The dispatch question.** Load `references/orchestration.md` now; "Choosing N" holds the
-options and labels. Before wave 1, ONE `AskUserQuestion` — how many localize workers in
-flight, the resolved N with its source at position 1, the provisional table (`python
-"${CLAUDE_SKILL_DIR}/findings.py" plan`, no `--from`) as its `preview` — **skipped** when
-`--parallel N` answered it, when the findings to localize form at most one cluster, and when
-the Agent tool is unavailable. Record `concurrency:`; only a decided N (flag or answer)
-rewrites `run_defaults.parallel`. The call also carries the scope questions (full flow, asked
-even when N is not): *defer the cosmetic findings without a walk* (`list --open` prints each
-row's severity); for the parked latent findings (`list --status deferred`), *work them too*.
+**The dispatch question.** Load `references/orchestration.md` now; "Choosing N" holds the options and labels. Before
+wave 1, ONE `AskUserQuestion` — how many localize workers in flight, the resolved N with its source at position 1 and
+both worker models in its text, the provisional table (`python "${CLAUDE_SKILL_DIR}/findings.py" plan`, no `--from`) as
+its `preview` — **skipped** when `--parallel N` answered it, when the findings to localize form at most one cluster, and
+when the Agent tool is unavailable. Record `concurrency:`; only a decided N (flag or answer) rewrites
+`run_defaults.parallel` (only a model flag writes a model key). The call also carries the scope questions (full flow,
+asked even when N is not): *defer the cosmetic findings without a walk* (`list --open` prints each row's severity); for
+the parked latent findings (`list --status deferred`), *work them too*.
 
-**Wave 1 — localize.** `python "${CLAUDE_SKILL_DIR}/findings.py" cluster --json` groups
-the findings to localize (the open set's, without a `resolution.located_stage`); the
-wave dispatches ONE read-only worker per cluster (the Agent tool, `model: "opus"`,
-`run_in_background: true`, N in flight, rolling — a worker even at N = 1, for context
-isolation), its brief carrying paths only: the member ids and queue path,
+**Wave 1 — localize.** `python "${CLAUDE_SKILL_DIR}/findings.py" cluster --json` groups the findings to localize
+(the open set's, without a `resolution.located_stage`); the wave dispatches ONE read-only worker per cluster
+(the Agent tool, `model` = the resolved localize model, `run_in_background: true`, N in flight, rolling — a
+worker even at N = 1, for context isolation), its brief carrying paths only: the member ids and queue path,
 `references/back-propagation.md`, the index, the snapshot, one report path per member
-(`.claude/skills-state/sdlc-repair/localize/<FND>.yaml`). It walks each member, writes
-that member's file, edits nothing, asks nothing; membership is no duplicate claim.
-Without the Agent tool, walk them yourself, one finding at a time, and say so on the
-card. The shape of every walk, whoever runs it:
+(`.claude/skills-state/sdlc-repair/localize/<FND>.yaml`). It walks each member, writes that member's file, edits
+nothing, asks nothing; membership is no duplicate claim. Without the Agent tool, walk them yourself, one finding
+at a time, and say so on the card. The shape of every walk, whoever runs it:
 
 - walk **backwards** from where the finding surfaced to the earliest artifact
   whose content is wrong; a finding raised by an interview skill usually
@@ -391,7 +391,7 @@ what it is called) is one this run CAN get: ask it at Phase 3, then write it.
 A new finding is cheap to write and expensive to redeem: the next skill re-derives the cross-artifact
 walk cold, with no guarantee of the same reading.
 
-**Wave 2 — fix.** One worker per aggregate (`model: "opus"`), **one aggregate
+**Wave 2 — fix.** One worker per aggregate (`model` = the resolved fix model), **one aggregate
 at a time, in plan order**, whatever N is, briefed with paths: the aggregate's
 localize reports, `gate/answers.yaml`, `references/forward-propagation.md`,
 the snapshot, and a **write boundary** = the aggregate's write set — nothing
@@ -404,7 +404,7 @@ Even disjoint aggregates never run side by side (`references/orchestration.md`,
 "Choosing N"); the next stage-wave starts only after the previous one drained (Phase 5). A worker never asks: a
 decision the gate did not take is reported `blocked` with the question, and
 a walk that proves wrong mid-fix is reported `relocated` with the artifact it
-points at, nothing edited — the session re-plans it or names it on the card.
+points at, nothing edited — the session re-plans it or names it on the card; edits landed but unverified is `unverified`.
 **The reconcile chain is never printed here**; a re-invoke records its owed
 commands in the report and the session prints the consolidated chain once, at
 close. Without the Agent tool, run the sequences yourself in plan order.
@@ -607,7 +607,7 @@ naming even one pair the snapshot lacks is wave-caused and is stamped now;
 re-reads the queue, clustering admitted mints in one pass; re-greps each report's `swept_tokens` and routes any hit outside
 that worker's own write boundary; and asks the user each `blocked` report's question
 (four per call), re-dispatching that finding with the answer, while a `relocated`
-report is re-planned into a later aggregate or listed on the card's `Remaining:` row.
+report is re-planned into a later aggregate or listed on the card's `Remaining:` row; an `unverified` report (edits landed, verification unfinished) is finished by the session or resumed, never dispatched fresh.
 Then it writes the drained resolutions (the Phase 6 write), commits one checkpoint per located stage on a green tree - the write succeeded and no finding this drain settled still lists open
 (`autocommit.py commit` with `--checkpoint`, "Between waves" step 8) and, at a round's end, prints the round card.
 A downstream wave dispatched before an upstream drain would stamp its shard against upstream bytes still moving.
@@ -708,7 +708,7 @@ Stale:     demo-api/TSK-003, demo-api/TSK-004 will be offered for regeneration
 Remaining: 1 open, not worked this run — FND-005 (outside the chosen extent: first wave)
 Parked:    2 latent findings parked (FND-008, FND-009) - the next /sdlc:repair run offers to work them
 Handoffs:  2 re-runs owed for FND-004 — first: /sdlc:test demo-api --reconcile (each prints the next; the last routes back here)
-Workers:   6 localize workers over 14 findings (N 6 remembered, effective 6), 3 fixers one at a time (opus) - 1 relocated, 0 blocked
+Workers:   6 localize workers over 14 findings (N 6 remembered, effective 6, model sonnet remembered), 3 fixers one at a time (model opus default) - 1 relocated, 0 blocked
 Commit:    {a1b2c3d  /sdlc:repair → <summary> | nothing to commit — only when auto-commit is on}
 Status:    {computed - e.g. not finished - 1 open finding remains (FND-005)}
 Next:      {the computed next invocation}   ← in a NEW session
@@ -792,12 +792,11 @@ Every target must have a `sdlc/skills/<name>/SKILL.md`; never route to
 
 ## Model policy
 
-**opus / xhigh** (frontmatter), deliberately: the core operation is
-cross-artifact archaeology — deciding which of eight artifacts is *actually*
-wrong — the opposite regime from `/sdlc:code`'s sonnet/high manager, which is
-why the two are separate skills. The workers are opus for the same reason;
-they exist first for context isolation, and the localize wave's N buys speed
-on top (`references/orchestration.md`, "Why two waves", "Choosing N").
+**opus / xhigh** (frontmatter), deliberately: the core operation is cross-artifact archaeology — deciding
+which of eight artifacts is *actually* wrong — the opposite regime from `/sdlc:code`'s sonnet/high manager,
+which is why the two are separate skills. The workers are opus by default for the same reason;
+`--localize-model` / `--fix-model` choose sonnet per role (`references/orchestration.md`, "Worker model").
+"Why two waves" says why they exist.
 
 ## Quick reference: user inputs at gates
 
@@ -821,4 +820,4 @@ on top (`references/orchestration.md`, "Why two waves", "Choosing N").
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.33"
+skill_version: "1.34"

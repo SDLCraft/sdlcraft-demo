@@ -235,7 +235,9 @@ This validates:
       unique within its component; `summary` non-empty; `traces_api_operation`,
       `implements_requirements` (⊆ the component's), `touches_entities` resolve
       (⊆ the component's `traces_data_entities` — the error's fix is the derive
-      rule above: complete the component list to the union of unit touches).
+      rule above: complete the component list to the union of unit touches);
+      `touches_enums` names DATA-MODEL enums and sits only on a `kind: module`
+      unit (blocking from the 2.0 gate floor, a warning below it).
       Advisory: a component whose units touch entities while its
       `traces_data_entities` is missing/empty (subset check has no base).
     - **#21 blocking upgrade** — a NON-TRIVIAL component (non-plumbing archetype

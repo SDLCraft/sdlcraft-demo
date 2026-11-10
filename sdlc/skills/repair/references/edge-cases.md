@@ -125,10 +125,11 @@ read for what it is:
 - **A downstream artifact is `status: draft`** → repair it anyway, but say so:
   a draft artifact will be rewritten by its own skill, and the edit may not
   survive. Prefer `re-invoke` for draft stages.
-- **Write-permission error mid-repair** → a worker reports it as `blocked`
-  and edits nothing more; the session stops the run, does not dispatch the
-  next wave, and reports which artifacts were already edited and which were
-  not: a half-propagated fix is the one state worse than an unfixed defect, and
+- **Write-permission error mid-repair** → a worker that had already edited
+  reports it as `unverified` with `blocked_on` set (before its first edit it
+  reports `blocked`) and edits nothing more; the session stops the run, sends
+  no Resume worker, does not dispatch the next wave, and reports which
+  artifacts were already edited and which were not: a half-propagated fix is the one state worse than an unfixed defect, and
   the user needs to know exactly where it stopped.
 - **A worker relocates** (its fix proved the walk wrong, the source is outside
   its write boundary) → it edits nothing; the session re-plans the finding
@@ -225,6 +226,23 @@ read for what it is:
 - **`--parallel N` looks like it should speed up the fixes** → it never does:
   fixes run one aggregate at a time (`orchestration.md`, "Choosing N"). If the
   user asks, say why in one line; never widen the fix wave on request.
+
+### Remembered worker model
+
+- **No `localize_model` / `fix_model` in `run_defaults`** (a first run, or a state
+  file from before the setting) → that role runs opus, labelled *default*. No
+  question is asked: the dispatch question's text names both models and the flags.
+- **A hand-edited value that is neither `opus` nor `sonnet`** → read as never
+  chosen (opus), said in one `Attention:` line, and the run carries on. A model
+  preference must never fail a repair run, and a bad value never reaches the
+  dispatch.
+- **`--localize-model` or `--fix-model` with a value outside the two** → say so in
+  one line, use the remembered value (else opus) and write nothing.
+- **Restart or discard at the resume prompt** → the new state file carries both
+  keys forward unchanged. `EXIT`, a skipped question and a run with no flag leave
+  them untouched; only a flag writes one.
+- **A run without the Agent tool** → no worker is dispatched, so no model applies;
+  the card says `inline` and prints no model.
 
 ## Boundaries
 
