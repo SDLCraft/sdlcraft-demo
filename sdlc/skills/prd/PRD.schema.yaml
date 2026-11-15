@@ -15,6 +15,7 @@
 #     can detect gaps without ambiguity.
 #   - For trade-off fields, a sibling `<field>_rationale` (string) captures
 #     the *why*. Downstream agents weight decisions accordingly.
+#   - Contract text states today's behaviour only: change history (a version tag, an FND id, "Through vN" narrative) goes to metadata.changelog, a why-sentence to a <field>_rationale sibling.
 #   - For pre-filled or uncertain answers, a sibling `<field>_confidence`
 #     captures certainty as one of: confirmed | inferred | assumption.
 #       * confirmed  — user explicitly stated

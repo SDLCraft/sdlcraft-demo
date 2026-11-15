@@ -7,6 +7,10 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.25 (2026-11-15) — the schema template states that contract fields carry today's behaviour only
+
+The schema template states the contract-field rule in one comment line: a contract field states today's behaviour only, and change history goes to `metadata.changelog`. Comment only - no validator change. The check that finds existing history is repair's `history_scan.py` (one pattern for every artifact family), not a copy in this validator. Ledger IMP-282.
+
 ## 1.24 (2026-11-01) — the findings drain never caps what the user confirmed; past 3 unprompted sightings it asks once instead of dropping
 
 Phase 8 findings drain: user-confirmed notes and `upstream_incomplete` are never capped; past 3 other sightings the close asks once (record all | first 3 | none) with the notes listed in the question; on EXIT, or when it cannot ask, it records them all. 'Unless one is blocking' is gone: FINDINGS has no such severity, and it left a fourth note with no stated fate (ledger IMP-296; pin `repair/_smoke/findings_drain_cap_selftest.py`). The Findings-capture restatement points at the drain.

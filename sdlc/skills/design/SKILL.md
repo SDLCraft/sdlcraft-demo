@@ -14,7 +14,7 @@ description: >
 user-invocable: true
 disable-model-invocation: true
 model: opus
-effort: xhigh
+effort: high
 allowed-tools: Read Write(docs/DESIGN.yaml) Write(docs/DESIGN__*.yaml) Write(.claude/skills-state/sdlc-design.state.yaml) Bash Bash(ls *) Glob Grep AskUserQuestion WebFetch
 ---
 

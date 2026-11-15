@@ -24,7 +24,7 @@ description: >
 user-invocable: true
 disable-model-invocation: true
 model: opus
-effort: xhigh
+effort: high
 allowed-tools: Read Write(docs/ARCH.yaml) Write(docs/ARCH__*.yaml) Write(.claude/skills-state/sdlc-arch.state.yaml) Write(.claude/skills-state/sdlc-arch.derivation-report-*.yaml) Bash Bash(ls *) Glob Grep AskUserQuestion
 ---
 
@@ -1216,4 +1216,4 @@ The architecture interview can be long. Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.29"
+skill_version: "1.30"

@@ -7,6 +7,10 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.31 (2026-11-15) — the schema templates state that contract fields carry today's behaviour only
+
+The schema template states the contract-field rule in one comment line: a contract field states today's behaviour only, and change history goes to `metadata.changelog`. Comment only - no validator change. The check that finds existing history is repair's `history_scan.py` (one pattern for every artifact family), not a copy in this validator. Ledger IMP-282.
+
 ## 1.30 (2026-11-10) — upstream-reconciliation reads docs_index's "text outside the indexed items moved" line by line range and cards it per section; the no-question re-stamp is only for a metadata or comment edit
 
 Steps 4 and 6 (ledger IMP-316): docs_index now reports an upstream edit confined to text in no indexed item (UX `cli.exit_codes`, `state_patterns`, ARCH `tech_stack`) instead of calling it "re-stamp only". Step 6's "hash moved, no item delta -> re-stamp, no question" clause applies only when no such line is printed. Pin: setup `_smoke/index_selftest.py`.

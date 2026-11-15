@@ -11,7 +11,7 @@ description: >
 user-invocable: true
 disable-model-invocation: true
 model: opus
-effort: xhigh
+effort: high
 allowed-tools: Read Write(docs/API.yaml) Write(docs/API__*.yaml) Write(.claude/skills-state/sdlc-api.state.yaml) Bash Bash(ls *) Glob Grep AskUserQuestion
 ---
 

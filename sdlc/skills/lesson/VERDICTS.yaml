@@ -171,7 +171,7 @@ rows:
   - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-158, status: resolved, imp_id: IMP-278, fixed_in: "0.9.27", "on": "2026-10-27"}
   - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-159, status: resolved, imp_id: IMP-279, fixed_in: "0.9.27", "on": "2026-10-27"}
   - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-160, status: resolved, imp_id: IMP-280, fixed_in: "0.9.27", "on": "2026-10-27"}
-  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-161, status: resolved, imp_id: IMP-282, fixed_in: "0.9.27", "on": "2026-10-27"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-161, status: resolved, imp_id: IMP-282, fixed_in: "0.9.30", "on": "2026-11-15"}
   - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-162, status: resolved, imp_id: IMP-277, fixed_in: "0.9.27", "on": "2026-10-27"}
   - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-163, status: resolved, imp_id: IMP-275, fixed_in: "0.9.27", "on": "2026-10-27"}
   - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-164, status: resolved, imp_id: IMP-274, fixed_in: "0.9.27", "on": "2026-10-27"}
@@ -201,6 +201,20 @@ rows:
   - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-188, status: resolved, imp_id: IMP-314, fixed_in: "0.9.29", "on": "2026-11-10"}
   - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-189, status: resolved, imp_id: IMP-312, fixed_in: "0.9.29", "on": "2026-11-10"}
   - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-190, status: resolved, imp_id: IMP-315, fixed_in: "0.9.29", "on": "2026-11-10"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-191, status: resolved, imp_id: IMP-317, fixed_in: "0.9.30", "on": "2026-11-15"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-192, status: resolved, imp_id: IMP-318, fixed_in: "0.9.30", "on": "2026-11-15"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-193, status: resolved, imp_id: IMP-315, fixed_in: "0.9.29", "on": "2026-11-15"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-194, status: resolved, imp_id: IMP-319, fixed_in: "0.9.30", "on": "2026-11-15"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-195, status: resolved, imp_id: IMP-306, fixed_in: "0.9.29", "on": "2026-11-15"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-196, status: resolved, imp_id: IMP-320, fixed_in: "0.9.30", "on": "2026-11-15"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-197, status: resolved, imp_id: IMP-321, fixed_in: "0.9.30", "on": "2026-11-15"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-198, status: resolved, imp_id: IMP-314, fixed_in: "0.9.29", "on": "2026-11-15"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-199, status: resolved, imp_id: IMP-322, fixed_in: "0.9.30", "on": "2026-11-15"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-200, status: resolved, imp_id: IMP-309, fixed_in: "0.9.29", "on": "2026-11-15"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-201, status: resolved, imp_id: IMP-312, fixed_in: "0.9.29", "on": "2026-11-15"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-202, status: resolved, imp_id: IMP-314, fixed_in: "0.9.29", "on": "2026-11-15"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-203, status: resolved, imp_id: IMP-323, fixed_in: "0.9.30", "on": "2026-11-15"}
+  - {project: "41f0233f-6a58-4925-b1ae-e378e2dff61d", lsn_id: LSN-204, status: resolved, imp_id: IMP-282, fixed_in: "0.9.30", "on": "2026-11-15"}
   - {project: "df3214d59237", lsn_id: LSN-001, status: resolved, imp_id: IMP-035, fixed_in: "0.9.4", "on": "2026-09-22"}
   - {project: "df3214d59237", lsn_id: LSN-002, status: resolved, imp_id: IMP-034, fixed_in: "0.9.13", "on": "2026-09-22"}
   - {project: "df3214d59237", lsn_id: LSN-003, status: resolved, imp_id: IMP-028, fixed_in: "0.9.4", "on": "2026-09-22"}

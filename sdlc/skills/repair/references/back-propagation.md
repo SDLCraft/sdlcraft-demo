@@ -57,10 +57,13 @@ Who raised the finding tells you where to *start* the walk, not where it ends:
 | `user` (`--flag`) | wherever the user was looking | the `--stage` / `--path` given, then the owner table below; the user's guess is a hint, not a verdict |
 
 **Surface, never hunt.** A defect you meet while reading what this finding
-needs goes in the report's `beside:` list (summary, site, `read_for`); you read
-no further to find more and propose no fix for it. A finding already in the
-queue, open or parked, goes in `resighted:`. What the run does with the entry
-is the session's call (`orchestration.md`, "Convergence").
+needs, one that needs its own decision, goes in the report's `beside:` list
+(summary, site, `read_for`); you read no further to find more and propose no
+fix for it. A clause of the symbol you located that the SAME decision settles
+is part of this finding, not a beside entry: its `field_path` goes in
+`located`, where the gate row shows it and the fixer edits it. A finding
+already in the queue, open or parked, goes in `resighted:`. What the run does
+with the entry is the session's call (`orchestration.md`, "Convergence").
 
 **Decided together.** List a finding in the report's `decide_with` only when its
 decision or edit is the same act as yours — one answer settles both. Never for

@@ -3426,11 +3426,12 @@ def check_owns_callables(container: ArchContainer, file_label: str) -> List[str]
 # text. Contract fields state today's behaviour; history lives in
 # metadata.changelog (bump_artifact.py), a "why" sentence in a `<field>_rationale`
 # sibling. The pattern is strict on purpose - a bare `v1.2` would flag
-# "OpenAPI v3.1" prose. Pinned, with the marker phrase, by
-# _smoke/contract_history_selftest.py; a later TEST-STRATEGY / DATA-MODEL check
-# is a lockstep copy of both strings. It blocks nothing, so it needs no version
-# floor (CLAUDE.md 10 gates blocking checks only).
-CONTRACT_HISTORY_PATTERN = r"FND-\d+|Through v\d|\(v\d+\.\d+[,)]"
+# "OpenAPI v3.1" prose. It is the identical string repair's history_scan.py
+# carries (the one scanner every other artifact family goes through), pinned
+# with the marker phrase by _smoke/contract_history_selftest.py: change one
+# copy and the selftest fails the other. It blocks nothing, so it needs no
+# version floor (CLAUDE.md 10 gates blocking checks only).
+CONTRACT_HISTORY_PATTERN = r"\bFND-\d+\b|\((?:(?:ARCH|DATA-MODEL|TEST-STRATEGY|TASKS|PRD|UX|API|DESIGN)(?:__[a-z0-9-]+)?\s+)?v\d+\.\d+\s*[,)]|\b(?:ARCH|DATA-MODEL|TEST-STRATEGY|TASKS|PRD|UX|API|DESIGN)(?:__[a-z0-9-]+)?\s+v\d+\.\d+\b|\b(?:Through|Until|Since|From|After|As of)\s+v\d+\.\d+\b|\b(?:Through|Until|Since)\s+\d+\.\d{2,3}\b|\bv\d+\.\d+\s+(?:adds|added|removes|removed|retires|retired|renames|renamed|changes|changed|introduces|introduced)\b"
 CONTRACT_HISTORY_MARKER = "change history"
 _CONTRACT_HISTORY_RE = re.compile(CONTRACT_HISTORY_PATTERN)
 
@@ -4282,7 +4283,7 @@ def validate_all(arch_path: Path) -> int:
         ("{n} callable(s) are claimed by more than one function's owns_callables [cross-check 29]", owns_collision_warns),
         ("{n} function(s) are called by nothing in the architecture, so the code built for them would never run [cross-check 32]", unreachable_units),
         ("{n} configuration entr(y/ies) need attention [cross-check 30]", configuration_warns),
-        ("{n} function(s) carry change history inside their contract text (a version tag, an FND id, or \"Through vN\" narrative) - the contract fields state today's behaviour only; strip a tag when you next edit that field, its fact goes to metadata.changelog (bump_artifact.py) [cross-check 33]", contract_history_warns),
+        ("{n} function(s) carry change history inside their contract text (a version tag, an FND id, or a \"Through vN\" style lead-in) - the contract fields state today's behaviour only; the fact goes to metadata.changelog (bump_artifact.py) and a stock already there is cleared by one repair finding, never stripped by a script [cross-check 33]", contract_history_warns),
         ("{n} store reference(s) do not match the DATA-MODEL store ids", store_resolution_warns),
         ("{n} DATA entit(y/ies) are read or written by no component in any container, so no code will ever touch them - trace each from its owning component, or defer it with a reason", untraced_entities),
         ("{n} external container(s) realize a PRD integration without an external_contract", ext_contract_warns),

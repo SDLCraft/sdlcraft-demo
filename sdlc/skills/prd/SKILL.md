@@ -10,7 +10,7 @@ description: >
 user-invocable: true
 disable-model-invocation: true
 model: opus
-effort: xhigh
+effort: high
 allowed-tools: Read Write(docs/PRD.yaml) Write(.claude/skills-state/sdlc-prd.state.yaml) Bash Bash(ls *) Glob Grep AskUserQuestion
 ---
 
@@ -706,4 +706,4 @@ The interview is potentially long. Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.25"
+skill_version: "1.26"

@@ -317,14 +317,19 @@ This validates:
     by `.<ext>` (a file reference, never a call), do not count. **#33** —
     change history inside a work_unit's contract text: a `work_units[]`
     `summary` / `inputs` / `output` / `raises` / `signature` string matching
-    `FND-\d+`, `Through v\d` or `\(v\d+\.\d+[,)]` (strict on purpose: a bare
-    `v3.1` is API prose, not history). One grouped, exit-neutral warning that
-    names each unit id and its matched tokens, never the text. A contract field
-    states today's behaviour only: the history goes to `metadata.changelog`
-    (`bump_artifact.py`), a "why" sentence to a `<field>_rationale` sibling.
-    Strip a tag when you next edit that field — editing a built task's
-    contract text moves its build fingerprint, so there is no bulk strip. It
-    blocks nothing, so it carries no version floor.
+    the pinned grammar — an FND id, a parenthesised version tag
+    (`(v1.304,`), an artifact-qualified version (`DATA-MODEL v2.39`), a
+    lead-in + version (`Through v1.75`, `Through 1.242`) or a version + change
+    verb (`v1.33 adds`); strict on purpose: a bare `v3.1` is API prose, not
+    history. The pattern is the identical string repair's `history_scan.py`
+    carries, which walks every other artifact family. One grouped,
+    exit-neutral warning that names each unit id and its matched tokens, never
+    the text. A contract field states today's behaviour only: the history goes
+    to `metadata.changelog` (`bump_artifact.py`), a "why" sentence to a
+    `<field>_rationale` sibling. A stock that already carries it is cleared by
+    one repair finding — each field rewritten, independently reviewed, the
+    stale rows acked — never by a script; `history_scan.py --census` lists it.
+    It blocks nothing, so it carries no version floor.
 
 18. **Version gating (CLAUDE.md §10).** Checks **#21–#24** and the
     component-containment gate ERROR at schema version >= 2.0

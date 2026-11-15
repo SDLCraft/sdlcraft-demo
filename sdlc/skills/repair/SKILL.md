@@ -26,7 +26,7 @@ description: >
 user-invocable: true
 disable-model-invocation: true
 model: opus
-effort: xhigh
+effort: high
 allowed-tools: Read Write Edit Bash Bash(ls *) Glob Grep Agent AskUserQuestion
 ---
 
@@ -78,6 +78,7 @@ defect is an `LSN-NNN`, and all of them surface, generated, in
 | `validate_findings.py` | Pydantic v2 validator for the queue (+ id/resolution/propagation integrity, version-gated). `--stats` prints the suspected-vs-located matrix. |
 | `findings.py` | The queue's ONLY writer: `add \| cluster \| list \| plan \| reopen \| validate \| stats`. Every stage calls it as `python "${CLAUDE_SKILL_DIR}/../repair/findings.py"`; `setup` installs a copy at `.claude/sdlc/findings.py` for ambient sessions. Validates before it appends, dedupes, stamps recurrence; `plan` orders the open set into aggregates and stage-waves. |
 | `doctor.py` | The sweep runner. `--quick` = cross-artifact linter only (what `/sdlc:code` runs at component boundaries); default = the full sweep; `--provenance` = upstream-hash drift; `--emit-findings [--warnings-as-findings]` records failures through `findings.py`. |
+| `history_scan.py` | Names change history left in contract fields (FND ids, version tags, "Through vN" lead-ins) across every artifact family, by owner and token, never the text. `--census` counts; `--check` exits 1 while any remains; `doctor.py --provenance` prints the same count as a warn-only row. Read by the "History sweep" in `references/forward-propagation.md`. |
 | `bump_artifact.py` | Bumps `metadata.<name>_version` and prepends the changelog line as one text-level edit (comments preserved); refuses an out-of-order changelog unless `--force`. Installed by `setup` at `.claude/sdlc/bump_artifact.py`. |
 | `references/orchestration.md` | The two worker waves: briefs, report shapes, breadcrumbs, aggregates and their order, the plan gate, the drain between waves, the consolidated handoffs, convergence, the round card, the close card rows. Read by the session in Phase 2. |
 | `references/back-propagation.md` | Finding → source stage, and the write set (Step 3½). Read by every localize worker; by the session when it walks inline. |
@@ -177,6 +178,7 @@ handoffs: []                 # Phase 6: the consolidated command chain, printed 
 baseline_checks: {}          # Phase 2: {"<check name> <target>": <exit>} copied from
                              #   doctor.py --json, so Phase 5 can say "red before, red after"
 provenance_drift: []         # Phase 2: the [stale] lines doctor.py --provenance printed
+stale_pairs_at_start: []     # Phase 2: docs_index.py --stale --json pairs; read only by the last drain's review
 rounds: []                   # appended at each round's end: orchestration.md, "Convergence"
 metrics: {}                  # run telemetry (CLAUDE.md 15): validator_runs, validator_failures, resumes,
                              # workers_dispatched, localize_concurrency, localize_clusters, max_wave_width,
@@ -242,7 +244,9 @@ Copy the second run's per-check exits into the state file's `baseline_checks`
 and its `[stale]` lines into `provenance_drift`. A `[stale]` line is *not* a
 finding — an artifact built against an older upstream is a known state whose
 channel is the owning skill's §7 delta-review — but it is a fact Phase 4 needs
-(see "hand-edits" in `references/edge-cases.md`).
+(see "hand-edits" in `references/edge-cases.md`). Once, copy the (artifact,
+upstream) pairs of `docs_index.py --stale --json` into `stale_pairs_at_start`
+for the last drain's review; a resumed run keeps the recorded value, never re-snapshots.
 
 **The open set** is every `open` finding plus every `triaged` one — the
 sweep's new findings merged with the queue's existing ones, all raisers
@@ -448,9 +452,9 @@ close. Without the Agent tool, run the sequences yourself in plan order.
      upstream this run did not review, and a pair the Phase 2 snapshot
      (`sdlc-repair.doctor.json`, `provenance.stale`) already listed — such a
      pair owes an older, unreviewed delta to `/sdlc:<skill> … --reconcile`,
-     and stamping it now would forge that review (the session's re-stamp of
-     a `re-stamp only` row between waves is the one exception, and it holds
-     every other upstream the same way). An artifact with no fresh reviewed
+     and stamping it now would forge that review (the session's stamps - a
+     `re-stamp only` row between waves, a RESTAMP pair at the last drain - are
+     the exceptions, each holding every other upstream the same way). An artifact with no fresh reviewed
      pair is not stamped at all; a held pair goes in the report's
      `held_pairs`. **Then read what the stamp printed:** a `re-stamped
      <upstream>: … since the last stamp - reviewed by this run?` line names
@@ -583,8 +587,8 @@ python "${CLAUDE_SKILL_DIR}/../task/reslice_embeds.py" --docs-dir docs --contain
 python "${CLAUDE_SKILL_DIR}/../task/crosscheck_artifacts.py" --docs-dir docs                             # edition-ok: demo edition skips this line, and says so (Phase 4)
 python .claude/sdlc/docs_index.py                 # regenerate the index - the PROJECT's copy only; the SESSION's line (a fixer never writes docs/INDEX.yaml)
 python .claude/sdlc/docs_index.py --check         # dangling-reference gate
-python "${CLAUDE_SKILL_DIR}/doctor.py" --docs-dir docs --provenance --json   # re-run of the Phase 2 command; diff its stale PAIRS against `provenance_drift`, pair by pair - never the row count below
-python .claude/sdlc/docs_index.py --stale         # human read-out + the drain's `re-stamp only` labels only; a pair the snapshot already held (checked above) is pre-existing, owed to its own --reconcile - never counted against the snapshot itself
+python "${CLAUDE_SKILL_DIR}/doctor.py" --docs-dir docs --artifact <touched file> [--artifact <touched file> ...] --provenance --json   # validator exits for exactly the touched files (keys as in baseline_checks), never the full sweep; diff its stale PAIRS against `provenance_drift`, pair by pair - never the row count below
+python .claude/sdlc/docs_index.py --stale         # human read-out + the drain's `re-stamp only` labels (and the last drain's pair list, `--json`); a pair the snapshot already held (checked above) is pre-existing, owed to its own --reconcile - never counted against the snapshot itself
 ```
 
 The `test` and `task` lines run only where those skills ship; in the demo
@@ -595,21 +599,15 @@ copy bare (`references/edge-cases.md`, "Verification").
 **The drain.** When every worker of a stage-wave has reported, the session —
 before dispatching the next wave (`references/orchestration.md`, "Between
 waves"): reads each report's exit codes against `baseline_checks`; runs
-`python "${CLAUDE_SKILL_DIR}/doctor.py" --docs-dir docs --quick` and
-`python "${CLAUDE_SKILL_DIR}/validate_findings.py"` bare; re-stamps every
+`python "${CLAUDE_SKILL_DIR}/doctor.py" --docs-dir docs --quick --provenance --json` (the pair facts below)
+and `python "${CLAUDE_SKILL_DIR}/validate_findings.py"` bare; re-stamps every
 row `docs_index.py --stale` marks `re-stamp only` that no pending aggregate
-holds — the session does this, with `--hold-upstream` for every other
-recorded upstream, because such a row's review is empty and the claim true.
-A row is pre-existing only when EVERY (artifact, upstream) pair it names is
-already in `provenance_drift` — the Phase 2 pair snapshot, never the
-`--stale` row count — and such rows are stamped right after the gate; a row
-naming even one pair the snapshot lacks is wave-caused and is stamped now;
-re-reads the queue, clustering admitted mints in one pass; re-greps each report's `swept_tokens` and routes any hit outside
-that worker's own write boundary; and asks the user each `blocked` report's question
-(four per call), re-dispatching that finding with the answer, while a `relocated`
-report is re-planned into a later aggregate or listed on the card's `Remaining:` row; an `unverified` report (edits landed, verification unfinished) is finished by the session or resumed, never dispatched fresh.
-Then it writes the drained resolutions (the Phase 6 write), commits one checkpoint per located stage on a green tree - the write succeeded and no finding this drain settled still lists open
-(`autocommit.py commit` with `--checkpoint`, "Between waves" step 8) and, at a round's end, prints the round card.
+holds, with `--hold-upstream` for every other recorded upstream (such a row's
+review is empty, the claim true) — a row is pre-existing only when EVERY
+(artifact, upstream) pair it names is already in `provenance_drift`, the
+Phase 2 pair snapshot, never the `--stale` row count, and is stamped right
+after the gate, any other row now; re-reads the queue, clustering admitted mints in one pass; re-greps each report's `swept_tokens` and routes any hit outside that worker's own write boundary; asks the user each `blocked` report's question (four per call) and re-dispatches that finding with the answer; re-plans a `relocated` report into a later aggregate or lists it on the card's `Remaining:` row; finishes an `unverified` report (edits landed, verification unfinished) itself or resumes it, never dispatching it fresh.
+Then it writes the drained resolutions (the Phase 6 write), commits one checkpoint per located stage on a green tree - the write succeeded and no finding this drain settled still lists open (`autocommit.py commit` with `--checkpoint`, "Between waves" step 8) and, at a round's end, prints the round card. At the last drain only, after the round question, one read-only review stamps or hands off the pairs this run's own propagation left stale ("Between waves" step 9).
 A downstream wave dispatched before an upstream drain would stamp its shard against upstream bytes still moving.
 
 Validate **every artifact touched**, not just the source. Compare each exit
@@ -792,7 +790,7 @@ Every target must have a `sdlc/skills/<name>/SKILL.md`; never route to
 
 ## Model policy
 
-**opus / xhigh** (frontmatter), deliberately: the core operation is cross-artifact archaeology — deciding
+**opus / high** (frontmatter), deliberately: the core operation is cross-artifact archaeology — deciding
 which of eight artifacts is *actually* wrong — the opposite regime from `/sdlc:code`'s sonnet/high manager,
 which is why the two are separate skills. The workers are opus by default for the same reason;
 `--localize-model` / `--fix-model` choose sonnet per role (`references/orchestration.md`, "Worker model").
@@ -820,4 +818,4 @@ which is why the two are separate skills. The workers are opus by default for th
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.34"
+skill_version: "1.35"

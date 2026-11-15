@@ -7,6 +7,10 @@ fix, so each entry's one-line summary is the answer to "did a later
 version address this?". Newest first; the top version must equal the
 `skill_version` at the end of `SKILL.md` (`lint_skill_versions.py`).
 
+## 1.30 (2026-11-15) — cross-check 33 finds the wider history forms and its remedy is a reviewed sweep, not strip-on-next-edit
+
+`[cross-check 33]` (still warn-only, exit-neutral) uses the pattern `repair/history_scan.py` pins, character for character: FND ids, a parenthesised or artifact-qualified version, a lead-in plus version (`Through 1.242`), and a version plus change verb (`v1.33 adds`). No bare `vN.NN`, so `OpenAPI v3.1` stays silent. The remedy in the warning, `references/merge-validate.md` row 33 and the `ARCH__CONTAINER.schema.yaml` comment no longer says strip a tag when the field is next edited: a stock is cleared by one repair finding (repair `references/forward-propagation.md`, "History sweep"). Pins: `_smoke/contract_history_selftest.py` (fixture `_smoke/48_contract_history`) and repair's `_smoke/history_scan_selftest.py`, which holds the two pattern strings equal. Ledger IMP-282.
+
 ## 1.29 (2026-11-10) — a `kind: module` work unit declares the DATA-MODEL enums it defines in `touches_enums`, so code can restale the definer when an enum gains or loses a member
 
 `touches_enums` (ledger IMP-315): a new optional work-unit trace. Enum names stay out of `touches_entities`, which keeps the documented rule that enums are not entities. Cross-check 21 refuses a name that is not a DATA-MODEL enum, and the field on any unit whose kind is not `module`. It blocks from the 2.0 gate floor and warns below it. component-discovery.md and merge-validate.md name the field. Pins: fixtures `49_touches_enums_at_floor` (exit 1), `50_touches_enums_below_floor` (exit 0), `51_touches_enums_valid` (exit 0), `_smoke/touches_enums_selftest.py`.

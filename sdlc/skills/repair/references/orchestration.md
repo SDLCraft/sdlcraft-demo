@@ -198,9 +198,11 @@ SNAPSHOT:  <abs path>/.claude/skills-state/sdlc-repair.doctor.json
            (provenance.stale = pairs already owed before this run; you hold them, you never claim them)
 WRITE:     <abs path>/.claude/skills-state/sdlc-repair/localize/FND-NNN.yaml - ONE file per member,
            written the moment that member's walk ends (shape in orchestration.md)
-SURFACE, NEVER HUNT: a defect you meet while reading what a finding needs goes in that report's
-           `beside:` (summary, site, read_for: that FND); a finding already in the queue goes in
-           `resighted:`. Never read further to find more; never propose a fix for one.
+SURFACE, NEVER HUNT: a defect you meet while reading what a finding needs, one that needs its own
+           decision, goes in that report's `beside:` (summary, site, read_for: that FND); a finding
+           already in the queue goes in `resighted:`. A clause of the symbol you LOCATED that the SAME
+           decision settles is part of this finding: its field_path goes in `located`, never in
+           `beside:`. Never read further to find more; never propose a fix for one.
 PINS:      <abs path>/../task/validate_schema.py, module docstring only; absent in the free edition, skip   # edition-ok: demo edition has no task skill; the row is dropped from the brief
 PRICE:     none - read-only: run no topo_order.py or reslice_embeds.py and copy no docs; the
            fixer prices the edit ("Pricing").
@@ -221,6 +223,8 @@ located:                        # one or more; quote a field_path - `[0]` is not
     symbol: items-controller/listItems
     field_path: "components[0].work_units[1]"   # the defective field INSIDE the symbol,
                                 #   never the symbol's own entry
+                                # one more entry per clause of this symbol the SAME decision settles
+                                #   (its own field_path) - never `beside:`
 walk:                           # <= 6 lines: surfacing site, stages examined, chosen source, why
   - "surfaced in demo-api/TSK-004 (a codegen worker's blocked report)"
   - "TASKS embed matches ARCH byte for byte -> the embed is not the source"
@@ -246,7 +250,8 @@ restamp_only_rows: []           # `docs_index.py --stale` rows marked re-stamp o
 recurrence_of: null
 duplicate_of: null              # another OPEN finding on the same located symbol
 decide_with: []                 # FND ids whose decision or edit is the SAME as this one's; [] when none
-beside:                         # defects met while reading what THIS finding needs; [] when none
+beside:                         # defects met while reading what THIS finding needs that need their own
+                                #   decision; [] when none (a clause the SAME decision settles is `located`)
   - {summary: "listItems orders by 'ascending numeric id'", site: "docs/ARCH__demo-api.yaml#items-controller/listItems", read_for: FND-004}
 resighted: []                   # FND ids already in the queue (open or parked) this walk met again
 report: |                       # <= 12 lines, what the plan table shows the user
@@ -365,8 +370,12 @@ BREADCRUMB:     <abs path>/inflight/<FND>.json - shape and phases: orchestration
                 Create it, `baseline` filled, before your first write; update it after every phase.
 RESUME FROM:    <breadcrumb path> (a resumed aggregate only) - keep its `baseline` verbatim and only
                 append; classify each touched file by role (orchestration.md, "Resume").
-BESIDE:         SURFACE, NEVER HUNT - a defect met beside a finding's fix goes in that report's
-                `beside:` (summary, site, read_for); never fixed here, never looked for.
+BESIDE:         SURFACE, NEVER HUNT - a defect met beside a finding's fix that needs its own decision
+                goes in that report's `beside:` (summary, site, read_for); never fixed here, never
+                looked for. A site inside your own located slice that the answered decision covers
+                word for word is in scope of your edit: list it under `symbols_changed` and say so
+                in `summary`, never `beside:`; a site needing a judgement the answer does not state
+                is `beside:` as above.
 REPORT:         <abs path>/reports/<FND>.report.yaml per finding (shape in orchestration.md) + the capped block.
 DO NOT: write the queue or the state file; run docs_index.py bare; run another skill;
         print a --reconcile chain (record owed commands in the report instead);
@@ -436,7 +445,7 @@ phase: null                     # unverified only: the breadcrumb phase reached 
 sequence_complete: null         # unverified only: true when the finding's mode sequence finished
 summary: "one line for resolution.summary"
 lesson: null                    # a skill defect met on the way, one line (the session routes it)
-beside: []                      # as in the localize report: defects met while fixing, {summary, site, read_for}
+beside: []                      # as in the localize report: defects met while fixing that need their own decision, {summary, site, read_for}
 resighted: []                   # FND ids already in the queue this fix met again
 ```
 
@@ -466,9 +475,10 @@ session, before the next wave is dispatched:
 1. read each report's captured exit codes and compare them to
    `baseline_checks` (a check red before the run is pre-existing, never
    claimed either way);
-2. `python "${CLAUDE_SKILL_DIR}/doctor.py" --docs-dir docs --quick` and
-   `python "${CLAUDE_SKILL_DIR}/validate_findings.py"`, bare, exit codes
-   captured;
+2. `python "${CLAUDE_SKILL_DIR}/doctor.py" --docs-dir docs --quick --provenance --json`
+   and `python "${CLAUDE_SKILL_DIR}/validate_findings.py"`, bare, exit codes
+   captured - the drain reads only pair facts from the doctor's JSON (step 1's
+   validator exits come from the reports), so it asks for no deeper sweep;
 3. re-stamp the **re-stamp-only rows**: `docs_index.py --stale` marks a row
    `re-stamp only` when nothing the downstream artifact references or cites
    changed, so its "review" is empty and the stamp's claim is true — but the
@@ -483,7 +493,8 @@ session, before the next wave is dispatched:
    exactly as surgical step 5 prescribes. This is the ONE case where a pair
    in the Phase-2 snapshot is stamped. A row with real item drift inside a
    pending aggregate's boundary belongs to that worker; outside every
-   boundary it joins the handoff chain;
+   boundary, a pair the Phase-2 snapshot lacks waits for the last drain's
+   review (step 9) and any other pair joins the handoff chain;
 4. re-read the queue (`findings.py list --open`) and test every report's
    `beside:` entries ("Convergence"): the admitted ones are minted and join the
    next wave, the latent ones are minted and parked. ONE `python
@@ -541,7 +552,32 @@ session, before the next wave is dispatched:
    skipped), and a helper that is absent or refuses is a skipped step. Rolling
    one fixer back stays possible from its report's file list. At the last
    drain of a round, print the round card ("The round card") and, when the
-   round parked latent findings, ask its question ("Convergence").
+   round parked latent findings, ask its question ("Convergence");
+9. the last drain only: after the round question, when no aggregate is
+   pending and no further round was chosen, the pairs this run's own
+   propagation left stale. List them with `docs_index.py --stale --json` - the
+   tool that wrote `stale_pairs_at_start` at Phase 2, so both sides read
+   alike; never the bare `doctor.py --provenance --json`, which is sha only
+   and blind to a pair whose text outside the indexed items moved - and take
+   every (artifact, upstream) pair of a row not marked `restamp_only` that
+   `stale_pairs_at_start` does not hold: it was fresh at the start, so its
+   whole upstream delta is the run's. ONE read-only worker on the localize
+   model (paths in its brief: the pairs, `docs_index.py --drift <artifact>`
+   per pair, the reports' `swept_tokens`; no git history is assumed) says per
+   pair what it grepped and returns `RESTAMP` or `OWED <site>`. The session
+   stamps each RESTAMP pair upstream first (ARCH before TEST-STRATEGY before
+   a task shard) as step 3 does: `--upstream` that pair, `--hold-upstream` for
+   every other recorded upstream, the `re-stamped` printout read. An OWED pair
+   never goes through Admission, which would park it latent with no wave left
+   to join: one finding per downstream artifact (`findings.py add --raised-by
+   sdlc-repair --kind stale_downstream_claim --file docs/<artifact>`), written
+   `triaged` by the Phase 6 write with `mode: re-invoke` and the worker's
+   residue as `resolution.handoff`, rides the handoff chain - never latent,
+   never a new wave, no heal pass. `re-stamp only` is never widened, and
+   `stale_pairs_at_start` is read only here: a resumed run keeps the recorded
+   value and never re-snapshots. A project copy of `docs_index.py` older than
+   the outside-moved pair list lists those pairs at neither end, so the step
+   never sees them: they stay with the handoff chain.
 
 Only then the next wave. A downstream wave that started before an upstream
 drain would stamp its shard against upstream bytes still moving.
@@ -612,7 +648,7 @@ The doctor sweep and its snapshot; `findings.py add | cluster | plan | reopen |
 validate`; the Phase-6 resolution write (from reports, never from memory);
 `doctor.py --quick` and `validate_findings.py` at every drain; the bare
 `docs_index.py` regenerate through the project's copy; the re-stamp-only
-stamps; the consolidated chain; `lessons.py record-run`; `autocommit.py`; the
+stamps and the last drain's reviewed stamps; the consolidated chain; `lessons.py record-run`; `autocommit.py`; the
 card. Workers report, the session records.
 
 ## Convergence

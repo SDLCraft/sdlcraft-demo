@@ -13,6 +13,7 @@
 #     can be set to the literal string "inherit" (or omitted) — downstream
 #     agents fall back to the global pattern.
 #   - All ids inside (component ids, interaction ids) are kebab-case.
+#   - Contract text states today's behaviour only: change history (a version tag, an FND id, "Through vN" narrative) goes to metadata.changelog, a why-sentence to a <field>_rationale sibling.
 #
 # ID conventions for this file (see UX.schema.yaml header for the full
 # family map):

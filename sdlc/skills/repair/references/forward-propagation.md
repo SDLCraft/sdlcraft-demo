@@ -96,8 +96,8 @@ Nothing in this sequence is a hand edit to a task JSON.
    contract field states today's behaviour only: when the field you edit
    carries change history (a version tag, an FND id, a "Through vN" line), the
    tag's fact moves to `metadata.changelog` in this same edit (step 2's bump),
-   and the fix adds none of its own. The re-stale this edit causes is already
-   paid.
+   and the fix adds none of its own. A whole stock of such fields is not this
+   edit's job: it is one finding of its own ("History sweep" below).
 2. **Bump its metadata in the same write** — one call:
 
    ```bash
@@ -199,7 +199,9 @@ Nothing in this sequence is a hand edit to a task JSON.
    (`--hold-upstream docs/Y`), name the pair on the close card (`Attention:
    pre-existing: docs/X vs docs/Y, owed to /sdlc:task <cid> --reconcile`) and
    route the reconcile in `Next:`. An artifact with no fresh reviewed pair is
-   not stamped at all. The reconcile skills stamp freely because they review
+   not stamped at all. A pair the snapshot lacks, on a file no aggregate
+   edited, is no fixer's stamp either: the session's last drain reviews it
+   (`orchestration.md`, "Between waves" step 9). The reconcile skills stamp freely because they review
    the whole `--drift` delta; that is the difference — a `ci_integration` fix
    landed in a TASKS.json that already owed a TEST-STRATEGY reconcile:
    following the step would have forged it, skipping it drew the "missed
@@ -292,6 +294,39 @@ Nothing in this sequence is a hand edit to a task JSON.
    into `resolution.stale_tasks`, each with the reason `topo_order` gives.
    `refreshed` tasks (only the whole-hash moved) are not stale and are not
    listed.
+
+## History sweep — clearing a stock of change history
+
+A contract field states today's behaviour only. A corpus that already carries
+version tags, FND ids and "Through vN" narrative in its text (task embeds copy
+it, so every code worker reads it) is cleared by ONE finding, raised once with
+`findings.py add` and fixed as a surgical aggregate — never by a script and
+never as a side effect of editing one field. A regex strip cannot do it: almost
+every hit is fused to substance (a sentence subject, an obligation after the
+tag), so a stripped line loses meaning.
+
+1. **List the stock.** `python "${CLAUDE_SKILL_DIR}/history_scan.py" --docs-dir docs --census`
+   counts per family, document and field; without `--census` it names every
+   field by owner and token (never the text), and `--check` exits 1 while any
+   remains. `doctor.py --provenance` prints the same count. Both walk every
+   string outside `metadata.changelog`, deferrals, `*_warnings`, open
+   questions, retired ids and accepted warnings.
+2. **Rewrite each field to what holds today.** The fact the tag carried goes to
+   `metadata.changelog` through `bump_artifact.py` (step 2), a why-sentence to
+   the field's `<field>_rationale` sibling. Leave no tag behind and add none.
+3. **Review independently.** A read-only reviewer that did not write the
+   rewrites reads each one against the original text and names every rewrite
+   that dropped an obligation or a subject; fix those before step 4. An
+   unreviewed rewrite is where a requirement is lost.
+4. **Carry it downstream.** Source first, then the surgical sequence above
+   from step 4 on: stamp what you reconciled (step 5), re-slice the embeds
+   copied from each changed symbol (step 6), verify (step 7). The built tasks
+   this leaves stale moved only in their text or context, not in behaviour:
+   price them (step 8) and ack them at the code plan gate by moved-key class,
+   with a reason naming the key; they are not rebuilt.
+
+Re-run `history_scan.py --check` last: zero fields, or each remaining one named
+on the resolution with the reason it is correct.
 
 ## Additive mode — author the determined item
 
@@ -492,8 +527,8 @@ python .claude/sdlc/docs_index.py                 # regenerate the index - the P
                                                   # (a fixer never writes docs/INDEX.yaml); absent -> skip and say so,
                                                   # never the plugin's copy (SKILL.md Phase 5)
 python .claude/sdlc/docs_index.py --check         # dangling-reference gate
-python "${CLAUDE_SKILL_DIR}/doctor.py" --docs-dir docs --provenance --json   # re-run of the Phase 2 command; diff its stale PAIRS against `provenance_drift`, pair by pair - never the row count below
-python .claude/sdlc/docs_index.py --stale         # human read-out + the `re-stamp only` labels only (step 5) - a pair the snapshot already held (checked above) is pre-existing, owed to its own --reconcile - named on the close card, never stamped; never counted against the snapshot itself
+python "${CLAUDE_SKILL_DIR}/doctor.py" --docs-dir docs --artifact <touched file> [--artifact <touched file> ...] --provenance --json   # validator exits for exactly the touched files (keys as in baseline_checks), never the full sweep; diff its stale PAIRS against `provenance_drift`, pair by pair - never the row count below
+python .claude/sdlc/docs_index.py --stale         # human read-out + the `re-stamp only` labels (step 5) and the last drain's pair list (`--json`) - a pair the snapshot already held (checked above) is pre-existing, owed to its own --reconcile - named on the close card, never stamped; never counted against the snapshot itself
 ```
 
 The `test` and `task` lines run only where those skills ship (demo edition:

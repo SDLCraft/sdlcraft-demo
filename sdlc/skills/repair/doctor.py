@@ -69,7 +69,11 @@ What a check's output means here:
     owed-work reader the moment the finding closed (findings.py reopen
     FND-NNN is the sanctioned way back). Such a check is also held out of
     --emit-findings, exactly like an open finding's, so the reopen hint stays
-    the only new thing said about it.
+    the only new thing said about it. With --provenance it also prints ONE row
+    naming the fields that carry change history (history_scan.py, over the
+    documents already loaded - no second parse; a report row, never a check, so
+    it mints no finding and moves no warning count). --quick and the plain
+    sweep never print it.
 
 Every check runs BARE and its exit code is captured directly — never read an
 exit status after a pipe (CLAUDE.md section 11: an upstream validator once ran
@@ -173,6 +177,7 @@ HERE = Path(__file__).resolve().parent
 SKILLS_DIR = HERE.parent  # sdlc/skills/
 sys.path.insert(0, str(HERE))
 import findings as fq  # noqa: E402  - the queue's only writer
+import history_scan  # noqa: E402  - the one change-history scanner (pinned grammar)
 
 DEFAULT_FINDINGS = Path(".claude/skills-state/sdlc-findings.yaml")
 MAX_EVIDENCE = fq.MAX_EVIDENCE
@@ -1234,13 +1239,33 @@ class Hasher:
         return val
 
 
+# libyaml's C loader where installed (the same resolver and output as
+# SafeLoader, an order of magnitude faster on a multi-MB artifact), the
+# pure-Python one otherwise - the expression findings.py uses.
+_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+# path -> ((mtime_ns, size), whole document). One run parses each artifact
+# once: the provenance pass asks for the same file once per resolved re-invoke
+# finding that owes it, and the cost used to follow queue age x corpus size.
+# The cache hands out the SAME object every time - a caller reads it, never
+# edits it - and is keyed by what is on disk, so a rewritten file is re-read.
+_ARTIFACT_CACHE: Dict[str, Tuple[Tuple[int, int], Optional[Dict[str, Any]]]] = {}
+
+
 def load_artifact(path: Path) -> Optional[Dict[str, Any]]:
     try:
+        st = path.stat()
+        stamp = (st.st_mtime_ns, st.st_size)
+        hit = _ARTIFACT_CACHE.get(path.as_posix())
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
         text = path.read_text(encoding="utf-8")
-        raw = json.loads(text) if path.suffix == ".json" else yaml.safe_load(text)
+        raw = json.loads(text) if path.suffix == ".json" else yaml.load(text, Loader=_YAML_LOADER)
     except (OSError, ValueError, yaml.YAMLError):
         return None
-    return raw if isinstance(raw, dict) else None
+    doc = raw if isinstance(raw, dict) else None
+    _ARTIFACT_CACHE[path.as_posix()] = (stamp, doc)
+    return doc
 
 
 def provenance_entries(meta: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1397,6 +1422,7 @@ def provenance_report(docs: Path, findings_path: Optional[Path]
                       ) -> Tuple[List[str], List[str], List[str], List[str]]:
     """([stale] lines, 'can be marked resolved' hints, 'should be reopened' hints,
     fnd_ids whose reopen hint was suppressed for an empty `artifacts_touched`)."""
+    _ARTIFACT_CACHE.clear()   # one report = one read of each artifact
     hasher = Hasher(docs)
     stale: List[str] = []
     fresh_artifacts: Dict[str, bool] = {}
@@ -1452,6 +1478,19 @@ def provenance_report(docs: Path, findings_path: Optional[Path]
     reg, skipped = resolved_stale_registry(docs, data, hasher)
     reopen = [hint for _fnd_id, hint in reg.values()]
     return stale, hints, reopen, skipped
+
+
+def history_report(docs: Path) -> Dict[str, Any]:
+    """The change-history row: history_scan over the documents `load_artifact`
+    already holds, so it parses nothing the provenance pass did not. Read-only
+    over the cached objects. It is a report row and never a Check: nothing here
+    reaches `warning_entries`, the warning count or the findings queue.
+    `lines` carries every field (owner and token, never the text); the JSON
+    report keeps only the counts and a sample."""
+    records = history_scan.scan_docs(docs, load_artifact)
+    out = history_scan.summarise(records)
+    out["lines"] = [history_scan.describe(r) for r in records]
+    return out
 
 
 # '/sdlc:test demo-api --reconcile' -> 'TEST-STRATEGY__demo-api.yaml'. Shared
@@ -1567,8 +1606,10 @@ def main() -> int:
     hints: List[str] = []
     reopen_hints: List[str] = []
     reopen_hints_skipped: List[str] = []
+    history: Optional[Dict[str, Any]] = None
     if args.provenance:
         stale, hints, reopen_hints, reopen_hints_skipped = provenance_report(docs, findings_path)
+        history = history_report(docs)
 
     if args.as_json:
         print(json.dumps(
@@ -1585,7 +1626,8 @@ def main() -> int:
                 "findings_awaiting": held,
                 "queue_error": queue_error,
                 "provenance": {"stale": stale, "resolvable": hints, "reopenable": reopen_hints,
-                               "reopen_hints_skipped": reopen_hints_skipped}
+                               "reopen_hints_skipped": reopen_hints_skipped,
+                               "contract_history": {k: v for k, v in (history or {}).items() if k != "lines"}}
                               if args.provenance else None,
             },
             indent=2,
@@ -1637,6 +1679,14 @@ def main() -> int:
                         f"{len(rows)} red check(s) wait on it ({join_ids([r.target for r in rows], 3)}); "
                         f"they turn green when that runs and are not recorded again until then")
     warnings += stale
+    if history and history["fields"]:
+        scanner = (HERE / "history_scan.py").as_posix()
+        warnings.append((
+            f"{history['fields']} field(s) in {len(history['documents'])} document(s) carry change history "
+            f"(a version tag, an FND id, or a lead-in plus a version) - a contract field states today's "
+            f"behaviour only; one repair finding clears the stock (forward-propagation.md, \"History sweep\"); "
+            f"list it with: python \"{scanner}\" --docs-dir {docs.as_posix()} --census",
+            history["lines"]))
     if queue_error:
         warnings.append(f"findings queue: {queue_error} - run validate_findings.py and repair it before "
                         f"the next /sdlc:repair")

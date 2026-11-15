@@ -14,6 +14,7 @@
 #   - `null` (not omission) means "explicitly unanswered".
 #   - For trade-off fields, a sibling `<field>_rationale` (string) captures
 #     the *why*.
+#   - Contract text states today's behaviour only: change history (a version tag, an FND id, "Through vN" narrative) goes to metadata.changelog, a why-sentence to a <field>_rationale sibling.
 #   - For pre-filled answers, a sibling `<field>_confidence` captures
 #     certainty: confirmed | inferred | assumption.
 #   - Enum values are lowercase snake_case strings.

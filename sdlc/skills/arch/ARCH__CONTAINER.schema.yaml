@@ -392,14 +392,12 @@ components:                                # REQUIRED — non-empty
                                            #   restales the unit when an enum moves.
         satisfies_acceptance:              # OPTIONAL — the component acceptance_criterion
           - "Creating a task returns 201 with a persisted id."  # string(s) this fulfils.
-        # --- contract text states TODAY'S behaviour only. Keep change history
-        #     out of summary / inputs / output / raises / signature: no version
-        #     tags, no FND ids, no "Through vN" narrative. The history goes to
-        #     metadata.changelog (bump_artifact.py); a "why" sentence goes to a
-        #     `<field>_rationale` sibling. `task` copies these fields verbatim
-        #     into build tasks, so a tag edit restales a built task. Strip a tag
-        #     when you next edit the field; cross-check 33 counts the rest
-        #     (warning only). ---
+        # --- Contract text states today's behaviour only: change history (a version tag, an FND id, "Through vN" narrative) goes to metadata.changelog, a why-sentence to a <field>_rationale sibling.
+        #     This covers summary / inputs / output / raises / signature. `task`
+        #     copies these fields verbatim into build tasks, so a tag edit
+        #     restales a built task; a stock already carrying tags is cleared
+        #     by one repair finding, never by a script. Cross-check 33 names
+        #     the rest (warning only). ---
         # --- interface contract (codegen-grade). DEFER-OR-DECLARE, ENFORCED by
         #     cross-check #23:
         #       DEFER   — allowed ONLY when `traces_api_operation` is set (the

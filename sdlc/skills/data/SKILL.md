@@ -20,7 +20,7 @@ description: >
 user-invocable: true
 disable-model-invocation: true
 model: opus
-effort: xhigh
+effort: high
 allowed-tools: Read Write(docs/DATA-MODEL.yaml) Write(.claude/skills-state/sdlc-data.state.yaml) Bash Bash(ls *) Glob Grep AskUserQuestion
 ---
 
@@ -931,4 +931,4 @@ Keep it humane:
 Version history: [`CHANGELOG.md`](CHANGELOG.md) - maintainer-facing,
 not loaded into a run's context.
 
-skill_version: "1.24"
+skill_version: "1.25"
